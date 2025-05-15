@@ -100,7 +100,7 @@ class DynamicFunctionManager:
 
         if not os.path.exists(file_path):
             logger.warning(f"⚠️ _fs_load_code: File not found for '{name}' at {file_path}")
-            return None
+            raise FileNotFoundError(f"Function '{name}' not found at {file_path}")
 
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -771,7 +771,7 @@ def {name}():
             if not callable(function_to_call):
                 raise ValueError(f"No callable function '{secure_name}' found in module. "
                               f"Please ensure the file contains a function matching its filename.")
-            
+
             # Log whether we have user context available
             if user:
                 logger.debug(f"Function '{secure_name}' will be called with user context: {user}")
@@ -819,9 +819,10 @@ def {name}():
             await self._write_error_log(name, error_msg)
             return {'valid': False, 'error': error_msg, 'function_info': None}
 
-        code = await self._fs_load_code(secure_name)
-        if code is None:
-            error_msg = f"Function '{secure_name}' not found or could not be read."
+        try:
+            code = await self._fs_load_code(secure_name)
+        except FileNotFoundError as e:
+            error_msg = str(e)
             await self._write_error_log(name, error_msg)
             return {'valid': False, 'error': error_msg, 'function_info': None}
 

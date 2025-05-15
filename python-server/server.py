@@ -1040,11 +1040,9 @@ class DynamicAdditionServer(Server):
             elif name == "_function_get":
                 logger.debug(f"---> Calling built-in: get_function_code") # <-- ADD THIS LINE
                 function_name = args.get('name')
+                # _fs_load_code will now throw FileNotFoundError if the function doesn't exist
                 code = await self.function_manager._fs_load_code(function_name)
-                if code is None:
-                    result_raw = [TextContent(type="text", text=f"Error: Function '{function_name}' not found or could not be loaded.")]
-                else:
-                    result_raw = [TextContent(type="text", text=code)]
+                result_raw = [TextContent(type="text", text=code)]
             elif name == "_function_remove":
                 # Remove function
                 func_name = args.get("name")
