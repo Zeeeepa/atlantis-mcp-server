@@ -10,6 +10,7 @@
 - avoid over-engineering
 - avoid introducing new variables when existing ones will work fine
 - point out any problems you see w older code but do not correct unless related to task
+- when calling functions, carefully check order of parameters and data types
 
 # architecture overview
 - this is a simple mcp (model context protocol) npx client and two server implementations: python and node

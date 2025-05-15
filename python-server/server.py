@@ -1130,7 +1130,26 @@ class DynamicAdditionServer(Server):
                 result_raw = [TextContent(type="text", text=f"Server '{svc_name}' removed successfully.")] if success else [TextContent(type="text", text=f"Failed to remove server '{svc_name}'.")]
             elif name == "_server_set":
                 logger.debug(f"---> Calling built-in: server_set with args: {args!r}")
-                result_raw = await self.server_manager.server_set(args, self)
+                # Extract the config from the args dictionary
+                config = args.get("config")
+                if not config:
+                    raise ValueError("Missing required parameter: config")
+
+                # Try to extract the server name from the config JSON, but allow non-JSON content
+                try:
+                    server_name = self.server_manager.extract_server_name(config)
+                    if not server_name:
+                        raise ValueError("Failed to get server name")
+                except Exception as e:
+                    # If parsing fails completely, we need an explicit name
+                    logger.warning(f"Could not parse config as JSON: {str(e)}")
+                    # Check if name was provided directly
+                    server_name = args.get('name')
+                    if not server_name:
+                        raise ValueError("Unable to resolve server name")
+
+                # Call server_set with the correct parameters
+                result_raw = await self.server_manager.server_set(server_name, config)
             elif name == "_server_validate":
                 svc_name = args.get("name")
                 if not svc_name:

@@ -52,14 +52,15 @@ Why the cloud? MCP auth and security are still being worked out it's easier to h
 
 ```bash
 python server.py  \
-  --email=your@gmail.com  \
-  --api-key=foobar \      // this is default, you should change this online later
-  --host=localhost \      // on your local box, this is what the npx client is looking for
+  --email=youremail@gmail.com  \
+  --api-key=foobar \                         # probably should change online later
+  --host=localhost \                         # npx client will be looking for this
   --port=8000  \
-  --cloud-host=ws://projectatlantis.ai  \
-  --cloud-port=3010  \
-  --service-name=home
+  --cloud-host=wss://projectatlantis.ai  \
+  --cloud-port=443  \
+  --service-name=home                        # name this anything you want but must be unique across all machines
 ```
+
 
 4. Sign up at https://www.projectatlantis.ai under the same email
 
