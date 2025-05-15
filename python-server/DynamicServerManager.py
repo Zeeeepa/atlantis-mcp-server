@@ -15,8 +15,6 @@ from typing import Any, Dict, Optional, List, Tuple, Union
 from mcp import ClientSession, StdioServerParameters, stdio_client
 from mcp.types import TextContent, Tool, ListToolsResult, ListToolsRequest
 
-from EmCeePee import EmCeePee
-
 from state import (
     SERVERS_DIR,
     logger,
@@ -48,8 +46,6 @@ class DynamicServerManager:
         os.makedirs(self.servers_dir, exist_ok=True)
         os.makedirs(self.old_dir, exist_ok=True)
 
-        # Server state tracking
-        self.servers:Dict[str, EmCeePee] = {}
 
 
 
