@@ -27,18 +27,8 @@ ACTIVE_SERVER_TASKS: dict[str, dict] = {}
 
 
 class DynamicServerManager:
-    """
-    Manages dynamic MCP servers lifecycle - adding, removing, starting, stopping, etc.
-    Handles the configuration of MCP servers and their execution as background tasks.
-    """
 
     def __init__(self, servers_dir: str):
-        """
-        Initialize the Dynamic Server Manager with a specific servers directory.
-
-        Args:
-            servers_dir: Path to the directory where server configuration files are stored
-        """
         self.servers_dir = servers_dir
         self.old_dir = os.path.join(servers_dir, 'OLD')
 
@@ -58,16 +48,6 @@ class DynamicServerManager:
     # --- 1. File Save/Load Methods ---
 
     def extract_server_name(self, server_json_content: str) -> Optional[str]:
-        """
-        Extract the MCP server name from JSON content.
-        The server name is either the top-level key or the first child under mcpServers.
-
-        Args:
-            server_json_content: Raw JSON content as string
-
-        Returns:
-            The server name if found, None otherwise
-        """
         try:
             # Try to parse the JSON content
             config = json.loads(server_json_content)
@@ -88,10 +68,7 @@ class DynamicServerManager:
             pass
 
     async def _fs_save_server(self, name: str, content: str) -> Optional[str]:
-        """
-        Saves the provided raw content to {name}.json in servers_dir without validation.
-        Returns the full path if successful, None otherwise.
-        """
+
         safe_name = f"{name}.json"
         file_path = os.path.join(self.servers_dir, safe_name)
         logger.debug(f"---> _fs_save_server: Attempting to save '{name}' to path: {file_path}")
@@ -104,11 +81,6 @@ class DynamicServerManager:
             pass
 
     async def _fs_load_server(self, name: str) -> Optional[str]:
-        """
-        Loads the config for server '{name}' from {name}.json in servers_dir.
-        Returns the raw file content (str) on successful read.
-        Returns None if the file doesn't exist or an IO error occurs.
-        """
         safe_name = f"{name}.json"
         file_path = os.path.join(self.servers_dir, safe_name)
         if not os.path.exists(file_path):
@@ -126,11 +98,6 @@ class DynamicServerManager:
             return None
 
     async def _write_server_error_log(self, name: str, error_msg: str, raw_content: Optional[str] = None) -> None:
-        """
-        Write an error message to a server-specific log file in the servers_dir.
-        Overwrites any existing log to only keep the latest error.
-        Includes raw content if provided (e.g., for JSON decode errors).
-        """
         log_filename = f"{name}_error.log"
         log_path = os.path.join(self.servers_dir, log_filename)
         try:
@@ -148,15 +115,6 @@ class DynamicServerManager:
     # --- 2. Config CRUD Methods ---
 
     async def server_add(self, name: str) -> bool:
-        """
-        Adds a new server config with template settings. Returns False if it already exists.
-
-        Args:
-            name: The name for the new server configuration
-
-        Returns:
-            bool: True if server was successfully added, False if it already exists
-        """
         # Check if server already exists
         existing = await self._fs_load_server(name)
         if existing is not None:
@@ -186,10 +144,6 @@ class DynamicServerManager:
         return result is not None
 
     async def server_remove(self, name: str) -> bool:
-        """
-        Removes the server config by deleting its JSON file. Returns False if missing.
-        Also stops the server if it's running.
-        """
         # Check if server is running and stop it first
         if name in self.active_server_tasks:
             logger.info(f"🛑 Stopping running server '{name}' before removal...")
@@ -229,34 +183,12 @@ class DynamicServerManager:
             return False
 
     async def server_get(self, name: str) -> Optional[str]:
-        """
-        Returns whatever _fs_load_server returns without any validation.
-
-        Args:
-            name: The name of the server to get config for
-
-        Returns:
-            Raw server config string, or None if not found or an error occurred during load.
-        """
         # No validation, just return whatever _fs_load_server gives us
         return await self._fs_load_server(name)
 
     # Note: We're using the existing server_start method instead of a custom helper
 
     async def get_server_tools(self, name: str) -> List[Tool]:
-        """
-        Fetches the tool list from a managed MCP server.
-        Prioritizes using an existing session from a running server.
-        Only creates a temporary connection if no running session exists.
-
-        Returns a list of Tool objects from the server.
-
-        Raises:
-            ValueError: If the server name is invalid or not found.
-            RuntimeError: If the server config is invalid or server is not running.
-            TimeoutError: If the connection or request to the server times out.
-            Exception: For other communication or MCP errors.
-        """
         if not name or not isinstance(name, str):
             raise ValueError(f"Invalid server name: {name}")
 
@@ -314,9 +246,9 @@ class DynamicServerManager:
 
         # Get the server config (for temporary connection or for starting the server)
         logger.debug(f"get_server_tools: Loading config for '{name}'")
-        full_config = await self.server_get(name)
-        if not full_config:
-            raise ValueError(f"Server config not found for '{name}'")
+        config_txt = await self.server_get(name)
+
+        # convert config txt to json and store in full_config
 
         if 'mcpServers' not in full_config or name not in full_config['mcpServers']:
             raise ValueError(f"Invalid server config structure for '{name}'")
@@ -359,9 +291,6 @@ class DynamicServerManager:
         raise RuntimeError(f"Unexpected error: Unable to get tools from server '{name}'")
 
     async def server_list(self) -> List[str]:
-        """
-        Returns a list of all available server names from the servers directory.
-        """
         try:
             servers_path = pathlib.Path(self.servers_dir)
             server_files = list(servers_path.glob('*.json'))
@@ -372,15 +301,6 @@ class DynamicServerManager:
             return []
 
     async def is_server_running(self, name: str) -> bool:
-        """
-        Checks if a specific server is currently running.
-
-        Args:
-            name: The name of the server to check
-
-        Returns:
-            bool: True if the server is running, False otherwise
-        """
         if not name or not isinstance(name, str):
             return False
 
@@ -390,18 +310,6 @@ class DynamicServerManager:
                 not self.active_server_tasks[name]['task'].done())
 
     async def get_running_servers(self) -> List[str]:
-        """
-        Returns a list of currently running server names, filtering out servers
-        that are starting but not yet ready or have failed to start properly.
-
-        A server is considered running only if:
-        1. It has an active task that's not done
-        2. It has an established session
-        3. The session is connected
-
-        Returns:
-            List[str]: A list of truly running server names
-        """
         # Filter the active_server_tasks to only include properly running servers
         running_servers = []
         for name, task_info in self.active_server_tasks.items():
@@ -431,18 +339,6 @@ class DynamicServerManager:
         return running_servers
 
     async def server_set(self, name: str, content: str) -> List[TextContent]:
-        """
-        MCP handler to add/update a server config without ANY validation.
-        Simply saves the provided content string for the given server name.
-        Use server_validate() for validation if needed.
-
-        Args:
-            name: The name of the server to save config for
-            content: The raw configuration content to save
-
-        Returns:
-            List[TextContent] with response message
-        """
         # Save the content directly without any validation or processing
         result = await self._fs_save_server(name, content)
 
@@ -453,19 +349,17 @@ class DynamicServerManager:
     async def server_validate(self, name: str) -> Dict[str, Any]:
         """
         Validates that the *saved* server config JSON has required keys.
-        Returns a dict with 'valid':bool and 'error':Optional[str].
-
-        Validates the standard MCP server format with nested 'mcpServers' structure.
+        either returns JSON or raises exception
         """
         result = {
             'valid': False,
             'error': None
         }
 
-        config = await self.server_get(name)
-        if not config:
-            result['error'] = f"Server config '{name}' not found or has parsing errors"
-            return result
+        config_txt = await self.server_get(name)
+
+        # convert config txt to json and store in config
+
 
         # Check for proper mcpServers structure
         if not isinstance(config, dict):
@@ -510,11 +404,6 @@ class DynamicServerManager:
     # --- 3. Background Task Methods ---
 
     async def _run_mcp_client_session(self, name: str, params: StdioServerParameters, shutdown_event: asyncio.Event) -> None:
-        """
-        Runs the background MCP client session for a managed server.
-        Establishes a client connection and keeps it alive until shutdown is requested.
-        The session is stored in active_server_tasks for reuse by other methods.
-        """
         logger.info(f"[{name}] Starting MCP client session task...")
         session = None  # Define session here to ensure it's accessible in finally block if needed
         try:
@@ -742,10 +631,6 @@ class DynamicServerManager:
     # --- 4. Server Start/Stop Methods ---
 
     async def server_start(self, args: Dict[str, Any], server) -> List[TextContent]:
-        """
-        MCP handler to start a managed MCP server process as a background task.
-        Expects args['name']: str.
-        """
         name = args.get('name')
         logger.debug(f"▶️ server_start: Entered with args: {args}")
         if not name or not isinstance(name, str):
@@ -754,7 +639,7 @@ class DynamicServerManager:
             raise ValueError(msg)
 
         # Load the config using server_get (as in self_test)
-        full_config = await self.server_get(name)
+        config_txt = await self.server_get(name)
         if not full_config:
             msg = f"Config file not found for server '{name}'."
             logger.error(f"❌ server_start: {msg}")
@@ -823,10 +708,6 @@ class DynamicServerManager:
 
 # ... (rest of the code remains the same)
     async def server_stop(self, args: Dict[str, Any], server) -> List[TextContent]:
-        """
-        MCP handler to stop a managed MCP server process task.
-        Expects args['name']: str.
-        """
         name = args.get('name')
         if not name or not isinstance(name, str):
             msg = "Missing or invalid parameter: 'name' must be str."
@@ -883,489 +764,3 @@ class DynamicServerManager:
 
             return [TextContent(type='text', text=f"MCP server '{name}' stopped")]
 
-    # --- 5. Self-test Methods ---
-
-    async def self_test(self) -> bool:
-        """
-        Runs a comprehensive self-test of the DynamicServerManager functionality.
-        Creates, validates, starts, queries, and stops test servers, then cleans up.
-
-        Returns:
-            bool: True if all tests pass, False otherwise
-        """
-        # Save original logger for restoration
-        original_logger = logger if 'logger' in globals() else None
-
-        class MockLogger:
-            def __init__(self):
-                self.logs = []
-
-            def debug(self, msg, *args, **kwargs):
-                print(f"[DEBUG] {msg}")
-                self.logs.append(f"DEBUG: {msg}")
-
-            def info(self, msg, *args, **kwargs):
-                print(f"[INFO] {msg}")
-                self.logs.append(f"INFO: {msg}")
-
-            def warning(self, msg, *args, **kwargs):
-                print(f"[WARNING] {msg}")
-                self.logs.append(f"WARNING: {msg}")
-
-            def error(self, msg, *args, **kwargs):
-                print(f"[ERROR] {msg}")
-                self.logs.append(f"ERROR: {msg}")
-
-        try:
-            print("\n🧪 STARTING DYNAMICSERVERMANAGER SELF-TEST...")
-            all_tests_passed = True
-            total_tests = 0
-            passed_tests = 0
-
-            # Import needed for testing
-            from state import SERVERS_DIR
-            from pathlib import Path
-
-            # Use the actual SERVERS_DIR for testing
-            servers_dir = SERVERS_DIR
-            print(f"\n📁 Using servers directory: {servers_dir}")
-
-            # Set up the manager
-            globals()['logger'] = MockLogger()
-            manager = DynamicServerManager(servers_dir)
-
-            # Test 1: _fs_save_server method
-            total_tests += 1
-            print("\n🧪 TEST 1: Testing _fs_save_server method...")
-            test_server_name = "test_server"
-            test_config = {
-                "command": "python -m http.server",
-                "args": ["8888"],
-                "cwd": "/tmp",
-                "env": {"DEBUG": "1"}
-            }
-
-            file_path = await manager._fs_save_server(test_server_name, test_config)
-            saved_file = Path(servers_dir) / f"{test_server_name}.json"
-
-            if file_path and saved_file.exists():
-                print("✅ Test 1 PASSED: Server config was successfully saved")
-                passed_tests += 1
-            else:
-                print("❌ Test 1 FAILED: Server config was not saved")
-                all_tests_passed = False
-
-            # Test 2: _fs_load_server method
-            total_tests += 1
-            print("\n🧪 TEST 2: Testing _fs_load_server method...")
-            loaded_config = await manager._fs_load_server(test_server_name)
-
-            if isinstance(loaded_config, str) and loaded_config.strip().startswith('{'):
-                print("✅ Test 2 PASSED: Loaded config matches the saved config")
-                passed_tests += 1
-            else:
-                print("❌ Test 2 FAILED: Loaded config doesn't match the saved config")
-                print(f"Expected: {test_config}")
-                print(f"Got: {loaded_config}")
-                all_tests_passed = False
-
-            # Test 3: server_add method (now creates template config automatically)
-            total_tests += 1
-            print("\n🧪 TEST 3: Testing server_add method...")
-            new_server_name = "new_test_server"
-
-            try:
-                # Test that server_add works with just the name parameter now
-                result = await manager.server_add(new_server_name)
-                new_file = Path(servers_dir) / f"{new_server_name}.json"
-
-                if result and new_file.exists():
-                    print("✅ Test 3 PASSED: Server config was successfully added")
-                    passed_tests += 1
-                else:
-                    print("❌ Test 3 FAILED: Server config was not added")
-                    all_tests_passed = False
-            except Exception as e:
-                print(f"❌ Test 3 FAILED with exception: {e}")
-                all_tests_passed = False
-
-            # Test 4: server_list method
-            total_tests += 1
-            print("\n🧪 TEST 4: Testing server_list method...")
-            try:
-                server_list = await manager.server_list()
-                if test_server_name in server_list and new_server_name in server_list:
-                    print("✅ Test 4 PASSED: Server list correctly contains added servers")
-                    passed_tests += 1
-                else:
-                    print("❌ Test 4 FAILED: Server list doesn't contain expected servers")
-                    print(f"Expected servers: {test_server_name}, {new_server_name}")
-                    print(f"Got servers: {server_list}")
-                    all_tests_passed = False
-            except Exception as e:
-                print(f"❌ Test 4 FAILED with exception: {e}")
-                all_tests_passed = False
-
-            # Test 5: server_validate method
-            total_tests += 1
-            print("\n🧪 TEST 5: Testing server_validate method...")
-            try:
-                validation_result = await manager.server_validate(test_server_name)
-                if validation_result.get('valid'):
-                    print("✅ Test 5 PASSED: Server config validation successful")
-                    passed_tests += 1
-                else:
-                    print("❌ Test 5 FAILED: Server config validation failed")
-                    print(f"Error: {validation_result.get('error')}")
-                    all_tests_passed = False
-            except Exception as e:
-                print(f"❌ Test 5 FAILED with exception: {e}")
-                all_tests_passed = False
-
-            # Test 6: Invalid server validation
-            total_tests += 1
-            print("\n🧪 TEST 6: Testing validation of non-existent server...")
-            try:
-                # Create a server with missing required fields
-                invalid_server_name = "invalid_server"
-                invalid_config = {"args": ["-h"], "cwd": "/tmp"} # Missing 'command'
-                await manager._fs_save_server(invalid_server_name, invalid_config)
-
-                validation_result = await manager.server_validate(invalid_server_name)
-                if not validation_result.get('valid') and validation_result.get('error'):
-                    print("✅ Test 6 PASSED: Invalid server correctly failed validation")
-                    print(f"Validation error: {validation_result.get('error')}")
-                    passed_tests += 1
-                else:
-                    print("❌ Test 6 FAILED: Invalid server incorrectly passed validation")
-                    all_tests_passed = False
-            except Exception as e:
-                print(f"❌ Test 6 FAILED with exception: {e}")
-                all_tests_passed = False
-
-            # Test 7: Test server_start and server_stop MCP handlers
-            total_tests += 1
-            print("\n🧪 TEST 7: Testing server_start and server_stop MCP handlers...")
-            try:
-                # Create an echo server config that finishes quickly
-                echo_server_name = "echo_server"
-                echo_config = {
-                    "mcpServers": {
-                        echo_server_name: {
-                            "command": "echo",
-                            "args": ["Hello from echo server!"],
-                            "cwd": "/tmp"
-                        }
-                    }
-                }
-
-                # Save the echo server config
-                await manager._fs_save_server(echo_server_name, echo_config)
-
-                # Create mock server for notifications
-                class MockServer:
-                    async def publish_notification(self, *args, **kwargs):
-                        print(f"🔔 Mock notification published: {args}, {kwargs}")
-
-                mock_server = MockServer()
-
-                # Test server_start
-                start_args = {"name": echo_server_name}
-                start_response = await manager.server_start(start_args, mock_server)
-
-                # Echo should start and finish quickly, give it a second
-                await asyncio.sleep(1)
-
-                # Test server_stop (may already have exited due to echo finishing)
-                stop_args = {"name": echo_server_name}
-                try:
-                    stop_response = await manager.server_stop(stop_args, mock_server)
-                    print("✅ Test 7 PASSED: Server start and stop MCP handlers work")
-                    passed_tests += 1
-                except ValueError as e:
-                    # If echo server already exited, this is still a pass
-                    if "not running" in str(e):
-                        print("✅ Test 7 PASSED: Server start worked, stop showed server already exited (expected)")
-                        passed_tests += 1
-                    else:
-                        print(f"❌ Test 7 FAILED: Unexpected error stopping server: {e}")
-                        all_tests_passed = False
-            except Exception as e:
-                print(f"❌ Test 7 FAILED with exception: {e}")
-                all_tests_passed = False
-
-            # Test 8: Test server_set MCP handler
-            total_tests += 1
-            print("\n🧪 TEST 8: Testing server_set MCP handler...")
-            try:
-                # Create mock server for notifications
-                mock_server = MockServer()
-
-                # Test adding a new server
-                new_server_name = "test_server"
-                result = await manager.server_add(new_server_name)
-
-                # Now let's check if the template was created and override it with our test config
-                if result:
-                    # For testing, we want a simpler config with echo command
-                    test_server_config = {
-                        "mcpServers": {
-                            new_server_name: {
-                                "command": "echo",
-                                "args": ["Hello, MCP World!"]
-                            }
-                        }
-                    }
-                    # Override the template with our test config
-                    await manager._fs_save_server(new_server_name, test_server_config)
-
-                # Test config to set via server_set
-                cat_server_name = "cat_server"
-                cat_config = {
-                    "mcpServers": {
-                        cat_server_name: {
-                            "command": "cat",
-                            "args": ["/etc/hostname"],
-                            "cwd": "/tmp"
-                        }
-                    }
-                }
-
-                set_args = {"config": cat_config}
-                name, response = await manager.server_set(set_args, mock_server)
-
-                if name == cat_server_name:
-                    # Verify the server was saved properly
-                    loaded_config = await manager._fs_load_server(cat_server_name)
-                    if loaded_config and 'mcpServers' in loaded_config and cat_server_name in loaded_config['mcpServers']:
-                        cmd = loaded_config['mcpServers'][cat_server_name].get('command')
-                        if cmd == "cat":
-                            print("✅ Test 8 PASSED: Server set MCP handler works correctly")
-                            passed_tests += 1
-                        else:
-                            print(f"❌ Test 8 FAILED: Server set returned incorrect command: {cmd}")
-                            all_tests_passed = False
-                    else:
-                        print("❌ Test 8 FAILED: Server set did not save config correctly")
-                        all_tests_passed = False
-                else:
-                    print(f"❌ Test 8 FAILED: Server set returned wrong name: {name}")
-                    all_tests_passed = False
-            except Exception as e:
-                print(f"❌ Test 8 FAILED with exception: {e}")
-                all_tests_passed = False
-
-            # Test 9: server_remove method
-            total_tests += 1
-            print("\n🧪 TEST 9: Testing server_remove method...")
-            try:
-                result = await manager.server_remove(new_server_name)
-                new_file = Path(servers_dir) / f"{new_server_name}.json"
-
-                if result and not new_file.exists():
-                    print("✅ Test 9 PASSED: Server config was successfully removed")
-                    passed_tests += 1
-                else:
-                    print("❌ Test 9 FAILED: Server config was not removed")
-                    all_tests_passed = False
-            except Exception as e:
-                print(f"❌ Test 9 FAILED with exception: {e}")
-                all_tests_passed = False
-
-            # Test 10: Testing with a real MCP server (openweather) - simplified direct approach
-            total_tests += 1
-            print("\n🧪 TEST 10: Testing with real openweather MCP server...")
-            try:
-                # Create the openweather server config with the real API key
-                openweather_name = "openweather"
-                openweather_config = {
-                    "mcpServers": {
-                        openweather_name: {
-                            "command": "uvx",
-                            "args": [
-                                "--from",
-                                "atlantis-open-weather-mcp",
-                                "start-weather-server",
-                                "--api-key",
-                                "1234"
-                            ]
-                        }
-                    }
-                }
-
-                # Save the openweather config
-                print("  Saving openweather server configuration...")
-                save_result = await manager._fs_save_server(openweather_name, openweather_config)
-
-                if save_result:
-                    # Try to validate the server configuration
-                    print("  Validating openweather server configuration...")
-                    validation = await manager.server_validate(openweather_name)
-
-                    if validation.get('valid'):
-                        print("✅ Server configuration validated successfully")
-
-                        # Test direct connection approach (which we already know works)
-                        print("  Creating direct connection to OpenWeather server...")
-                        try:
-                            # Get the parameters from the configuration
-                            server_config = await manager.server_get(openweather_name)
-                            if 'mcpServers' in server_config and openweather_name in server_config['mcpServers']:
-                                specific_config = server_config['mcpServers'][openweather_name]
-
-                                # Create connection parameters
-                                params = StdioServerParameters(
-                                    command=specific_config['command'],
-                                    args=specific_config.get('args', []),
-                                    env=specific_config.get('env', {}),
-                                    cwd=specific_config.get('cwd', None)
-                                )
-
-                                # Create a direct connection
-                                print("  Opening connection to OpenWeather server...")
-                                async with stdio_client(params) as (reader, writer):
-                                    print("  Connection established, creating session...")
-                                    async with ClientSession(reader, writer) as session:
-                                        # Initialize the session
-                                        print("  Initializing session...")
-                                        await session.initialize()
-                                        print("✅ Session initialized successfully!")
-
-                                        # Get available tools
-                                        print("  Fetching tool list...")
-                                        tools_result = await session.list_tools()
-                                        print(f"  ✅ Found {len(tools_result.tools)} tools: {[t.name for t in tools_result.tools]}")
-
-                                        # If we got tools, try to get weather for Nuuk
-                                        if tools_result.tools:
-                                            # Set up the tool arguments
-                                            print("  Fetching current weather for Nuuk, Greenland...")
-                                            tool_args = {
-                                                "location": "Nuuk",
-                                                "timezone_offset": 0
-                                            }
-
-                                            # Call the get_current_weather tool
-                                            result = await session.call_tool("get_current_weather", tool_args)
-
-                                            if result and hasattr(result, 'content') and result.content:
-                                                weather_data = result.content
-                                                print(f"  Weather response received: {weather_data}")
-
-                                                # Check if the response contains an error
-                                                error_detected = False
-                                                for content_item in weather_data:
-                                                    if hasattr(content_item, 'text') and isinstance(content_item.text, str):
-                                                        text = content_item.text
-                                                        if '"error"' in text or 'Error' in text or 'error' in text or '401' in text or 'Unauthorized' in text:
-                                                            print(f"  ❌ API Error detected: {text}")
-                                                            error_detected = True
-                                                            break
-
-                                                if not error_detected:
-                                                    print(f"  ☀️ Current weather in Nuuk successfully retrieved!")
-                                                    print("✅ Test 10 PASSED: Successfully fetched weather data for Nuuk!")
-                                                    passed_tests += 1
-                                                else:
-                                                    print(f"❌ Test 10 FAILED: API error in weather response")
-                                                    all_tests_passed = False
-                                            else:
-                                                print(f"❌ Test 10 FAILED: Weather data response was empty or malformed: {result}")
-                                                all_tests_passed = False
-                                        else:
-                                            print("❌ Test 10 FAILED: No tools found on the server")
-                                            all_tests_passed = False
-                            else:
-                                print("❌ Test 10 FAILED: Invalid server config structure")
-                                all_tests_passed = False
-
-                        except Exception as e:
-                            print(f"❌ Test 10 FAILED with direct connection exception: {e}")
-                            all_tests_passed = False
-                    else:
-                        print(f"❌ Test 10 FAILED: Configuration validation failed: {validation.get('error')}")
-                        all_tests_passed = False
-                else:
-                    print("❌ Test 10 FAILED: Could not save openweather server config")
-                    all_tests_passed = False
-            except Exception as e:
-                print(f"❌ Test 10 FAILED with exception: {e}")
-                all_tests_passed = False
-
-            # Clean up leftover test files
-            print("\n🧹 Cleaning up test files...")
-            leftover_files = [
-                "test_server",            # From Test 1 & 2
-                "invalid_server",        # From Test 6
-                "echo_server",           # From Test 7
-                "cat_server",            # From Test 8
-                "openweather"            # From Test 10
-            ]
-
-            for test_file in leftover_files:
-                try:
-                    if os.path.exists(os.path.join(SERVERS_DIR, f"{test_file}.json")):
-                        await manager.server_remove(test_file)
-                        print(f"  Removed {test_file}.json")
-                except Exception as e:
-                    print(f"  ⚠️ Could not remove {test_file}.json: {e}")
-
-            # Print test summary
-            print("\n🏁 DYNAMICSERVERMANAGER SELF-TEST COMPLETE 🏁")
-            print(f"Tests passed: {passed_tests}/{total_tests} ({passed_tests/total_tests*100:.1f}%)")
-
-            if all_tests_passed:
-                print("\n✅ ALL TESTS PASSED! DynamicServerManager is working correctly.")
-                # Clean up OLD directory if it exists
-                old_dir_final_cleanup = Path(SERVERS_DIR) / "OLD"
-                if old_dir_final_cleanup.exists() and old_dir_final_cleanup.is_dir():
-                    print(f"🧹 Cleaning up OLD directory: {old_dir_final_cleanup}")
-                    import shutil
-                    shutil.rmtree(old_dir_final_cleanup) # remove OLD and its contents
-                return True
-            else:
-                print("\n❌ SOME TESTS FAILED. See above for details.")
-                print(f"👉 NOTE: Tests were run against {SERVERS_DIR}. Review and manually clean up test files if necessary.")
-                return False
-        finally:
-            # Restore the original logger
-            if original_logger:
-                globals()['logger'] = original_logger
-            else:
-                if 'logger' in globals(): # if mock was set but no original, remove it
-                    del globals()['logger']
-
-
-# Run the tests if this module is executed directly
-if __name__ == "__main__":
-    from state import SERVERS_DIR
-    import sys
-
-    # Create a banner
-    print("="*80)
-    print(f"{'DYNAMIC SERVER MANAGER SELF-TEST':^80}")
-    print("="*80)
-    print(f"Testing with servers directory: {SERVERS_DIR}")
-    print("-"*80)
-
-    async def run_tests():
-        """Set up the manager and run self-tests"""
-        manager = DynamicServerManager(SERVERS_DIR)
-        success = await manager.self_test()
-        sys.exit(0 if success else 1)
-
-    try:
-        # Check if there's an existing event loop
-        try:
-            asyncio.get_running_loop()
-            print("Already in an event loop, creating a task")
-            asyncio.create_task(run_tests())
-        except RuntimeError:
-            print("Creating new event loop for tests")
-            # Create a new event loop for testing
-            asyncio.run(run_tests())
-    except Exception as e:
-        print(f"Error running tests: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
