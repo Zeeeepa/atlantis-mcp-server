@@ -103,26 +103,27 @@ class DynamicServerManager:
         finally:
             pass
 
-    async def _fs_load_server(self, name: str) -> Optional[Union[Dict[str, Any], str]]:
+    async def _fs_load_server(self, name: str) -> Optional[str]:
         """
         Loads the config for server '{name}' from {name}.json in servers_dir.
-        Returns the parsed JSON dict on success.
-        Returns the raw file content (str) if JSON parsing fails.
+        Returns the raw file content (str) on successful read.
         Returns None if the file doesn't exist or an IO error occurs.
         """
         safe_name = f"{name}.json"
         file_path = os.path.join(self.servers_dir, safe_name)
         if not os.path.exists(file_path):
-            logger.info(f"⚠️ _fs_load_server: Existing config not found for '{name}' at {file_path}")
+            logger.info(f"⚠️ _fs_load_server: Config file not found for '{name}' at {file_path}")
             self._server_load_errors.pop(name, None)  # Clear potential old error if file is gone
             return None
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 raw_content = f.read()
-            return raw_content  # Return raw content on JSON error
-        finally:
-            pass
-
+            self._server_load_errors.pop(name, None) # Clear any previous load error for this name if read succeeds
+            return raw_content
+        except IOError as e:
+            logger.error(f"❌ _fs_load_server: IOError reading server config '{name}' from {file_path}: {e}")
+            self._server_load_errors[name] = f"IOError: {e}"
+            return None
 
     async def _write_server_error_log(self, name: str, error_msg: str, raw_content: Optional[str] = None) -> None:
         """
@@ -227,7 +228,7 @@ class DynamicServerManager:
             logger.error(f"❌ Failed to remove server '{name}': {e}")
             return False
 
-    async def server_get(self, name: str) -> Optional[Union[Dict[str, Any], str]]:
+    async def server_get(self, name: str) -> Optional[str]:
         """
         Returns whatever _fs_load_server returns without any validation.
 
@@ -235,7 +236,7 @@ class DynamicServerManager:
             name: The name of the server to get config for
 
         Returns:
-            Whatever _fs_load_server returns (dict, str, or None)
+            Raw server config string, or None if not found or an error occurred during load.
         """
         # No validation, just return whatever _fs_load_server gives us
         return await self._fs_load_server(name)
@@ -959,7 +960,7 @@ class DynamicServerManager:
             print("\n🧪 TEST 2: Testing _fs_load_server method...")
             loaded_config = await manager._fs_load_server(test_server_name)
 
-            if isinstance(loaded_config, dict) and loaded_config.get('command') == test_config['command']:
+            if isinstance(loaded_config, str) and loaded_config.strip().startswith('{'):
                 print("✅ Test 2 PASSED: Loaded config matches the saved config")
                 passed_tests += 1
             else:

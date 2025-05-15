@@ -26,9 +26,11 @@
 - see DynamicFunctionManager.py
 - dynamic functions can still be stored and retrieved even if invalid
 - dynamic functions invoked by tools/call
+- function_set must allow invalid Python
 
 # dynamic (mcp) servers
 - adds the ability to host other mcp tools as if they are part of our own
 - these are simple JSON
 - see DynamicServerManager.py
+- server_set must allow invalid JSON
 - server_get_tools will get a list of mcp tools from a started mcp server (openweather and openweather.json is a good example)
