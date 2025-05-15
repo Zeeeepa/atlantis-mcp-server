@@ -1,0 +1,8 @@
+python server.py  \
+  --email=youremail@gmail.com  \
+  --api-key=foobar \
+  --host=localhost \
+  --port=8000  \
+  --cloud-host=www.projectatlantis.ai/service  \
+  --cloud-port=443  \
+  --service-name=nuuk
