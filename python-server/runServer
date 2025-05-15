@@ -1,8 +1,8 @@
-python server.py  \
-  --email=rein.dapp@gmail.com  \
+  python server.py  \
+  --email=youremail@gmail.com  \
   --api-key=foobar \
   --host=localhost \
   --port=8000  \
-  --cloud-host=ws://projectatlantis.test  \
-  --cloud-port=3010  \
+  --cloud-host=wss://projectatlantis.ai  \
+  --cloud-port=443  \
   --service-name=home
