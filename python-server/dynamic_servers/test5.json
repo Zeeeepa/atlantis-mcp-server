@@ -1,0 +1,14 @@
+{
+    "mcpServers": {
+        "test5": {
+            "command": "uvx",
+            "args": [
+                "--from",
+                "atlantis-mcp-template",
+                "start-test5-server",
+                "--api-key",
+                "<your api key here>"
+            ]
+        }
+    }
+}
