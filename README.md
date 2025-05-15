@@ -51,12 +51,13 @@ Why the cloud? MCP auth and security are still being worked out it's easier to h
 3. Edit the runServer script in the `python-server` folder and set the email and service name:
 
 ```bash
-python server.py
-  --email=your@gmail.com
-  --api-key=foobar   // you should change this
-  --host=localhost
-  --port=8000
-  --cloud-host=https://www.projectatlantis.ai --cloud-port=3010
+python server.py  \
+  --email=your@gmail.com  \
+  --api-key=foobar \      // this is default, you should change this online later
+  --host=localhost \      // on your local box, this is what the npx client is looking for
+  --port=8000  \
+  --cloud-host=ws://projectatlantis.ai  \
+  --cloud-port=3010  \
   --service-name=home
 ```
 
