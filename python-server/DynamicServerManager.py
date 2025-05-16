@@ -636,6 +636,12 @@ class DynamicServerManager:
             # Clean up if needed (task cancellation, etc.)
             logger.info(f"[{name}] Client session task exiting.")
 
+            # CRITICAL: Always ensure the ready_event is set to prevent hanging
+            if name in self.active_server_tasks and 'ready_event' in self.active_server_tasks[name]:
+                if not self.active_server_tasks[name]['ready_event'].is_set():
+                    logger.debug(f"[{name}] Setting ready_event in finally block to prevent hanging")
+                    self.active_server_tasks[name]['ready_event'].set()
+
             # Force-clear session reference to help with garbage collection
             if session is not None:
                 logger.debug(f"[{name}] Clearing session reference.")
