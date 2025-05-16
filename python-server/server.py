@@ -615,9 +615,9 @@ class DynamicAdditionServer(Server):
             logger.error(f"❌ Error scanning for dynamic functions: {str(e)}")
             # Continue with just the built-in tools
 
-        # --- DEBUG: Log current ACTIVE_SERVER_TASKS state before processing servers ---
-        # Access ACTIVE_SERVER_TASKS via module namespace
-        logger.debug(f"🔧 _get_tools_list: Current active_server_tasks state: {self.server_manager.active_server_tasks!r}")
+        # --- DEBUG: Log current server_tasks state before processing servers ---
+        # Access server_tasks via module namespace
+        logger.debug(f"🔧 _get_tools_list: Current server_tasks state: {self.server_manager.server_tasks!r}")
 
         # Scan dynamic servers
         servers_found = []
@@ -635,8 +635,8 @@ class DynamicAdditionServer(Server):
                 # First identify running vs. non-running servers using proper accessor
                 is_running = await self.server_manager.is_server_running(server_name)
 
-                # Check if server is in failed state in active_server_tasks
-                task_info = self.server_manager.active_server_tasks.get(server_name, {})
+                # Check if server is in failed state in server_tasks
+                task_info = self.server_manager.server_tasks.get(server_name, {})
                 if task_info and task_info.get('status') == 'failed':
                     status = "failed"  # Mark explicitly as failed
                 else:
@@ -685,7 +685,7 @@ class DynamicAdditionServer(Server):
                         logger.warning(f"⚠️ Could not get mtime for server '{server_name}': {me}")
 
                     # Define task_info FIRST, outside any status checks
-                    task_info = self.server_manager.active_server_tasks.get(server_name)
+                    task_info = self.server_manager.server_tasks.get(server_name)
 
                     # Better check for running status - don't rely on 'status' field which might not be set
                     # Instead check if task exists, is not done, and session exists
@@ -719,7 +719,7 @@ class DynamicAdditionServer(Server):
                         if not start_time or not isinstance(start_time, datetime.datetime):
                             logger.debug(f"🕒 Setting started_at timestamp for '{server_name}' to current time")
                             start_time = datetime.datetime.now(datetime.timezone.utc)
-                            # Save it in ACTIVE_SERVER_TASKS for future use
+                            # Save it in server_tasks for future use
                             if task_info:
                                 task_info['started_at'] = start_time
 
@@ -738,7 +738,7 @@ class DynamicAdditionServer(Server):
 
                         # Always check ALL error sources thoroughly
                     error_msg = None
-                    task_info = self.server_manager.active_server_tasks.get(server_name, {})
+                    task_info = self.server_manager.server_tasks.get(server_name, {})
 
                     # STEP 1: Log ALL possible error sources
                     logger.info(f"🔍 SERVER STATUS CHECK FOR '{server_name}':")
@@ -1194,7 +1194,7 @@ class DynamicAdditionServer(Server):
                     raise ValueError(f"Server '{server_alias}' is not running.")
 
                 # Get the session for the target server
-                task_info = self.server_manager.active_server_tasks.get(server_alias)
+                task_info = self.server_manager.server_tasks.get(server_alias)
                 if not task_info:
                      # This shouldn't happen if the check above passed, but safety first
                     raise ValueError(f"Could not find task info for running server '{server_alias}'.")
