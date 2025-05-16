@@ -147,8 +147,7 @@ class DynamicServerManager:
         # Remove the config file
         file_path = os.path.join(self.servers_dir, f"{name}.json")
         if not os.path.exists(file_path):
-            logger.warning(f"⚠️ Server config '{name}' not found for removal.")
-            return False
+            raise ValueError(f"⚠️ Server config '{name}' not found for removal.")
 
         #suppress any  backup errors
         try:
