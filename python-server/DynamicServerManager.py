@@ -48,37 +48,32 @@ class DynamicServerManager:
     # --- 1. File Save/Load Methods ---
 
     def extract_server_name(self, server_json_content: str) -> Optional[str]:
-        try:
-            # Try to parse the JSON content
-            config = json.loads(server_json_content)
+        # Try to parse the JSON content
+        config = json.loads(server_json_content)
 
-            # Check if it's in the modern format with mcpServers
-            if isinstance(config, dict) and 'mcpServers' in config:
-                # Get the first key under mcpServers
-                if isinstance(config['mcpServers'], dict) and len(config['mcpServers']) > 0:
-                    return next(iter(config['mcpServers'].keys()))
+        # Check if it's in the modern format with mcpServers
+        if isinstance(config, dict) and 'mcpServers' in config:
+            # Get the first key under mcpServers
+            if isinstance(config['mcpServers'], dict) and len(config['mcpServers']) > 0:
+                return next(iter(config['mcpServers'].keys()))
 
-            # Check if it's in the legacy format (top-level key)
-            elif isinstance(config, dict) and len(config) > 0:
-                # Return the first top-level key
-                return next(iter(config.keys()))
+        # Check if it's in the legacy format (top-level key)
+        elif isinstance(config, dict) and len(config) > 0:
+            # Return the first top-level key
+            return next(iter(config.keys()))
 
-            return None
-        finally:
-            pass
+        return None
 
     async def _fs_save_server(self, name: str, content: str) -> Optional[str]:
 
         safe_name = f"{name}.json"
         file_path = os.path.join(self.servers_dir, safe_name)
         logger.debug(f"---> _fs_save_server: Attempting to save '{name}' to path: {file_path}")
-        try:
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            logger.info(f"💾 Saved server config for '{name}' to {file_path}")
-            return file_path
-        finally:
-            pass
+
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        logger.info(f"💾 Saved server config for '{name}' to {file_path}")
+        return file_path
 
     async def _fs_load_server(self, name: str) -> Optional[str]:
         safe_name = f"{name}.json"
@@ -87,30 +82,24 @@ class DynamicServerManager:
             logger.info(f"⚠️ _fs_load_server: Config file not found for '{name}' at {file_path}")
             self._server_load_errors.pop(name, None)  # Clear potential old error if file is gone
             return None
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                raw_content = f.read()
-            self._server_load_errors.pop(name, None) # Clear any previous load error for this name if read succeeds
-            return raw_content
-        except IOError as e:
-            logger.error(f"❌ _fs_load_server: IOError reading server config '{name}' from {file_path}: {e}")
-            self._server_load_errors[name] = f"IOError: {e}"
-            return None
+
+        with open(file_path, 'r', encoding='utf-8') as f:
+            raw_content = f.read()
+        self._server_load_errors.pop(name, None) # Clear any previous load error for this name if read succeeds
+        return raw_content
 
     async def _write_server_error_log(self, name: str, error_msg: str, raw_content: Optional[str] = None) -> None:
         log_filename = f"{name}_error.log"
         log_path = os.path.join(self.servers_dir, log_filename)
-        try:
-            with open(log_path, 'w', encoding='utf-8') as f:
-                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                f.write(f"=== Error Log for '{name}' @ {timestamp} ===\n\n")
-                f.write(f"{error_msg}\n\n")
-                if raw_content:
-                    f.write("=== Raw Content ===\n\n")
-                    f.write(raw_content)
-            logger.debug(f"📝 Error log written to {log_path}")
-        except Exception as e:
-            logger.error(f"❌ Failed to write error log for '{name}': {e}")
+
+        with open(log_path, 'w', encoding='utf-8') as f:
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"=== Error Log for '{name}' @ {timestamp} ===\n\n")
+            f.write(f"{error_msg}\n\n")
+            if raw_content:
+                f.write("=== Raw Content ===\n\n")
+                f.write(raw_content)
+        logger.debug(f"📝 MCP error log written to {log_path}")
 
     # --- 2. Config CRUD Methods ---
 
@@ -118,8 +107,7 @@ class DynamicServerManager:
         # Check if server already exists
         existing = await self._fs_load_server(name)
         if existing is not None:
-            logger.warning(f"⚠️ Server '{name}' already exists, not adding.")
-            return False
+            raise ValueError(f"⚠️ Server '{name}' already exists, not adding.")
 
         # Create a template config based on openweather example
         template_obj = {
@@ -146,6 +134,7 @@ class DynamicServerManager:
     async def server_remove(self, name: str) -> bool:
         # Check if server is running and stop it first
         if name in self.active_server_tasks:
+            # suppress any errors during stop
             logger.info(f"🛑 Stopping running server '{name}' before removal...")
             try:
                 # Call server_stop with proper arguments
@@ -161,6 +150,7 @@ class DynamicServerManager:
             logger.warning(f"⚠️ Server config '{name}' not found for removal.")
             return False
 
+        #suppress any  backup errors
         try:
             # Backup the config before deletion
             backup_dir = self.old_dir
@@ -169,22 +159,28 @@ class DynamicServerManager:
             backup_path = os.path.join(backup_dir, f"{timestamp}_{name}.json")
             shutil.copy2(file_path, backup_path)
             logger.info(f"📦 Backed up '{name}' config to {backup_path}")
-
-            # Delete the original file
-            os.remove(file_path)
-            logger.info(f"🗑️ Removed server config '{name}'")
-
-            # Clean up any cached errors
-            self._server_load_errors.pop(name, None)
-
-            return True
         except Exception as e:
             logger.error(f"❌ Failed to remove server '{name}': {e}")
             return False
 
+        # Delete the original file
+        os.remove(file_path)
+        logger.info(f"🗑️ Removed server config '{name}'")
+
+        # Clean up any cached errors
+        self._server_load_errors.pop(name, None)
+
+        return True
+
     async def server_get(self, name: str) -> Optional[str]:
         # No validation, just return whatever _fs_load_server gives us
         return await self._fs_load_server(name)
+
+    async def server_get_valid(self, name: str) -> Dict[str, Any]:
+        # No validation, just return whatever _fs_load_server gives us
+        config_txt = await self._fs_load_server(name)
+        return await self.validate(config_txt)
+
 
     # Note: We're using the existing server_start method instead of a custom helper
 
@@ -236,6 +232,7 @@ class DynamicServerManager:
                             try:
                                 tools_result = await asyncio.wait_for(task_info['session'].list_tools(), timeout=SERVER_REQUEST_TIMEOUT)
                                 logger.info(f"Successfully fetched {len(tools_result.tools)} tools from newly started server '{name}'")
+                                logger.info(f"Tools: {tools_result.tools}")
                                 return tools_result.tools
                             except Exception as e:
                                 logger.warning(f"Failed to use newly ready session for '{name}': {e}")
@@ -249,9 +246,12 @@ class DynamicServerManager:
         config_txt = await self.server_get(name)
 
         # convert config txt to json and store in full_config
+        full_config: Dict[str, Any] = json.loads(config_txt)
 
         if 'mcpServers' not in full_config or name not in full_config['mcpServers']:
             raise ValueError(f"Invalid server config structure for '{name}'")
+
+        # also possible that mcpServers is missing entirely and go straight to name attr
 
         server_config = full_config['mcpServers'][name]
         if 'command' not in server_config:
@@ -347,46 +347,45 @@ class DynamicServerManager:
         return [TextContent(type="text", text=success_msg)]
 
     async def server_validate(self, name: str) -> Dict[str, Any]:
-        """
-        Validates that the *saved* server config JSON has required keys.
-        either returns JSON or raises exception
-        """
-        result = {
-            'valid': False,
-            'error': None
-        }
-
         config_txt = await self.server_get(name)
 
         # convert config txt to json and store in config
+        config: Dict[str, Any] = json.loads(config_txt)
 
-
-        # Check for proper mcpServers structure
+        # apparently python JSON allows arrays and strings too
         if not isinstance(config, dict):
-            result['error'] = f"Server config for '{name}' is not a valid dictionary"
-            return result
+            raise ValueError(f"Server config for '{name}' is not a valid dictionary")
 
+        name_from_config = self.server_manager.extract_server_name(config)
+        if not name_from_config:
+            raise ValueError("Failed to get server name")
+
+        if name_from_config != name:
+            # This comparison works correctly even if 'name' is None.
+            # - If name_from_config = "s1" and name = "s1", then "s1" != "s1" is False.
+            # - If name_from_config = "s1" and name = "s2", then "s1" != "s2" is True.
+            # - If name_from_config = "s1" and name = None, then "s1" != None is True.
+            raise ValueError(
+                f"Server name mismatch. Expected name based on input: '{name}', "
+                f"but name found in config: '{name_from_config}'."
+            )
         # Check if we have the mcpServers key which is the standard format
         if 'mcpServers' in config:
             # Modern format with mcpServers structure
             if not isinstance(config['mcpServers'], dict):
-                result['error'] = f"'mcpServers' in config for '{name}' is not a dictionary"
-                return result
+                raise ValueError(f"'mcpServers' in config for '{name}' is not a dictionary")
 
             if name not in config['mcpServers']:
-                result['error'] = f"Server '{name}' not found within 'mcpServers' key"
-                return result
+                raise ValueError(f"Server '{name}' not found within 'mcpServers' key")
 
             server_config = config['mcpServers'][name]
 
             # Check required fields in the server config
             if not isinstance(server_config, dict):
-                result['error'] = f"Server config for '{name}' is not a dictionary"
-                return result
+                raise ValueError(f"Server config for '{name}' is not a dictionary")
 
             if 'command' not in server_config:
-                result['error'] = f"Missing required key 'command' in server config for '{name}'"
-                return result
+                raise ValueError(f"Missing required key 'command' in server config for '{name}'")
 
         else:
             # Legacy format (direct config)?
@@ -394,12 +393,10 @@ class DynamicServerManager:
 
             # Check for command directly in the old format
             if 'command' not in config:
-                result['error'] = f"Missing required key 'command' in server config for '{name}'"
-                return result
+                raise ValueError(f"Missing required key 'command' in server config for '{name}'")
 
         # Config is valid
-        result['valid'] = True
-        return result
+        return config
 
     # --- 3. Background Task Methods ---
 
@@ -640,33 +637,41 @@ class DynamicServerManager:
 
         # Load the config using server_get (as in self_test)
         config_txt = await self.server_get(name)
-        if not full_config:
-            msg = f"Config file not found for server '{name}'."
-            logger.error(f"❌ server_start: {msg}")
-            raise FileNotFoundError(msg)
 
+        # convert config txt to json and store in full_config
+        full_config: Dict[str, Any] = json.loads(config_txt)
 
         if name in self.active_server_tasks:
             msg = f"Server '{name}' is already running."
             logger.warning(f"⚠️ server_start: {msg}")
             raise ValueError(msg)  # Or return a message indicating it's already running
 
-        # Perform basic validation on the extracted config
-        if not isinstance(server_config, dict) or 'command' not in server_config:
-            msg = f"Invalid server config for '{name}': must be a dictionary with at least a 'command' key."
-            logger.warning(f"⚠️ server_start: {msg}")
-            raise ValueError(msg)
-
-        validation_result = await self.server_validate(name)
-        logger.debug(f"▶️ server_start: Validation result for '{name}': {validation_result}")
-        if not validation_result.get('valid', False):
-            error = validation_result.get('error', 'Unknown error')
-            msg = f"Invalid config for '{name}': {error}"
+        try:
+            # server_validate now returns the config dict directly or raises ValueError
+            validation_result = await self.server_validate(name)
+            logger.debug(f"▶️ server_start: Successfully validated config for '{name}': {validation_result}")
+        except ValueError as e:
+            msg = f"Server configuration validation failed for '{name}': {e}"
             logger.error(f"❌ server_start: {msg}")
-            raise ValueError(msg)
+            raise ValueError(msg) from e # Re-raise to indicate server_start failure
+
+        # Determine the actual server configuration details from the full config
+        if 'mcpServers' in validation_result:
+            server_config_details = validation_result['mcpServers'].get(name)
+            if not server_config_details:
+                # This case should ideally be caught by server_validate, but defensive check
+                err_msg = f"Server '{name}' not found within 'mcpServers' in validated config."
+                logger.error(f"❌ server_start: {err_msg}")
+                raise ValueError(err_msg)
+        else:
+            # Legacy format (direct config)
+            server_config_details = validation_result
+
+        command = server_config_details.get('command')
 
         try:
             # Prepare parameters for stdio_client
+            server_config = full_config['mcpServers'][name]
             params = StdioServerParameters(
                 command=server_config['command'],
                 args=server_config.get('args', []),
@@ -706,7 +711,6 @@ class DynamicServerManager:
         # Return success
         return [TextContent(type='text', text=f"MCP service '{name}' started.")]
 
-# ... (rest of the code remains the same)
     async def server_stop(self, args: Dict[str, Any], server) -> List[TextContent]:
         name = args.get('name')
         if not name or not isinstance(name, str):
@@ -763,4 +767,3 @@ class DynamicServerManager:
             self.server_start_times.pop(name, None)  # Remove start time
 
             return [TextContent(type='text', text=f"MCP server '{name}' stopped")]
-
