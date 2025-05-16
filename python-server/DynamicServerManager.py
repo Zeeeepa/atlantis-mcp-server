@@ -648,7 +648,8 @@ class DynamicServerManager:
             # Remove from active tasks if still present
             if name in self.active_server_tasks:
                 logger.debug(f"[{name}] Removing entry from active_server_tasks.")
-                self.active_server_tasks.pop(name, None)
+                # dont remove or we blow away any error
+                # self.active_server_tasks.pop(name, None)
                 self.server_start_times.pop(name, None)
 
     # --- 4. Server Start/Stop Methods ---
