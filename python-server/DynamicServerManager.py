@@ -21,9 +21,8 @@ from state import (
     SERVER_REQUEST_TIMEOUT
 )
 
-# --- Tracking for Active Server Tasks (Moved from server_manager) ---
-# Stores {'server_name': {'task': asyncio.Task, 'config': Dict, 'shutdown_event': asyncio.Event, 'session': Optional[ClientSession], 'ready_event': asyncio.Event}}
-ACTIVE_SERVER_TASKS: dict[str, dict] = {}
+# --- Tracking for Server Tasks (Moved from server_manager) ---
+SERVER_TASKS: dict[str, dict] = {}
 
 
 class DynamicServerManager:
@@ -39,8 +38,7 @@ class DynamicServerManager:
 
 
 
-        self.active_server_tasks = ACTIVE_SERVER_TASKS
-        self.server_start_times = {}
+        self.server_tasks = SERVER_TASKS
         self._server_load_errors = {}
 
         logger.info(f"Dynamic Server Manager initialized with servers dir: {servers_dir}")
@@ -133,7 +131,7 @@ class DynamicServerManager:
 
     async def server_remove(self, name: str) -> bool:
         # Check if server is running and stop it first
-        if name in self.active_server_tasks:
+        if name in self.server_tasks:
             # suppress any errors during stop
             logger.info(f"🛑 Stopping running server '{name}' before removal...")
             try:
@@ -191,8 +189,8 @@ class DynamicServerManager:
         logger.debug(f"get_server_tools: Checking for running server '{name}'")
 
         # Check if the server is already running (use existing session)
-        if name in self.active_server_tasks:
-            task_info = self.active_server_tasks[name]
+        if name in self.server_tasks:
+            task_info = self.server_tasks[name]
             session = task_info.get('session')
 
             # If we have an existing session, try to use it
@@ -204,7 +202,7 @@ class DynamicServerManager:
                     tools_result = await asyncio.wait_for(session.list_tools(), timeout=SERVER_REQUEST_TIMEOUT)
 
                     # Update last successful use timestamp
-                    self.active_server_tasks[name]['last_used'] = datetime.datetime.now(datetime.timezone.utc)
+                    self.server_tasks[name]['last_used'] = datetime.datetime.now(datetime.timezone.utc)
                     logger.info(f"Successfully fetched {len(tools_result.tools)} tools from running server '{name}' using existing session")
                     return tools_result.tools
                 except asyncio.TimeoutError:
@@ -214,7 +212,7 @@ class DynamicServerManager:
                     logger.warning(f"Could not use existing session for '{name}': {e}")
                     # Continue to fetch tools via a new temporary connection
             else:
-                logger.debug(f"Server '{name}' exists in active_server_tasks but session is not available yet")
+                logger.debug(f"Server '{name}' exists in server_tasks but session is not available yet")
 
                 # Check if the server is still starting up
                 if task_info.get('status') == 'starting' and 'ready_event' in task_info:
@@ -257,7 +255,7 @@ class DynamicServerManager:
             raise ValueError(f"Missing 'command' in server config for '{name}'")
 
         # Auto-start the server if it's not already running
-        if name not in self.active_server_tasks:
+        if name not in self.server_tasks:
             logger.info(f"Server '{name}' is not running. Auto-starting it...")
             # Start the server and wait for it to be ready
             try:
@@ -272,12 +270,12 @@ class DynamicServerManager:
             await asyncio.sleep(1)  # Short delay to ensure initialization completes
 
             # Now retry getting the tools with the new session
-            if name in self.active_server_tasks and self.active_server_tasks[name].get('session') is not None:
-                session = self.active_server_tasks[name]['session']
+            if name in self.server_tasks and self.server_tasks[name].get('session') is not None:
+                session = self.server_tasks[name]['session']
                 try:
                     # Use the new session
                     tools_result = await asyncio.wait_for(session.list_tools(), timeout=SERVER_REQUEST_TIMEOUT)
-                    self.active_server_tasks[name]['last_used'] = datetime.datetime.now(datetime.timezone.utc)
+                    self.server_tasks[name]['last_used'] = datetime.datetime.now(datetime.timezone.utc)
                     logger.info(f"Successfully fetched {len(tools_result.tools)} tools from newly started server '{name}'")
                     return tools_result.tools
                 except Exception as e:
@@ -303,15 +301,15 @@ class DynamicServerManager:
         if not name or not isinstance(name, str):
             return False
 
-        # Check if the server exists in active_server_tasks with a valid task
-        return (name in self.active_server_tasks and
-                'task' in self.active_server_tasks[name] and
-                not self.active_server_tasks[name]['task'].done())
+        # Check if the server exists in server_tasks with a valid task
+        return (name in self.server_tasks and
+                'task' in self.server_tasks[name] and
+                not self.server_tasks[name]['task'].done())
 
     async def get_running_servers(self) -> List[str]:
-        # Filter the active_server_tasks to only include properly running servers
+        # Filter the server_tasks to only include properly running servers
         running_servers = []
-        for name, task_info in self.active_server_tasks.items():
+        for name, task_info in self.server_tasks.items():
             # Check for basic task existence and not done
             if 'task' not in task_info or task_info['task'].done():
                 logger.debug(f"Server '{name}' skipped: task missing or done")
@@ -411,12 +409,12 @@ class DynamicServerManager:
         try:
             logger.debug(f"[{name}] Attempting stdio_client connection with params: {params}")
             # Simply initialize an empty output buffer
-            if name in self.active_server_tasks:
-                self.active_server_tasks[name]['output_buffer'] = []
+            if name in self.server_tasks:
+                self.server_tasks[name]['output_buffer'] = []
 
             # We can't directly set a callback on StdioServerParameters, but we'll handle error capturing in other ways
             # The stderr outputs will be logged by the stdio_client itself and our timeout handlers will check for errors
-            
+
             async with stdio_client(params) as (reader, writer):
                 logger.debug(f"[{name}] Stdio connection established. Creating ClientSession...")
                 # Create the session object without using context manager so we can keep it alive
@@ -429,31 +427,31 @@ class DynamicServerManager:
                         await asyncio.wait_for(session.initialize(), timeout=15.0)  # Increased timeout for reliable init
                         logger.info(f"[{name}] MCP Session initialized successfully.")
 
-                        # Update active_server_tasks *after* successful initialization
-                        if name in self.active_server_tasks:
-                            logger.debug(f"[{name}] Updating active_server_tasks with session and timestamp...")
-                            self.active_server_tasks[name]['session'] = session
-                            self.active_server_tasks[name]['started_at'] = datetime.datetime.now(datetime.timezone.utc)
-                            self.active_server_tasks[name]['status'] = 'running'  # Mark as running
-                            logger.info(f"[{name}] active_server_tasks updated. Current state for '{name}': {{'status': '{self.active_server_tasks[name].get('status')}', 'started_at': '{self.active_server_tasks[name].get('started_at')}', 'session_present': {self.active_server_tasks[name].get('session') is not None}}}")
+                        # Update server_tasks *after* successful initialization
+                        if name in self.server_tasks:
+                            logger.debug(f"[{name}] Updating server_tasks with session and timestamp...")
+                            self.server_tasks[name]['session'] = session
+                            self.server_tasks[name]['started_at'] = datetime.datetime.now(datetime.timezone.utc)
+                            self.server_tasks[name]['status'] = 'running'  # Mark as running
+                            logger.info(f"[{name}] server_tasks updated. Current state for '{name}': {{'status': '{self.server_tasks[name].get('status')}', 'started_at': '{self.server_tasks[name].get('started_at')}', 'session_present': {self.server_tasks[name].get('session') is not None}}}")
 
                             # Pre-fetch tools list to validate the connection works
                             try:
                                 tools_result = await session.list_tools()
                                 logger.info(f"[{name}] Successfully fetched {len(tools_result.tools)} tools from running server")
                                 logger.info(f"[{name}] Tools: {tools_result.tools}")
-                                self.active_server_tasks[name]['tools_count'] = len(tools_result.tools)
+                                self.server_tasks[name]['tools_count'] = len(tools_result.tools)
                             except Exception as e:
                                 logger.warning(f"[{name}] Failed to fetch tools list: {e}")
 
                             # Signal readiness *after* updating state
-                            if 'ready_event' in self.active_server_tasks[name]:
-                                self.active_server_tasks[name]['ready_event'].set()
+                            if 'ready_event' in self.server_tasks[name]:
+                                self.server_tasks[name]['ready_event'].set()
                                 logger.debug(f"[{name}] Ready event set.")
                             else:
-                                logger.warning(f"[{name}] 'ready_event' not found in active_server_tasks entry.")
+                                logger.warning(f"[{name}] 'ready_event' not found in server_tasks entry.")
                         else:
-                            logger.error(f"[{name}] Entry disappeared from active_server_tasks before session could be stored!")
+                            logger.error(f"[{name}] Entry disappeared from server_tasks before session could be stored!")
                             # If the entry is gone, we probably can't signal readiness either. Shutdown might be needed.
                             return  # Exit if the task entry is gone
 
@@ -475,8 +473,8 @@ class DynamicServerManager:
 
                                 # Optional: Check session is still responsive with lightweight ping
                                 # Only do this for servers that have been running a while
-                                if name in self.active_server_tasks and self.active_server_tasks[name].get('status') == 'running':
-                                    started_at = self.active_server_tasks[name].get('started_at')
+                                if name in self.server_tasks and self.server_tasks[name].get('status') == 'running':
+                                    started_at = self.server_tasks[name].get('started_at')
                                     now = datetime.datetime.now(datetime.timezone.utc)
 
                                     # Only ping if server has been running more than 2 minutes
@@ -508,9 +506,9 @@ class DynamicServerManager:
 
                                 # Save the error message in BOTH places for display in tools list
                                 # This is the key - we must update both to ensure visibility
-                                if name in self.active_server_tasks:
-                                    self.active_server_tasks[name]['status'] = 'failed'
-                                    self.active_server_tasks[name]['error'] = key_error
+                                if name in self.server_tasks:
+                                    self.server_tasks[name]['status'] = 'failed'
+                                    self.server_tasks[name]['error'] = key_error
                                 # Always update the persistent error storage
                                 self._server_load_errors[name] = key_error
 
@@ -547,19 +545,19 @@ class DynamicServerManager:
 
                         # Generic error message to start
                         error_msg = "Timeout occurred during session initialization"
-                        
+
                         # Check for these errors in both output_buffer and recent log entries
                         # First search logs explicitly for these patterns before we time out
                         logger.warning(f"[{name}] 🔍 Searching for dependency errors that might cause timeout...")
-                        
+
                         # Try to look at process stdout/stderr that might be in logs but not in buffer yet
                         # This is a direct debug log of the timeout error
                         import traceback
                         tb_str = traceback.format_exc()
                         logger.debug(f"[{name}] Timeout full traceback: {tb_str}")
-                        
+
                         # Look for common package dependency errors in logs
-                        for line in self.active_server_tasks.get(name, {}).get('output_buffer', []):
+                        for line in self.server_tasks.get(name, {}).get('output_buffer', []):
                             for err_pattern in common_errors:
                                 if err_pattern in line:
                                     # Found a more specific error message to use!
@@ -573,24 +571,24 @@ class DynamicServerManager:
 
                         logger.error(f"[{name}] {error_msg}")
 
-                        if name in self.active_server_tasks:
+                        if name in self.server_tasks:
                             # Mark server as failed
-                            self.active_server_tasks[name]['status'] = 'failed'
+                            self.server_tasks[name]['status'] = 'failed'
                             # Set ready event to unblock anything waiting for this server
-                            if 'ready_event' in self.active_server_tasks[name]:
-                                self.active_server_tasks[name]['ready_event'].set()
+                            if 'ready_event' in self.server_tasks[name]:
+                                self.server_tasks[name]['ready_event'].set()
                                 logger.debug(f"[{name}] Ready event set (to unblock waiters) after initialization failure")
                             # Store the detailed error message
-                            self.active_server_tasks[name]['error'] = error_msg
+                            self.server_tasks[name]['error'] = error_msg
                             # Add to server load errors so it shows in tools list
                             self._server_load_errors[name] = error_msg
 
                             # Optional: Remove zombie tasks after a short delay to allow error inspection
                             async def _delayed_cleanup(server_name):
                                 await asyncio.sleep(120)  # Keep failed entry for 2 minutes for diagnostics
-                                if server_name in self.active_server_tasks and self.active_server_tasks[server_name].get('status') == 'failed':
-                                    logger.info(f"[{server_name}] Removing failed server from active_server_tasks after delay")
-                                    self.active_server_tasks.pop(server_name, None)
+                                if server_name in self.server_tasks and self.server_tasks[server_name].get('status') == 'failed':
+                                    logger.info(f"[{server_name}] Removing failed server from server_tasks after delay")
+                                    self.server_tasks.pop(server_name, None)
 
                             # Schedule cleanup
                             asyncio.create_task(_delayed_cleanup(name))
@@ -613,7 +611,7 @@ class DynamicServerManager:
                             "requirements are unsatisfiable",
                             "weahter-mcp"  # Detect common typo in weather
                         ]
-                        
+
                         # Check error message first
                         package_error_detected = False
                         for pattern in common_patterns:
@@ -626,10 +624,10 @@ class DynamicServerManager:
                                     key_error += " (Note: 'weather' is misspelled as 'weahter')"
                                     logger.error(f"[{name}] 📝 TYPO DETECTED: 'weahter' should be 'weather'")
                                 break
-                            
+
                         # If not found in the error message, check recent output buffer
                         if not package_error_detected:
-                            for line in self.active_server_tasks.get(name, {}).get('output_buffer', []):
+                            for line in self.server_tasks.get(name, {}).get('output_buffer', []):
                                 for pattern in common_patterns:
                                     if pattern in line:
                                         key_error = f"Package dependency error: {line.strip()}"
@@ -643,11 +641,11 @@ class DynamicServerManager:
                                 if package_error_detected:
                                     break
 
-                        if name in self.active_server_tasks:
-                            self.active_server_tasks[name]['status'] = 'init_failed'
-                            self.active_server_tasks[name]['error'] = key_error  # Store the captured error
-                            if 'ready_event' in self.active_server_tasks[name]:
-                                self.active_server_tasks[name]['ready_event'].set()  # Signal completion (failure)
+                        if name in self.server_tasks:
+                            self.server_tasks[name]['status'] = 'init_failed'
+                            self.server_tasks[name]['error'] = key_error  # Store the captured error
+                            if 'ready_event' in self.server_tasks[name]:
+                                self.server_tasks[name]['ready_event'].set()  # Signal completion (failure)
 
                         # Also store in _server_load_errors for persistence in tools/list
                         self._server_load_errors[name] = key_error
@@ -663,27 +661,27 @@ class DynamicServerManager:
 
         except ConnectionRefusedError:
             logger.error(f"[{name}] Connection refused when starting stdio client process.")
-            if name in self.active_server_tasks:
-                self.active_server_tasks[name]['status'] = 'connection_refused'
-                if 'ready_event' in self.active_server_tasks[name]:
-                    self.active_server_tasks[name]['ready_event'].set()  # Signal completion (failure)
+            if name in self.server_tasks:
+                self.server_tasks[name]['status'] = 'connection_refused'
+                if 'ready_event' in self.server_tasks[name]:
+                    self.server_tasks[name]['ready_event'].set()  # Signal completion (failure)
 
         except Exception as e:
             logger.error(f"[{name}] Unexpected error in client session: {e}", exc_info=True)
-            if name in self.active_server_tasks:
-                self.active_server_tasks[name]['status'] = 'error'
-                if 'ready_event' in self.active_server_tasks[name]:
-                    self.active_server_tasks[name]['ready_event'].set()  # Signal completion (failure)
+            if name in self.server_tasks:
+                self.server_tasks[name]['status'] = 'error'
+                if 'ready_event' in self.server_tasks[name]:
+                    self.server_tasks[name]['ready_event'].set()  # Signal completion (failure)
 
         finally:
             # Clean up if needed (task cancellation, etc.)
             logger.info(f"[{name}] Client session task exiting.")
 
             # CRITICAL: Always ensure the ready_event is set to prevent hanging
-            if name in self.active_server_tasks and 'ready_event' in self.active_server_tasks[name]:
-                if not self.active_server_tasks[name]['ready_event'].is_set():
+            if name in self.server_tasks and 'ready_event' in self.server_tasks[name]:
+                if not self.server_tasks[name]['ready_event'].is_set():
                     logger.debug(f"[{name}] Setting ready_event in finally block to prevent hanging")
-                    self.active_server_tasks[name]['ready_event'].set()
+                    self.server_tasks[name]['ready_event'].set()
 
             # Force-clear session reference to help with garbage collection
             if session is not None:
@@ -694,12 +692,9 @@ class DynamicServerManager:
                     logger.debug(f"[{name}] Error closing session during cleanup: {e}")
                 session = None
 
-            # Remove from active tasks if still present
-            if name in self.active_server_tasks:
-                logger.debug(f"[{name}] Removing entry from active_server_tasks.")
-                # dont remove or we blow away any error
-                # self.active_server_tasks.pop(name, None)
-                self.server_start_times.pop(name, None)
+            if name in self.server_tasks:
+                logger.debug(f"[{name}] Removing start time from server_tasks.")
+                self.server_tasks[name]['started_at'] = None
 
     # --- 4. Server Start/Stop Methods ---
 
@@ -717,10 +712,13 @@ class DynamicServerManager:
         # convert config txt to json and store in full_config
         full_config: Dict[str, Any] = json.loads(config_txt)
 
-        if name in self.active_server_tasks:
-            msg = f"Server '{name}' is already running."
-            logger.warning(f"⚠️ server_start: {msg}")
-            raise ValueError(msg)  # Or return a message indicating it's already running
+        if name in self.server_tasks:
+            task_info = self.server_tasks[name]
+            # Check both task state and status to determine if truly running
+            if (task_info.get('started_at') is not None):
+                msg = f"Server '{name}' is already running."
+                logger.warning(f"⚠️ server_start: {msg}")
+                raise ValueError(msg)
 
         try:
             # server_validate now returns the config dict directly or raises ValueError
@@ -780,7 +778,7 @@ class DynamicServerManager:
             'output_buffer': [],  # Store stdout/stderr from the process
             'error_buffer': []    # Store specific error messages
         }
-        self.active_server_tasks[name] = task_info
+        self.server_tasks[name] = task_info
         logger.info(f"Starting MCP server '{name}'")
         logger.debug(f"▶️ server_start: Task info recorded for '{name}'. Start time will be added upon session init.")
 
@@ -794,27 +792,23 @@ class DynamicServerManager:
             logger.error(f"❌ server_stop: {msg}")
             raise ValueError(msg)
 
-        if name not in self.active_server_tasks:
+        if name not in self.server_tasks:
             msg = f"Server '{name}' is not running or not managed."
             logger.warning(f"⚠️ server_stop: {msg}")
             raise ValueError(msg)
 
-        task_info = self.active_server_tasks.get(name)
+        task_info = self.server_tasks.get(name)
         if not task_info or 'task' not in task_info:
             msg = f"Error stopping server '{name}': Inconsistent state."
             logger.error(f"❌ server_stop: {msg}")
             # Clean up if entry exists but is broken
-            if name in self.active_server_tasks:
-                del self.active_server_tasks[name]
+            if name in self.server_tasks:
+                del self.server_tasks[name]
             raise RuntimeError(msg)
 
         task = task_info['task']
         if task.done():
             logger.info(f"🧹 Task for server '{name}' was already finished. Cleaning up entry.")
-            # Cleanup potentially missed by the finally block
-            if name in self.active_server_tasks:
-                del self.active_server_tasks[name]
-            self.server_start_times.pop(name, None)  # Remove start time
             return [TextContent(type='text', text=f"Server '{name}' task was already finished.")]
         else:
             logger.info(f"Attempting to cancel task for server '{name}'...")
@@ -838,8 +832,5 @@ class DynamicServerManager:
             except Exception as e:
                 logger.error(f"❓ Unexpected error while waiting for cancellation of '{name}': {e}")
 
-            # The finally block in _run_mcp_client_session should remove the entry.
-            # Also clean up our tracking
-            self.server_start_times.pop(name, None)  # Remove start time
 
             return [TextContent(type='text', text=f"MCP server '{name}' stopped")]
