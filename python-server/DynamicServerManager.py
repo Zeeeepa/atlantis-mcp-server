@@ -116,7 +116,7 @@ class DynamicServerManager:
                     "command": "uvx",  # Default command, can be edited later
                     "args": [
                         "--from",
-                        "atlantis-mcp-template",  # Placeholder package name
+                        "atlantis-open-weather-mcp",
                         f"start-{name}-server",  # Create standard start command based on name
                         "--api-key",
                         "<your api key here>"  # Placeholder for API key
@@ -347,6 +347,10 @@ class DynamicServerManager:
 
     async def server_validate(self, name: str) -> Dict[str, Any]:
         config_txt = await self.server_get(name)
+        if not config_txt:
+            # This case should ideally be handled by server_get raising an error or returning a clear signal
+            # For now, if server_get returns None (e.g., file not found), server_validate should indicate this.
+            raise ValueError(f"Configuration for server '{name}' not found or is empty.")
 
         # convert config txt to json and store in config
         config: Dict[str, Any] = json.loads(config_txt)
@@ -355,9 +359,11 @@ class DynamicServerManager:
         if not isinstance(config, dict):
             raise ValueError(f"Server config for '{name}' is not a valid dictionary")
 
-        name_from_config = self.server_manager.extract_server_name(config)
+        # Pass the original config_txt (string) to extract_server_name
+        name_from_config = self.extract_server_name(config_txt)
         if not name_from_config:
-            raise ValueError("Failed to get server name")
+            # extract_server_name might return None if it can't determine a name
+            raise ValueError("Failed to extract server name from the configuration content.")
 
         if name_from_config != name:
             # This comparison works correctly even if 'name' is None.
@@ -578,18 +584,39 @@ class DynamicServerManager:
                             except Exception:
                                 pass  # Ignore errors when closing an uninitialized session
                     except Exception as e:
-                        logger.error(f"[{name}] Error during session.initialize() or operation: {e}")
+                        error_message_str = str(e)
+                        logger.error(f"[{name}] Error during session.initialize() or operation: {error_message_str}", exc_info=True)
+
+                        # Determine a more specific error key
+                        key_error = f"Initialization error: {error_message_str.strip()}" # Default
+                        common_patterns = [
+                            "No solution found when resolving tool dependencies",
+                            "not found in the package registry",
+                            "requirements are unsatisfiable"
+                        ]
+                        for pattern in common_patterns:
+                            if pattern in error_message_str:
+                                key_error = f"Package dependency error: {error_message_str.strip()}"
+                                logger.warning(f"[{name}] 📦 DETECTED PACKAGE ERROR (during init): {key_error}")
+                                break
+
                         if name in self.active_server_tasks:
                             self.active_server_tasks[name]['status'] = 'init_failed'
+                            self.active_server_tasks[name]['error'] = key_error  # Store the captured error
                             if 'ready_event' in self.active_server_tasks[name]:
                                 self.active_server_tasks[name]['ready_event'].set()  # Signal completion (failure)
+
+                        # Also store in _server_load_errors for persistence in tools/list
+                        self._server_load_errors[name] = key_error
 
                         # Close session if it exists but failed
                         if session is not None:
                             try:
-                                await session.close()
-                            except Exception:
-                                pass  # Ignore errors when closing a failed session
+                                await asyncio.wait_for(session.close(), timeout=5.0)
+                            except Exception as close_err:
+                                logger.debug(f"[{name}] Error closing session after init failed: {close_err}")
+                        # This exception means we should exit _run_mcp_client_session, so we let it proceed to finally
+                        return # Exit the _run_mcp_client_session task
 
         except ConnectionRefusedError:
             logger.error(f"[{name}] Connection refused when starting stdio client process.")
@@ -628,7 +655,7 @@ class DynamicServerManager:
 
     async def server_start(self, args: Dict[str, Any], server) -> List[TextContent]:
         name = args.get('name')
-        logger.debug(f"▶️ server_start: Entered with args: {args}")
+        logger.info(f"▶️ server_start: Starting server '{name}'...")
         if not name or not isinstance(name, str):
             msg = "Missing or invalid parameter: 'name' must be str."
             logger.error(f"❌ server_start: {msg}")
@@ -704,11 +731,11 @@ class DynamicServerManager:
             'error_buffer': []    # Store specific error messages
         }
         self.active_server_tasks[name] = task_info
-        logger.info(f"MCP server '{name}' started")
+        logger.info(f"Starting MCP server '{name}'")
         logger.debug(f"▶️ server_start: Task info recorded for '{name}'. Start time will be added upon session init.")
 
         # Return success
-        return [TextContent(type='text', text=f"MCP service '{name}' started.")]
+        return [TextContent(type='text', text=f"Starting MCP service '{name}'")]
 
     async def server_stop(self, args: Dict[str, Any], server) -> List[TextContent]:
         name = args.get('name')
