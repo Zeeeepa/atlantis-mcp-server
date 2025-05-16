@@ -414,6 +414,9 @@ class DynamicServerManager:
             if name in self.active_server_tasks:
                 self.active_server_tasks[name]['output_buffer'] = []
 
+            # We can't directly set a callback on StdioServerParameters, but we'll handle error capturing in other ways
+            # The stderr outputs will be logged by the stdio_client itself and our timeout handlers will check for errors
+            
             async with stdio_client(params) as (reader, writer):
                 logger.debug(f"[{name}] Stdio connection established. Creating ClientSession...")
                 # Create the session object without using context manager so we can keep it alive
@@ -538,19 +541,34 @@ class DynamicServerManager:
                         common_errors = [
                             "No solution found when resolving tool dependencies",
                             "not found in the package registry",
-                            "requirements are unsatisfiable"
+                            "requirements are unsatisfiable",
+                            "weahter-mcp"  # Detect common typo in weather
                         ]
 
                         # Generic error message to start
                         error_msg = "Timeout occurred during session initialization"
-
+                        
+                        # Check for these errors in both output_buffer and recent log entries
+                        # First search logs explicitly for these patterns before we time out
+                        logger.warning(f"[{name}] 🔍 Searching for dependency errors that might cause timeout...")
+                        
+                        # Try to look at process stdout/stderr that might be in logs but not in buffer yet
+                        # This is a direct debug log of the timeout error
+                        import traceback
+                        tb_str = traceback.format_exc()
+                        logger.debug(f"[{name}] Timeout full traceback: {tb_str}")
+                        
                         # Look for common package dependency errors in logs
                         for line in self.active_server_tasks.get(name, {}).get('output_buffer', []):
                             for err_pattern in common_errors:
                                 if err_pattern in line:
                                     # Found a more specific error message to use!
-                                    error_msg = f"Package dependency error: {line.strip()}"
-                                    logger.info(f"📦 [ERROR] Found package dependency error: {line}")
+                                    error_msg = f"Package dependency error detected: {line.strip()}"
+                                    logger.error(f"[{name}] 📦 DEPENDENCY ERROR DETECTED: {line}")
+                                    # Check for common typos and provide helpful message
+                                    if "weahter" in line:
+                                        error_msg += " (Note: 'weather' is misspelled as 'weahter')"
+                                        logger.error(f"[{name}] 📝 TYPO DETECTED: 'weahter' should be 'weather'")
                                     break
 
                         logger.error(f"[{name}] {error_msg}")
@@ -592,13 +610,38 @@ class DynamicServerManager:
                         common_patterns = [
                             "No solution found when resolving tool dependencies",
                             "not found in the package registry",
-                            "requirements are unsatisfiable"
+                            "requirements are unsatisfiable",
+                            "weahter-mcp"  # Detect common typo in weather
                         ]
+                        
+                        # Check error message first
+                        package_error_detected = False
                         for pattern in common_patterns:
                             if pattern in error_message_str:
                                 key_error = f"Package dependency error: {error_message_str.strip()}"
-                                logger.warning(f"[{name}] 📦 DETECTED PACKAGE ERROR (during init): {key_error}")
+                                logger.error(f"[{name}] 📦 DETECTED PACKAGE ERROR (during init): {key_error}")
+                                package_error_detected = True
+                                # Check for common typos
+                                if "weahter" in error_message_str:
+                                    key_error += " (Note: 'weather' is misspelled as 'weahter')"
+                                    logger.error(f"[{name}] 📝 TYPO DETECTED: 'weahter' should be 'weather'")
                                 break
+                            
+                        # If not found in the error message, check recent output buffer
+                        if not package_error_detected:
+                            for line in self.active_server_tasks.get(name, {}).get('output_buffer', []):
+                                for pattern in common_patterns:
+                                    if pattern in line:
+                                        key_error = f"Package dependency error: {line.strip()}"
+                                        logger.error(f"[{name}] 📦 DETECTED PACKAGE ERROR (in output): {key_error}")
+                                        # Check for common typos
+                                        if "weahter" in line:
+                                            key_error += " (Note: 'weather' is misspelled as 'weahter')"
+                                            logger.error(f"[{name}] 📝 TYPO DETECTED: 'weahter' should be 'weather'")
+                                        package_error_detected = True
+                                        break
+                                if package_error_detected:
+                                    break
 
                         if name in self.active_server_tasks:
                             self.active_server_tasks[name]['status'] = 'init_failed'
