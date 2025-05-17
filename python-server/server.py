@@ -23,7 +23,7 @@ import datetime
 SERVER_VERSION = "0.1.0"
 
 from mcp.server import Server
-# Removed websocket_server import - implementing our own handler
+
 from mcp.client.websocket import websocket_client
 from mcp.types import (
     Tool,
@@ -31,7 +31,7 @@ from mcp.types import (
     CallToolResult,
     NotificationParams,
     Annotations # Ensure Annotation, ToolErrorAnnotation are NOT imported
-# <<< REMOVED Content IMPORT >>>
+
 )
 from starlette.applications import Starlette
 from starlette.routing import WebSocketRoute, Route
@@ -132,20 +132,10 @@ def handle_sigint(signum, frame):
 signal.signal(signal.SIGINT, handle_sigint)
 signal.signal(signal.SIGTERM, handle_sigint)
 
-# Initialize PID Manager
-pid_manager = PIDManager()
+# Initialize PID Manager variable (will be set after args parsing)
+pid_manager = None
 
-# Check if server is already running
-existing_pid = pid_manager.check_server_running()
-if existing_pid:
-    logger.error(f"❌ MCP SERVER ALREADY RUNNING WITH PID {existing_pid}")
-    logger.error(f"❌ If this is incorrect, delete the PID file and try again")
-    sys.exit(1)
-
-# Create the PID file
-if not pid_manager.create_pid_file():
-    logger.error("❌ Failed to create PID file! Exiting...")
-    sys.exit(1)
+# PID check moved to after argument parsing
 
 # --- File Watcher Setup ---
 
@@ -2176,6 +2166,20 @@ if __name__ == "__main__":
     # Update host and port from command line arguments
     HOST = args.host
     PORT = args.port
+
+    # Initialize PID Manager with service name if provided
+    pid_manager = PIDManager(service_name=args.service_name)
+
+    # Check if server is already running
+    existing_pid = pid_manager.check_server_running()
+    if existing_pid:
+        logger.error(f"❌ Server already running with PID {existing_pid}! Exiting...")
+        sys.exit(1)
+
+    # Create PID file
+    if not pid_manager.create_pid_file():
+        logger.error("❌ Failed to create PID file! Exiting...")
+        sys.exit(1)
 
     _load_registered_clients() # Load clients at startup
 
