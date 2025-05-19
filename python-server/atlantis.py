@@ -23,6 +23,12 @@ def client_log(message: str, level: str = "INFO"):
     """Sends a log message back to the requesting client for the current context.
     Includes a sequence number and automatically determines the calling function name.
     Also includes the original entry point function name.
+    
+    NOTE: This is a WRAPPER around the lower-level utils.client_log function.
+    This function automatically captures context data (like request_id, caller name, etc.)
+    and forwards it to utils.client_log. Dynamic functions should use THIS version,
+    not utils.client_log directly.
+    
     Calls the underlying log function directly; async dispatch is handled internally.
     """
     log_func = _client_log_var.get()
@@ -44,8 +50,8 @@ def client_log(message: str, level: str = "INFO"):
             current_seq = _log_seq_num_var.get()
             _log_seq_num_var.set(current_seq + 1)
 
-            # Call the underlying function, passing seq num, caller name, AND entry point name.
-            # NOTE: log_func (utils.client_log) needs update to accept entry_point_name.
+            # Call the underlying utils.client_log function, passing seq num, caller name, AND entry point name.
+            # This is the key connection between atlantis.client_log and utils.client_log.
             log_func(
                 message,
                 level=level,

@@ -58,9 +58,17 @@ def client_log(
     ):
     """
     Send a log message to the client.
+    
+    IMPORTANT: This is the LOW-LEVEL implementation of client logging.
+    Dynamic functions should NOT call this directly! Instead, use atlantis.client_log,
+    which is a context-aware wrapper that automatically provides all the necessary
+    context variables (request_id, client_id, etc.) to this function.
+    
+    atlantis.client_log -> utils.client_log -> server.send_client_log
 
     This function can be imported and called from dynamic functions to send
-    logs directly to the client using MCP notifications.
+    logs directly to the client using MCP notifications, but atlantis.client_log
+    is preferred in most cases.
 
     Args:
         message: The message to log (can be a string or structured data)
