@@ -54,7 +54,8 @@ def client_log(
     request_id: str = None,
     client_id_for_routing: str = None,
     seq_num: int = None,
-    entry_point_name: str = None
+    entry_point_name: str = None,
+    message_type: str = "text"
     ):
     """
     Send a log message to the client.
@@ -78,6 +79,7 @@ def client_log(
         client_id_for_routing: Optional client identifier to route the log message
         seq_num: Optional sequence number for client-side ordering
         entry_point_name: Name of the top-level function called by the request.
+        message_type: Type of message content ("text", "json", "image/png", etc.). Default is "text"
     """
     # Log locally first (always using INFO level for local display)
     seq_prefix = f"(Seq: {seq_num}) " if seq_num is not None else ""
@@ -98,8 +100,8 @@ def client_log(
                 logger_name = "dynamic_function"
 
             # Pass request_id, client_id_for_routing, AND seq_num to the server's method
-            # NOTE: _server_instance.send_client_log MUST be updated to accept seq_num
-            task = asyncio.create_task(_server_instance.send_client_log(level, message, logger_name, request_id, client_id_for_routing, seq_num, entry_point_name))
+            # Pass all parameters including message_type to the server's method
+            task = asyncio.create_task(_server_instance.send_client_log(level, message, logger_name, request_id, client_id_for_routing, seq_num, entry_point_name, message_type))
             
             # Log task creation
             logger.info(f"📋 CLIENT LOG TASK CREATED: {task.get_name()}")

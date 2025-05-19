@@ -1,6 +1,6 @@
 import contextvars
 import inspect # Ensure inspect is imported
-from typing import Callable, Optional
+from typing import Callable, Optional, Any
 
 # --- Context Variables ---
 # client_log_func: Holds the partially bound client_log function for the current request
@@ -19,7 +19,7 @@ _user_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_user
 
 # --- Accessor Functions ---
 
-def client_log(message: str, level: str = "INFO"):
+def client_log(message: Any, level: str = "INFO", message_type: str = "text"):
     """Sends a log message back to the requesting client for the current context.
     Includes a sequence number and automatically determines the calling function name.
     Also includes the original entry point function name.
@@ -28,6 +28,11 @@ def client_log(message: str, level: str = "INFO"):
     This function automatically captures context data (like request_id, caller name, etc.)
     and forwards it to utils.client_log. Dynamic functions should use THIS version,
     not utils.client_log directly.
+    
+    The message_type parameter specifies what kind of content is being sent:
+    - "text" (default): A plain text message
+    - "json": A JSON object or structured data
+    - "image/*": Various image formats (e.g., "image/png", "image/jpeg")
     
     Calls the underlying log function directly; async dispatch is handled internally.
     """
@@ -50,14 +55,15 @@ def client_log(message: str, level: str = "INFO"):
             current_seq = _log_seq_num_var.get()
             _log_seq_num_var.set(current_seq + 1)
 
-            # Call the underlying utils.client_log function, passing seq num, caller name, AND entry point name.
+            # Call the underlying utils.client_log function, passing seq num, caller name, entry point name, AND message type.
             # This is the key connection between atlantis.client_log and utils.client_log.
             log_func(
                 message,
                 level=level,
                 seq_num=current_seq,
                 logger_name=caller_name, # The immediate caller
-                entry_point_name=entry_point_name # The original function called
+                entry_point_name=entry_point_name, # The original function called
+                message_type=message_type # Type of content (text, json, image, etc.)
             )
         except Exception as e:
             print(f"ERROR: Failed during client_log call (after inspect): {e}")

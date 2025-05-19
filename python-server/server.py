@@ -922,7 +922,8 @@ class DynamicAdditionServer(Server):
                               request_id: str = None,
                               client_id: str = None,
                               seq_num: Optional[int] = None,
-                              entry_point_name: Optional[str] = None # <-- Add new param
+                              entry_point_name: Optional[str] = None,
+                              message_type: str = "text" # Message content type
                               ):
         """Send a log message notification to connected clients using direct WebSocket communication.
 
@@ -934,6 +935,7 @@ class DynamicAdditionServer(Server):
             client_id: Optional client identifier for routing the message
             seq_num: Optional sequence number for client-side ordering
             entry_point_name: Optional name of the top-level function originally called
+            message_type: Type of message content ("text", "json", "image/png", etc.). Default is "text"
         """
         try:
             # Normalize level to uppercase for consistency
@@ -945,7 +947,8 @@ class DynamicAdditionServer(Server):
                 "data": data,
                 "logger": logger_name or "unknown_caller", # The immediate caller
                 "requestId": request_id,
-                "entryPoint": entry_point_name or "unknown_entry_point" # The original entry point
+                "entryPoint": entry_point_name or "unknown_entry_point", # The original entry point
+                "messageType": message_type # Type of content (text, json, image, etc.)
             }
 
             # Add seqNum if provided
