@@ -978,7 +978,8 @@ class DynamicAdditionServer(Server):
                 logger.info(f"📋 CLIENT LOG ROUTING: Sending to client_id={client_id}, request_id={request_id}")
                 logger.info(f"📋 KNOWN CLIENTS: {list(client_connections.keys())}")
                 # Log the notification for debugging (now includes client_id if added)
-                logger.debug(f"Sending client log notification: {notification_json}")
+                #logger.debug(f"Sending client log notification: {notification_json}")
+                logger.debug(f"Sending client log notification")
 
                 client_info = client_connections[client_id]
                 client_type = client_info.get("type")
@@ -2267,4 +2268,7 @@ if __name__ == "__main__":
         loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
         loop.close()
         pid_manager.remove_pid_file() # Ensure PID file is removed on exit
-        logger.info("👋 SERVER SHUTDOWN COMPLETE")
+        # Use the service_name from pid_manager, or default to 'MCP' if not available
+        service_name = pid_manager.service_name if pid_manager.service_name else 'MCP'
+        logger.info(f"👋 SERVER SHUTDOWN COMPLETE FOR SERVICE: {service_name}")
+

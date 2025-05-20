@@ -18,6 +18,9 @@ class PIDManager:
             pid_file_path: Optional custom path for the PID file. If None, uses default location.
             service_name: Optional service name to include in the PID filename for identification.
         """
+        # Store the service name for later use
+        self.service_name = service_name
+        
         if pid_file_path:
             self.pid_file = pid_file_path
         else:
@@ -26,6 +29,8 @@ class PIDManager:
             self.pid_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
         
         logger.debug(f"PID Manager initialized with file path: {self.pid_file}")
+        if service_name:
+            logger.debug(f"PID Manager initialized for service: {service_name}")
     
     def check_server_running(self):
         """
