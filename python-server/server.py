@@ -2270,5 +2270,5 @@ if __name__ == "__main__":
         pid_manager.remove_pid_file() # Ensure PID file is removed on exit
         # Use the service_name from pid_manager, or default to 'MCP' if not available
         service_name = pid_manager.service_name if pid_manager.service_name else 'MCP'
-        logger.info(f"👋 SERVER SHUTDOWN COMPLETE FOR SERVICE: {service_name}")
+        logger.info(f"👋 SERVER '{service_name}' SHUTDOWN COMPLETE")
 
