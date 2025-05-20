@@ -23,17 +23,17 @@ def client_log(message: Any, level: str = "INFO", message_type: str = "text"):
     """Sends a log message back to the requesting client for the current context.
     Includes a sequence number and automatically determines the calling function name.
     Also includes the original entry point function name.
-    
+
     NOTE: This is a WRAPPER around the lower-level utils.client_log function.
     This function automatically captures context data (like request_id, caller name, etc.)
     and forwards it to utils.client_log. Dynamic functions should use THIS version,
     not utils.client_log directly.
-    
+
     The message_type parameter specifies what kind of content is being sent:
     - "text" (default): A plain text message
     - "json": A JSON object or structured data
     - "image/*": Various image formats (e.g., "image/png", "image/jpeg")
-    
+
     Calls the underlying log function directly; async dispatch is handled internally.
     """
     log_func = _client_log_var.get()
@@ -118,46 +118,46 @@ def client_image(image_path: str, level: str = "INFO", image_format: str = "imag
     """Sends an image back to the requesting client for the current context.
     This is a wrapper around client_log that automatically loads the image,
     converts it to base64, and sets the appropriate message type.
-    
+
     Args:
         image_path: Path to the image file to send
         level: Log level (e.g., "INFO", "DEBUG")
         image_format: MIME type of the image (e.g., "image/png", "image/jpeg")
-        
+
     Raises:
         FileNotFoundError: If the image file doesn't exist
         IOError: If there's an error reading the file
     """
     # Convert image to base64
     base64_data = image_to_base64(image_path)
-    
+
     # Add 'base64:' prefix to the string
     prefixed_data = f"base64:{base64_data}"
-    
+
     # Send to client_log with appropriate message_type
     client_log(prefixed_data, level=level, message_type=image_format)
 
 
 def image_to_base64(image_path: str) -> str:
     """Loads an image from the given file path and converts it to a base64 string.
-    
+
     Args:
         image_path: The path to the image file to load
-        
+
     Returns:
         A base64-encoded string representation of the image
-        
+
     Raises:
         FileNotFoundError: If the image file doesn't exist
         IOError: If there's an error reading the file
     """
     import base64
     import os.path
-    
+
     # Verify file exists to provide a helpful error
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"Image file not found: {image_path}")
-        
+
     try:
         # Read the binary data from the file
         with open(image_path, "rb") as image_file:
@@ -170,3 +170,28 @@ def image_to_base64(image_path: str) -> str:
         print(f"Error converting image to base64: {e}")
         # Re-raise to allow caller to handle
         raise
+
+
+def client_command(command: str, data: Any = None):
+    """Sends a command message with both a command string and optional JSON data back to the requesting client.
+    This is a wrapper around client_log that automatically sets the message type to 'command'.
+    
+    Command messages can be used by the client to trigger specific behaviors or state changes.
+    
+    Args:
+        command: The command string identifier
+        data: Optional JSON-serializable data associated with the command (default: None)
+    """
+    # Combine command and data into a single structure
+    payload = {
+        'command': command
+    }
+    
+    # Only include data in payload if it's not None
+    if data is not None:
+        payload['data'] = data
+        
+    # Send to client_log with message_type set to 'command'
+    client_log(payload, level="INFO", message_type="command")
+
+
