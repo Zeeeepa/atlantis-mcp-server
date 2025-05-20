@@ -110,3 +110,63 @@ def reset_context(tokens):
     _entry_point_name_var.reset(entry_point_token)
     # Reset the user context
     _user_var.reset(user_token)
+
+
+# --- Utility Functions ---
+
+def client_image(image_path: str, level: str = "INFO", image_format: str = "image/png"):
+    """Sends an image back to the requesting client for the current context.
+    This is a wrapper around client_log that automatically loads the image,
+    converts it to base64, and sets the appropriate message type.
+    
+    Args:
+        image_path: Path to the image file to send
+        level: Log level (e.g., "INFO", "DEBUG")
+        image_format: MIME type of the image (e.g., "image/png", "image/jpeg")
+        
+    Raises:
+        FileNotFoundError: If the image file doesn't exist
+        IOError: If there's an error reading the file
+    """
+    # Convert image to base64
+    base64_data = image_to_base64(image_path)
+    
+    # Add 'base64:' prefix to the string
+    prefixed_data = f"base64:{base64_data}"
+    
+    # Send to client_log with appropriate message_type
+    client_log(prefixed_data, level=level, message_type=image_format)
+
+
+def image_to_base64(image_path: str) -> str:
+    """Loads an image from the given file path and converts it to a base64 string.
+    
+    Args:
+        image_path: The path to the image file to load
+        
+    Returns:
+        A base64-encoded string representation of the image
+        
+    Raises:
+        FileNotFoundError: If the image file doesn't exist
+        IOError: If there's an error reading the file
+    """
+    import base64
+    import os.path
+    
+    # Verify file exists to provide a helpful error
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"Image file not found: {image_path}")
+        
+    try:
+        # Read the binary data from the file
+        with open(image_path, "rb") as image_file:
+            # Convert binary data to base64 encoded string
+            encoded_string = base64.b64encode(image_file.read())
+            # Return as UTF-8 string
+            return encoded_string.decode('utf-8')
+    except IOError as e:
+        # Log the error for debugging
+        print(f"Error converting image to base64: {e}")
+        # Re-raise to allow caller to handle
+        raise
