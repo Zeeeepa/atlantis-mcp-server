@@ -195,3 +195,17 @@ def client_command(command: str, data: Any = None):
     client_log(payload, level="INFO", message_type="command")
 
 
+def client_html(html_content: str, level: str = "INFO"):
+    """Sends HTML content back to the requesting client for the current context.
+    This is a wrapper around client_log that automatically sets the message type to 'html'.
+    
+    HTML messages can be rendered by clients that support HTML display.
+    
+    Args:
+        html_content: The HTML content to send
+        level: Log level (e.g., "INFO", "DEBUG")
+    """
+    # Send to client_log with message_type set to 'html'
+    client_log(html_content, level=level, message_type="html")
+
+
