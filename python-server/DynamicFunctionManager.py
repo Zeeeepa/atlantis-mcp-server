@@ -175,7 +175,7 @@ class DynamicFunctionManager:
         return metadata
 
 
-    def _ast_node_to_string(node: Optional[ast.expr]) -> str:
+    def _ast_node_to_string(self, node: Optional[ast.expr]) -> str:
         """Attempt to reconstruct a string representation of an AST node (for type hints)."""
         if node is None:
             return "Any"
