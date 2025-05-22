@@ -47,7 +47,7 @@ def get_server_instance():
     global _server_instance
     return _server_instance
 
-def client_log(
+async def client_log(
     message: Any,
     level: str = "info",
     logger_name: str = None,
@@ -59,12 +59,12 @@ def client_log(
     ):
     """
     Send a log message to the client.
-    
+
     IMPORTANT: This is the LOW-LEVEL implementation of client logging.
     Dynamic functions should NOT call this directly! Instead, use atlantis.client_log,
     which is a context-aware wrapper that automatically provides all the necessary
     context variables (request_id, client_id, etc.) to this function.
-    
+
     atlantis.client_log -> utils.client_log -> server.send_client_log
 
     This function can be imported and called from dynamic functions to send
@@ -91,27 +91,39 @@ def client_log(
     if _server_instance is not None:
         try:
             # Enhanced logging for diagnostics
-            logger.info(f"📋 CLIENT LOG DIAGNOSTICS: Routing to client_id={client_id_for_routing}, request_id={request_id}")
-            logger.info(f"📋 SERVER INSTANCE TYPE: {type(_server_instance).__name__}")
-            
-            # Create a task to send the log asynchronously
-            loop = asyncio.get_event_loop()
+            logger.info(f"📋 CLIENT LOG DIAGNOSTICS (AWAITABLE): Routing to client_id={client_id_for_routing}, request_id={request_id}")
+            logger.info(f"📋 SERVER INSTANCE TYPE (AWAITABLE): {type(_server_instance).__name__}")
+
+            # Await the server call to send the log/command and get a response
             if logger_name is None:
                 logger_name = "dynamic_function"
 
             # Pass request_id, client_id_for_routing, AND seq_num to the server's method
             # Pass all parameters including message_type to the server's method
-            task = asyncio.create_task(_server_instance.send_client_log(level, message, logger_name, request_id, client_id_for_routing, seq_num, entry_point_name, message_type))
-            
-            # Log task creation
-            logger.info(f"📋 CLIENT LOG TASK CREATED: {task.get_name()}")
+            # ASSUMPTION: _server_instance.send_client_log is now an async def method
+            # that returns the actual result/status from the client/Atlantis.
+            result = await _server_instance.send_client_log(
+                level,
+                message,
+                logger_name,
+                request_id,
+                client_id_for_routing,
+                seq_num,
+                entry_point_name,
+                message_type
+            )
+
+            logger.info(f"📋 CLIENT LOG/COMMAND (AWAITABLE) SENT, result: {result}")
+            return result # Return the result from the server call
         except Exception as e:
-            logger.error(f"❌ Error scheduling client log task: {e}") # Updated error message clarity
+            logger.error(f"❌ Error in awaitable client_log: {e}")
             logger.error(f"❌ Exception details: {type(e).__name__}: {e}")
             import traceback
             logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            raise # Re-raise the exception so the caller (atlantis.py) can handle it
     else:
-        logger.warning("Cannot send client log: server instance not set")
+        logger.warning("Cannot send client log/command: server instance not set")
+        return None # Or raise an error, depending on desired behavior
 
 
 # --- JSON Formatting Utility --- #

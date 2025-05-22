@@ -19,7 +19,7 @@ _user_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_user
 
 # --- Accessor Functions ---
 
-def client_log(message: Any, level: str = "INFO", message_type: str = "text"):
+async def client_log(message: Any, level: str = "INFO", message_type: str = "text"):
     """Sends a log message back to the requesting client for the current context.
     Includes a sequence number and automatically determines the calling function name.
     Also includes the original entry point function name.
@@ -57,7 +57,8 @@ def client_log(message: Any, level: str = "INFO", message_type: str = "text"):
 
             # Call the underlying utils.client_log function, passing seq num, caller name, entry point name, AND message type.
             # This is the key connection between atlantis.client_log and utils.client_log.
-            log_func(
+            # utils.client_log is now async and returns a result.
+            result = await log_func(
                 message,
                 level=level,
                 seq_num=current_seq,
@@ -65,10 +66,14 @@ def client_log(message: Any, level: str = "INFO", message_type: str = "text"):
                 entry_point_name=entry_point_name, # The original function called
                 message_type=message_type # Type of content (text, json, image, etc.)
             )
+            return result # Return the result from utils.client_log
         except Exception as e:
-            print(f"ERROR: Failed during client_log call (after inspect): {e}")
+            print(f"ERROR: Failed during async client_log call (after inspect): {e}")
+            # Decide if to re-raise or return an error indicator
+            raise
     else:
         print(f"WARNING: client_log called but no logger in context. Message: {message}")
+        return None # Or raise an error
 
 # --- Other Accessors ---
 def get_request_id() -> Optional[str]:
@@ -114,7 +119,7 @@ def reset_context(tokens):
 
 # --- Utility Functions ---
 
-def client_image(image_path: str, level: str = "INFO", image_format: str = "image/png"):
+async def client_image(image_path: str, level: str = "INFO", image_format: str = "image/png"):
     """Sends an image back to the requesting client for the current context.
     This is a wrapper around client_log that automatically loads the image,
     converts it to base64, and sets the appropriate message type.
@@ -135,8 +140,9 @@ def client_image(image_path: str, level: str = "INFO", image_format: str = "imag
     prefixed_data = f"base64:{base64_data}"
 
     # Send to client_log with appropriate message_type
-    client_log(prefixed_data, level=level, message_type=image_format)
-
+    # client_log is now async and returns a result
+    result = await client_log(prefixed_data, level=level, message_type=image_format)
+    return result
 
 def image_to_base64(image_path: str) -> str:
     """Loads an image from the given file path and converts it to a base64 string.
@@ -171,13 +177,12 @@ def image_to_base64(image_path: str) -> str:
         # Re-raise to allow caller to handle
         raise
 
-
-def client_command(command: str, data: Any = None):
+async def client_command(command: str, data: Any = None):
     """Sends a command message with both a command string and optional JSON data back to the requesting client.
     This is a wrapper around client_log that automatically sets the message type to 'command'.
-    
+
     Command messages can be used by the client to trigger specific behaviors or state changes.
-    
+
     Args:
         command: The command string identifier
         data: Optional JSON-serializable data associated with the command (default: None)
@@ -186,26 +191,27 @@ def client_command(command: str, data: Any = None):
     payload = {
         'command': command
     }
-    
+
     # Only include data in payload if it's not None
     if data is not None:
         payload['data'] = data
-        
+
     # Send to client_log with message_type set to 'command'
-    client_log(payload, level="INFO", message_type="command")
+    # client_log is now async and returns a result
+    result = await client_log(payload, level="INFO", message_type="command")
+    return result
 
-
-def client_html(html_content: str, level: str = "INFO"):
+async def client_html(html_content: str, level: str = "INFO"):
     """Sends HTML content back to the requesting client for the current context.
     This is a wrapper around client_log that automatically sets the message type to 'html'.
-    
+
     HTML messages can be rendered by clients that support HTML display.
-    
+
     Args:
         html_content: The HTML content to send
         level: Log level (e.g., "INFO", "DEBUG")
     """
     # Send to client_log with message_type set to 'html'
-    client_log(html_content, level=level, message_type="html")
-
-
+    # client_log is now async and returns a result
+    result = await client_log(html_content, level=level, message_type="html")
+    return result
