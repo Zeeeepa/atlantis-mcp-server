@@ -513,13 +513,13 @@ class DynamicFunctionManager:
         stub = f"""\
 import atlantis
 
-def {name}():
+async def {name}():
     \"\"\"
     This is a placeholder function for '{name}'
     \"\"\"
     print(f"Executing placeholder function: {name}...")
 
-    atlantis.client_log("{name} running")
+    await atlantis.client_log("{name} running")
 
     # Replace this return statement with your function's result
     return f"Placeholder function '{name}' executed successfully."

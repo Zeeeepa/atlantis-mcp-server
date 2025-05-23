@@ -1802,14 +1802,14 @@ class ServiceClient:
             if isinstance(data, dict) and \
                data.get("method") == "atlantis/commandResult" and \
                isinstance(data.get("params"), dict):
-                
+
                 params = data["params"]
                 correlation_id = params.get("correlationId")
 
                 # Ensure self.mcp_server and awaitable_requests exist
                 if hasattr(self.mcp_server, 'awaitable_requests') and \
                    correlation_id and correlation_id in self.mcp_server.awaitable_requests:
-                    
+
                     future = self.mcp_server.awaitable_requests.pop(correlation_id, None)
                     if future and not future.done():
                         if "result" in params:
@@ -1830,10 +1830,10 @@ class ServiceClient:
                         logger.debug(f"📥☁️ Handled atlantis/commandResult for {correlation_id} from cloud. Returning from service_message.")
                         return # IMPORTANT: Return early, this message is handled.
                     elif future and future.done():
-                        logger.warning(f"⚠️☁️ Received cloud commandResult for {correlation_id}, but future was already done. Ignoring and returning.")
+                        logger.warning(f"⚠️☁️ Received cloud commandResult for {correlation_id}, but future was already done. Ignoring.")
                         return
                     else: # Future not found in pop (e.g. already timed out and removed)
-                        logger.warning(f"⚠️☁️ Received cloud commandResult for {correlation_id}, but no active future found (pop returned None). Might have timed out. Ignoring and returning.")
+                        logger.warning(f"⚠️☁️ Received cloud commandResult for {correlation_id}, but no active future found (pop returned None). Might have timed out. Ignoring.")
                         return
                 else:
                     logger.warning(f"⚠️☁️ Received cloud atlantis/commandResult with missing, invalid, or non-pending correlationId: '{correlation_id}'. It will be passed to standard MCP processing if not caught by other logic.")
@@ -1956,29 +1956,40 @@ class ServiceClient:
             return response
 
     async def send_message(self, event: str, data: dict):
-        """Send a message to the cloud server via a named event"""
+        """Send a message to the cloud server via a named event.
+        Raises McpError if sending fails.
+        """
         if not self.sio or not self.is_connected:
-            logger.warning(f"⚠️ ATTEMPTED TO SEND {event} BUT NOT CONNECTED")
-            return False
+            # This check is also present in the caller (send_awaitable_client_command for cloud),
+            # but good to have defense in depth. More importantly, this ensures this method's
+            # contract is to raise on failure, not return False.
+            logger.warning(f"⚠️ ServiceClient: Attempted to send event '{event}' but not connected.")
+            raise McpError(f"ServiceClient not connected. Cannot send event '{event}'.")
 
         try:
-            # IMPORTANT: Always use the original event name for all messages
-            # Cloud server expects 'mcp_notification' for client logs
-            emit_event = event
+            emit_event = event # By default, use the event name as is
+            # Special handling for 'notifications/message' which is how client logs/commands are sent to cloud
+            if event == 'mcp_notification' and data.get('method') == 'notifications/message':
+                # The actual Socket.IO event for the cloud service is 'mcp_notification'
+                # The 'data' payload already contains the 'notifications/message' structure.
+                pass # emit_event is already 'mcp_notification'
 
-            # Special logging for client logs to make debugging easier
-            if event == 'mcp_notification' and isinstance(data, dict) and data.get('method') == 'notifications/message':
-                logger.debug(f"☁️ SENDING CLIENT LOG via {emit_event}: {data.get('method')}")
+            if data.get('method') == 'notifications/message':
+                logger.debug(f"☁️ SENDING CLIENT LOG/COMMAND via {emit_event}: {data.get('params', {}).get('command', data.get('method'))}")
             else:
-                logger.debug(f"☁️ SENDING MESSAGE: {emit_event}")
+                logger.debug(f"☁️ SENDING MCP MESSAGE via {emit_event}: {data.get('method')}")
 
-            # Emit the event with the appropriate name
             await self.sio.emit(emit_event, data, namespace=self.namespace)
+            # If emit succeeds, we don't return True anymore; success is implied by no exception.
 
-            return True
+        except socketio.exceptions.SocketIOError as e:
+            # Catch specific Socket.IO errors during emit (e.g., BadNamespaceError, ConnectionError if not caught by 'is_connected')
+            logger.error(f"❌ ServiceClient: Socket.IO error sending event '{event}': {str(e)}")
+            raise McpError(f"ServiceClient: Socket.IO error sending event '{event}': {str(e)}") from e
         except Exception as e:
-            logger.error(f"❌ ERROR SENDING MESSAGE: {str(e)}")
-            return False
+            # Catch any other unexpected errors during emit
+            logger.error(f"❌ ServiceClient: Unexpected error sending event '{event}': {str(e)}")
+            raise McpError(f"ServiceClient: Unexpected error sending event '{event}': {str(e)}") from e
 
     async def disconnect(self):
         """Disconnect from the cloud server"""
@@ -2063,17 +2074,17 @@ async def handle_websocket(websocket: WebSocket):
                 request_data = json.loads(message)
 
                 # --- Handle Awaitable Command Responses ---
-                # Check if mcp_server is available (it should be if app is running)
-                # and if the message is an awaitable command result.
-                if hasattr(mcp_server, 'awaitable_requests') and \
+                if isinstance(request_data, dict) and \
                    request_data.get("method") == "atlantis/commandResult" and \
                    "params" in request_data:
 
                     params = request_data["params"]
                     correlation_id = params.get("correlationId")
 
-                    if correlation_id and correlation_id in mcp_server.awaitable_requests:
-                        # Pop the future to prevent re-processing if multiple messages arrive (though unlikely for a single future)
+                    # Ensure self.mcp_server and awaitable_requests exist
+                    if hasattr(mcp_server, 'awaitable_requests') and \
+                       correlation_id and correlation_id in mcp_server.awaitable_requests:
+
                         future = mcp_server.awaitable_requests.pop(correlation_id, None)
                         if future and not future.done():
                             if "result" in params:

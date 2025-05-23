@@ -115,7 +115,7 @@ class DynamicServerManager:
                     "args": [
                         "--from",
                         "atlantis-open-weather-mcp",
-                        f"start-{name}-server",  # Create standard start command based on name
+                        f"start-weather-server",  # Create standard start command based on name
                         "--api-key",
                         "<your api key here>"  # Placeholder for API key
                     ]
