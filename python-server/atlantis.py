@@ -1,6 +1,8 @@
 import contextvars
 import inspect # Ensure inspect is imported
 from typing import Callable, Optional, Any
+from utils import client_log as util_client_log # For client_log, client_image, client_html
+from utils import execute_client_command_awaitable # For client_command
 
 # --- Context Variables ---
 # client_log_func: Holds the partially bound client_log function for the current request
@@ -58,13 +60,13 @@ async def client_log(message: Any, level: str = "INFO", message_type: str = "tex
             # Call the underlying utils.client_log function, passing seq num, caller name, entry point name, AND message type.
             # This is the key connection between atlantis.client_log and utils.client_log.
             # utils.client_log is now async and returns a result.
-            result = await log_func(
-                message,
-                level=level,
-                seq_num=current_seq,
-                logger_name=caller_name, # The immediate caller
-                entry_point_name=entry_point_name, # The original function called
-                message_type=message_type # Type of content (text, json, image, etc.)
+            result = await util_client_log(
+                client_id_for_routing=_client_id_var.get(),
+                request_id=_request_id_var.get(),
+                entry_point_name=entry_point_name,
+                message_type=message_type,
+                message=message,
+                level=level
             )
             return result # Return the result from utils.client_log
         except Exception as e:
@@ -177,29 +179,48 @@ def image_to_base64(image_path: str) -> str:
         # Re-raise to allow caller to handle
         raise
 
-async def client_command(command: str, data: Any = None):
-    """Sends a command message with both a command string and optional JSON data back to the requesting client.
-    This is a wrapper around client_log that automatically sets the message type to 'command'.
-
-    Command messages can be used by the client to trigger specific behaviors or state changes.
-
+async def client_command(command: str, data: Any = None) -> Any:
+    """Sends a command message to the client and waits for a specific acknowledgment and result.
+    
+    This function is for commands that require the server to wait for completion
+    or a specific response from the client before proceeding.
+    
     Args:
-        command: The command string identifier
-        data: Optional JSON-serializable data associated with the command (default: None)
+        command: The command string identifier.
+        data: Optional JSON-serializable data associated with the command.
+
+    Returns:
+        The result returned by the client for the command.
+
+    Raises:
+        RuntimeError: If context variables (client_id, request_id) are not set.
+        McpError: Propagated from underlying calls if timeouts or client-side errors occur.
     """
-    # Combine command and data into a single structure
-    payload = {
-        'command': command
-    }
+    # Get necessary context for routing and correlation
+    client_id = _client_id_var.get()
+    request_id = _request_id_var.get()
+    # entry_point_name = _entry_point_name_var.get() # Not strictly needed by execute_client_command_awaitable's signature but good for logging if it were
 
-    # Only include data in payload if it's not None
-    if data is not None:
-        payload['data'] = data
+    if not client_id or not request_id:
+        # This should ideally not happen if called within a proper request context
+        print(f"ERROR: client_command called without client_id or request_id in context. Command: {command}")
+        raise RuntimeError("Client ID or Request ID not found in context for client_command.")
 
-    # Send to client_log with message_type set to 'command'
-    # client_log is now async and returns a result
-    result = await client_log(payload, level="INFO", message_type="command")
-    return result
+    try:
+        print(f"INFO: Atlantis: Sending awaitable command '{command}' for client {client_id}, request {request_id}")
+        # Call the dedicated utility function for awaitable commands
+        result = await execute_client_command_awaitable(
+            client_id_for_routing=client_id,
+            request_id=request_id,
+            command=command,
+            command_data=data
+        )
+        print(f"INFO: Atlantis: Received result for awaitable command '{command}': {result}")
+        return result
+    except Exception as e:
+        print(f"ERROR: Atlantis: Error in client_command for command '{command}': {type(e).__name__} - {e}")
+        # Re-raise the exception (could be McpError from utils/server or other runtime errors)
+        raise
 
 async def client_html(html_content: str, level: str = "INFO"):
     """Sends HTML content back to the requesting client for the current context.

@@ -1,10 +1,10 @@
 import atlantis
 
 
-def ls():
+async def ls():
     """
     List tools and parameters
     """
 
-    atlantis.client_command("\\remote refresh_all")
-    atlantis.client_command("\\tool list")
+    await atlantis.client_command("\\remote refresh_all")
+    await atlantis.client_command("\\tool list")

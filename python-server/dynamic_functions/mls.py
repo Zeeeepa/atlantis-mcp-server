@@ -1,11 +1,11 @@
 import atlantis
 
 
-def mls():
+async def mls():
     """
     List MCP servers
     """
 
-    atlantis.client_command("\\remote refresh_all")
-    atlantis.client_command("\\mcp list")
+    await atlantis.client_command("\\remote refresh_all")
+    await atlantis.client_command("\\mcp list")
 

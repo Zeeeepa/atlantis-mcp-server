@@ -86,7 +86,7 @@ CLOUD_SERVER_PORT = 3010
 CLOUD_SERVER_URL = f"{CLOUD_SERVER_HOST}:{CLOUD_SERVER_PORT}"
 CLOUD_SERVICE_NAMESPACE = "/service"  # Socket.IO namespace for service-to-service communication
 CLOUD_CONNECTION_RETRY_SECONDS = 5  # Initial delay in seconds
-CLOUD_CONNECTION_MAX_RETRIES = 10  # Maximum number of retries before giving up (None for infinite)
+CLOUD_CONNECTION_MAX_RETRIES = None  # Maximum number of retries before giving up (None for infinite)
 CLOUD_CONNECTION_MAX_BACKOFF_SECONDS = 15  # Maximum delay for exponential backoff
 
 
@@ -252,6 +252,9 @@ class DynamicAdditionServer(Server):
         super().__init__("Dynamic Function Server")
         self.websocket_connections = set()  # Store active WebSocket connections
         self.service_connections = {} # Store active Service connections (e.g. cloud)
+        self.awaitable_requests: Dict[str, asyncio.Future] = {} # For tracking awaitable commands
+        self.awaitable_request_timeout: float = SERVER_REQUEST_TIMEOUT # Timeout for these commands
+
         # TODO: Add prompts and resources
         self._cached_tools: Optional[List[Tool]] = None # Cache for tool list
         self._last_functions_dir_mtime: float = 0.0 # Timestamp for cache invalidation
@@ -306,6 +309,102 @@ class DynamicAdditionServer(Server):
             "capabilities": params.get("capabilities"),
             "serverInfo": {"name": self.name, "version": SERVER_VERSION}
         }
+
+    async def send_awaitable_client_command(self,
+                                          client_id_for_routing: str,
+                                          request_id: str, # Original MCP request ID for client context
+                                          command: str, # The command string for the client
+                                          command_data: Optional[Any] = None # Optional data for the command
+                                          ) -> Any:
+        """Sends a command to a specific client and waits for a response with a correlation ID.
+
+        Args:
+            client_id_for_routing: The ID of the client to send the command to.
+            request_id: The original MCP request ID, for client-side context.
+            command: The command identifier string.
+            command_data: Optional data payload for the command.
+
+        Returns:
+            The result from the client's command execution.
+
+        Raises:
+            McpError: If the client response times out or the client returns an error.
+            Various other exceptions if sending or future handling fails.
+        """
+        correlation_id = str(uuid.uuid4())
+        future = asyncio.get_event_loop().create_future()
+        self.awaitable_requests[correlation_id] = future
+
+        logger.info(f"⏳ Preparing awaitable command '{command}' for client {client_id_for_routing} (correlationId: {correlation_id}, MCP_reqId: {request_id})")
+
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "atlantis/executeAwaitableCommand", # Distinct method for client to identify
+            "params": {
+                "correlationId": correlation_id,
+                "command": command,
+                "data": command_data,
+                "requestId": request_id # Original request_id for client context
+            }
+        }
+        payload_json = json.dumps(payload)
+
+        global client_connections # Access the global client connection tracking
+
+        if not client_id_for_routing or client_id_for_routing not in client_connections:
+            self.awaitable_requests.pop(correlation_id, None) # Clean up future
+            logger.error(f"❌ Cannot send awaitable command '{command}': Client ID '{client_id_for_routing}' not found or invalid.")
+            raise McpError(f"Client ID '{client_id_for_routing}' not found for awaitable command.")
+
+        client_info = client_connections[client_id_for_routing]
+        client_type = client_info.get("type")
+        connection = client_info.get("connection")
+
+        try:
+            if client_type == "websocket" and connection:
+                await connection.send_text(payload_json)
+                logger.info(f"✉️ Sent awaitable command '{command}' to WebSocket client {client_id_for_routing} (correlationId: {correlation_id})")
+            elif client_type == "cloud" and connection and hasattr(connection, 'is_connected') and connection.is_connected:
+                # Cloud clients get it wrapped in a 'notifications/message' structure, sent via 'mcp_notification' event
+                cloud_notification_params = {
+                    "messageType": "command",
+                    "requestId": request_id,       # Original MCP request_id for cloud client context
+                    "correlationId": correlation_id, # The ID for awaiting the response
+                    "command": command,            # The actual command string
+                    "data": command_data           # Associated data for the command
+                }
+                cloud_wrapper_payload = {
+                    "jsonrpc": "2.0",
+                    "method": "notifications/message",
+                    "params": cloud_notification_params
+                }
+                await connection.send_message('mcp_notification', cloud_wrapper_payload)
+                logger.info(f"☁️ Sent awaitable command '{command}' (as flat notifications/message) to cloud client {client_id_for_routing} (correlationId: {correlation_id}) via 'mcp_notification' event")
+            else:
+                self.awaitable_requests.pop(correlation_id, None) # Clean up future
+                logger.error(f"❌ Cannot send awaitable command '{command}': Client '{client_id_for_routing}' has no valid/active connection.")
+                raise McpError(f"Client '{client_id_for_routing}' has no active connection for awaitable command.")
+
+            # Wait for the future to be resolved
+            logger.debug(f"⏳ Waiting for response for command '{command}' (correlationId: {correlation_id}) timeout: {self.awaitable_request_timeout}s")
+            result = await asyncio.wait_for(future, timeout=self.awaitable_request_timeout)
+            logger.info(f"✅ Received response for awaitable command '{command}' (correlationId: {correlation_id})")
+            return result
+        except asyncio.TimeoutError:
+            logger.error(f"⏰ Timeout waiting for response for command '{command}' (correlationId {correlation_id}) from client {client_id_for_routing}")
+            self.awaitable_requests.pop(correlation_id, None)
+            raise McpError(f"Timeout waiting for client response for command: {command} (correlationId: {correlation_id})")
+        except Exception as e:
+            logger.error(f"❌ Error during awaitable command '{command}' processing (correlationId {correlation_id}): {type(e).__name__} - {e}")
+            self.awaitable_requests.pop(correlation_id, None) # Ensure cleanup
+            if isinstance(e, McpError):
+                raise
+            raise McpError(f"Error processing awaitable command '{command}': {e}")
+        finally:
+            # Final cleanup, though most paths should handle it.
+            if correlation_id in self.awaitable_requests:
+                 logger.warning(f"🧹 Final cleanup: Future for {correlation_id} was still in awaitable_requests.")
+                 self.awaitable_requests.pop(correlation_id, None)
 
     async def _get_tools_list(self, caller_context: str = "unknown") -> list[Tool]:
         """Core logic to return a list of available tools"""
@@ -1010,7 +1109,6 @@ class DynamicAdditionServer(Server):
             logger.debug(f"Log notification error details: {traceback.format_exc()}")
             # We intentionally don't re-raise here
 
-
     async def _execute_tool(self, name: str, args: dict, client_id: str = None, request_id: str = None, user: str = None) -> list[TextContent]:
         """Core logic to handle a tool call. Ensures result is List[TextContent(type='text')]"""
         logger.info(f"🔧 EXECUTING TOOL: {name}")
@@ -1136,7 +1234,7 @@ class DynamicAdditionServer(Server):
                         raise ValueError("Failed to get server name")
                 except Exception as e:
                     # If parsing fails completely, we need an explicit name
-                    logger.warning(f"Could not parse config as JSON: {str(e)}")
+                    logger.warning(f"Could not parse config as JSON: {e}")
                     # Check if name was provided directly
                     server_name = args.get('name')
                     if not server_name:
@@ -1399,7 +1497,6 @@ class DynamicAdditionServer(Server):
             except Exception as e:
                 logger.warning(f"Failed to send notifications/tools/list_changed notification to client {client_id}: {e}")
                 # Consider removing the client connection if sending fails repeatedly?
-
 
 async def get_all_tools_for_response(server: 'DynamicAdditionServer', caller_context: str) -> List[Dict[str, Any]]:
     """
@@ -1700,6 +1797,48 @@ class ServiceClient:
         @self.sio.event(namespace=self.namespace)
         async def service_message(data):
             logger.debug(f"☁️ RAW RECEIVED SERVICE MESSAGE: {data}")
+
+            # --- Handle Awaitable Command Responses from Cloud Client ---
+            if isinstance(data, dict) and \
+               data.get("method") == "atlantis/commandResult" and \
+               isinstance(data.get("params"), dict):
+                
+                params = data["params"]
+                correlation_id = params.get("correlationId")
+
+                # Ensure self.mcp_server and awaitable_requests exist
+                if hasattr(self.mcp_server, 'awaitable_requests') and \
+                   correlation_id and correlation_id in self.mcp_server.awaitable_requests:
+                    
+                    future = self.mcp_server.awaitable_requests.pop(correlation_id, None)
+                    if future and not future.done():
+                        if "result" in params:
+                            logger.info(f"✅☁️ Received cloud result for awaitable command (correlationId: {correlation_id})")
+                            future.set_result(params["result"])
+                        elif "error" in params:
+                            client_error_details = params["error"] # This could be a string from the cloud
+                            logger.error(f"❌☁️ Received cloud error for awaitable command (correlationId: {correlation_id}): {client_error_details}")
+                            if isinstance(client_error_details, Exception):
+                                future.set_exception(client_error_details)
+                            elif isinstance(client_error_details, dict) and "message" in client_error_details:
+                                future.set_exception(McpError(client_error_details.get("message", "Unknown cloud error")))
+                            else: # Handle string error or other non-Exception types
+                                future.set_exception(McpError(f"Cloud client error: {str(client_error_details)}"))
+                        else:
+                            logger.warning(f"⚠️☁️ Received cloud commandResult for {correlation_id} without 'result' or 'error'. Treating as error.")
+                            future.set_exception(McpError(f"Malformed commandResult from cloud client for {correlation_id}"))
+                        logger.debug(f"📥☁️ Handled atlantis/commandResult for {correlation_id} from cloud. Returning from service_message.")
+                        return # IMPORTANT: Return early, this message is handled.
+                    elif future and future.done():
+                        logger.warning(f"⚠️☁️ Received cloud commandResult for {correlation_id}, but future was already done. Ignoring and returning.")
+                        return
+                    else: # Future not found in pop (e.g. already timed out and removed)
+                        logger.warning(f"⚠️☁️ Received cloud commandResult for {correlation_id}, but no active future found (pop returned None). Might have timed out. Ignoring and returning.")
+                        return
+                else:
+                    logger.warning(f"⚠️☁️ Received cloud atlantis/commandResult with missing, invalid, or non-pending correlationId: '{correlation_id}'. It will be passed to standard MCP processing if not caught by other logic.")
+            # --- End Awaitable Command Response Handling ---
+
             # Check if this is an MCP JSON-RPC request
             if isinstance(data, dict) and 'jsonrpc' in data and 'method' in data:
                 # This is an MCP JSON-RPC request
@@ -1921,11 +2060,51 @@ async def handle_websocket(websocket: WebSocket):
 
             try:
                 # Parse the message as JSON
-                request = json.loads(message)
-                logger.debug(f"📥 Received: {request}")
+                request_data = json.loads(message)
 
+                # --- Handle Awaitable Command Responses ---
+                # Check if mcp_server is available (it should be if app is running)
+                # and if the message is an awaitable command result.
+                if hasattr(mcp_server, 'awaitable_requests') and \
+                   request_data.get("method") == "atlantis/commandResult" and \
+                   "params" in request_data:
+
+                    params = request_data["params"]
+                    correlation_id = params.get("correlationId")
+
+                    if correlation_id and correlation_id in mcp_server.awaitable_requests:
+                        # Pop the future to prevent re-processing if multiple messages arrive (though unlikely for a single future)
+                        future = mcp_server.awaitable_requests.pop(correlation_id, None)
+                        if future and not future.done():
+                            if "result" in params:
+                                logger.info(f"✅ Received result for awaitable command (correlationId: {correlation_id})")
+                                future.set_result(params["result"])
+                            elif "error" in params:
+                                client_error_details = params["error"]
+                                logger.error(f"❌ Received error from client for awaitable command (correlationId: {correlation_id}): {client_error_details}")
+                                future.set_exception(McpError(f"Client error for command (correlationId: {correlation_id}): {client_error_details}"))
+                            else:
+                                logger.warning(f"⚠️ Received commandResult for {correlation_id} without 'result' or 'error' key. Treating as error.")
+                                future.set_exception(McpError(f"Malformed commandResult from client for {correlation_id}"))
+                            # This message is handled, continue to next message in the loop
+                            logger.debug(f"📥 Handled atlantis/commandResult for {correlation_id}, continuing WebSocket loop.")
+                            continue
+                        elif future and future.done():
+                            # Future was already done (e.g., timed out and handled by send_awaitable_client_command)
+                            logger.warning(f"⚠️ Received commandResult for {correlation_id}, but future was already done. Ignoring.")
+                            continue
+                        else:
+                            # Future not found in pop, might have timed out and been removed by send_awaitable_client_command's timeout logic
+                            logger.warning(f"⚠️ Received commandResult for {correlation_id}, but no active future found (pop returned None). Might have timed out. Ignoring.")
+                            continue
+                    else:
+                        # No correlationId or not in awaitable_requests, could be a stray message or an issue.
+                        logger.warning(f"⚠️ Received atlantis/commandResult without a valid/pending correlationId: '{correlation_id}'. Passing to standard processing just in case, but this is unusual.")
+                # --- End Awaitable Command Response Handling ---
+
+                logger.debug(f"📥 Received (for MCP processing): {request_data}")
                 # Process the request using our MCP server (include client_id)
-                response = await process_mcp_request(mcp_server, request, client_id)
+                response = await process_mcp_request(mcp_server, request_data, client_id)
 
                 # Send the response back to the client
                 #logger.debug(f"📤 Sending: {response}")
@@ -2271,4 +2450,3 @@ if __name__ == "__main__":
         # Use the service_name from pid_manager, or default to 'MCP' if not available
         service_name = pid_manager.service_name if pid_manager.service_name else 'MCP'
         logger.info(f"👋 SERVER '{service_name}' SHUTDOWN COMPLETE")
-

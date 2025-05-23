@@ -1,10 +1,10 @@
 import atlantis
 
 
-def ll():
+async def ll():
     """
     List tools by last modified date
     """
 
-    atlantis.client_command("\\remote refresh_all")
-    atlantis.client_command("\\tool date")
+    await atlantis.client_command("\\remote refresh_all")
+    await atlantis.client_command("\\tool date")

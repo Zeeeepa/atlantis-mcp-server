@@ -5,11 +5,11 @@ import logging
 import json
 import asyncio
 from state import logger
+from typing import Any, Optional
 
 # ANSI escape codes for colors
 PINK = "\x1b[95m"  # Added Pink
 RESET = "\x1b[0m"
-
 
 
 """
@@ -17,8 +17,6 @@ Utility functions available for dynamic functions to use.
 Provides easy access to client-side logging and other shared functionality.
 """
 
-import logging
-from typing import Any
 
 # Empty function for filename cleaning - placeholder for future implementation
 def clean_filename(name: str) -> str:
@@ -125,6 +123,54 @@ async def client_log(
         logger.warning("Cannot send client log/command: server instance not set")
         return None # Or raise an error, depending on desired behavior
 
+async def execute_client_command_awaitable(
+    client_id_for_routing: str,
+    request_id: str, # Original MCP request ID for client context
+    command: str, # The command string for the client
+    command_data: Optional[Any] = None # Optional data for the command
+    ) -> Any:
+    """
+    Sends a command to a specific client via the server and waits for a dedicated response.
+    This is a low-level utility intended to be called by atlantis.client_command for awaitable operations.
+    It calls the server's 'send_awaitable_client_command' method.
+
+    Args:
+        client_id_for_routing: The ID of the client to send the command to.
+        request_id: The original MCP request ID, for client-side context.
+        command: The command identifier string.
+        command_data: Optional data payload for the command.
+
+    Returns:
+        The result from the client's command execution, as returned by the server.
+
+    Raises:
+        McpError: If the server call fails, client response times out, or client returns an error.
+        RuntimeError: If the server instance is not available or doesn't support awaitable commands.
+    """
+    global _server_instance
+    if _server_instance is None:
+        logger.error("❌ Cannot execute awaitable client command: server instance not set.")
+        raise RuntimeError("Server instance not available for awaitable command.")
+
+    if not hasattr(_server_instance, 'send_awaitable_client_command'):
+        logger.error("❌ Server instance does not have 'send_awaitable_client_command' method. This is required for true awaitable commands.")
+        raise RuntimeError("Server instance is outdated or incorrect for awaitable commands.")
+
+    try:
+        logger.info(f"🚀 Utils: Relaying dedicated awaitable command '{command}' to server for client {client_id_for_routing}")
+        # This specifically calls the method designed for awaitable command-response cycles
+        result = await _server_instance.send_awaitable_client_command(
+            client_id_for_routing=client_id_for_routing,
+            request_id=request_id,
+            command=command,
+            command_data=command_data
+        )
+        logger.info(f"✅ Utils: Received result for dedicated awaitable command '{command}' from server.")
+        return result
+    except Exception as e:
+        # Errors (including McpError for timeouts/client errors from server's send_awaitable_client_command) will propagate
+        logger.error(f"❌ Utils: Error relaying dedicated awaitable command '{command}' or receiving result: {type(e).__name__} - {e}")
+        raise # Re-raise the exception for atlantis.py to handle or propagate further
 
 # --- JSON Formatting Utility --- #
 
