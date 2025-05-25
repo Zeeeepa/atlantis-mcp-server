@@ -467,6 +467,16 @@ class DynamicFunctionManager:
                 docstring = ast.get_docstring(func_def_node)
                 input_schema = {"type": "object"} # Default empty schema
 
+                # Extract decorators
+                decorator_names = []
+                if func_def_node.decorator_list:
+                    for decorator_node in func_def_node.decorator_list:
+                        if isinstance(decorator_node, ast.Name):
+                            decorator_names.append(decorator_node.id)
+                        # elif isinstance(decorator_node, ast.Call): # For decorators with arguments
+                        #     if isinstance(decorator_node.func, ast.Name):
+                        #         decorator_names.append(decorator_node.func.id) # Just using the name for now
+
                 # Generate schema from arguments
                 try:
                      schema_parts = self._ast_arguments_to_json_schema(func_def_node.args, docstring)
@@ -479,7 +489,8 @@ class DynamicFunctionManager:
                 function_info = {
                     "name": func_name,
                     "description": docstring or "(No description provided)", # Provide default
-                    "inputSchema": input_schema
+                    "inputSchema": input_schema,
+                    "decorators": decorator_names # Add extracted decorators here
                 }
                 return True, None, function_info
             else:

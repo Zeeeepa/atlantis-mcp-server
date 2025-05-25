@@ -650,6 +650,10 @@ class DynamicAdditionServer(Server):
                          tool_description = function_info.get('description', f"Dynamic function '{tool_name}'")
                          tool_input_schema = function_info.get('inputSchema', {"type": "object", "properties": {}})
                          tool_annotations["validationStatus"] = "VALID"
+                         # Add decorator info if present (opt-in)
+                         decorators_from_info = function_info.get("decorators")
+                         if decorators_from_info: # Only add if list is not None and not empty
+                             tool_annotations["decorators"] = decorators_from_info
                     elif is_valid and not function_info:
                          # Valid syntax but failed to extract info (should ideally not happen)
                          tool_description = f"Dynamic function: {tool_name_from_file} (Details unavailable)"
@@ -1967,7 +1971,6 @@ class ServiceClient:
             raise McpError(f"ServiceClient not connected. Cannot send event '{event}'.")
 
         try:
-            emit_event = event # By default, use the event name as is
             # Special handling for 'notifications/message' which is how client logs/commands are sent to cloud
             if event == 'mcp_notification' and data.get('method') == 'notifications/message':
                 # The actual Socket.IO event for the cloud service is 'mcp_notification'
@@ -1975,11 +1978,11 @@ class ServiceClient:
                 pass # emit_event is already 'mcp_notification'
 
             if data.get('method') == 'notifications/message':
-                logger.debug(f"☁️ SENDING CLIENT LOG/COMMAND via {emit_event}: {data.get('params', {}).get('command', data.get('method'))}")
+                logger.debug(f"☁️ SENDING CLIENT LOG/COMMAND via {event}: {data.get('params', {}).get('command', data.get('method'))}")
             else:
-                logger.debug(f"☁️ SENDING MCP MESSAGE via {emit_event}: {data.get('method')}")
+                logger.debug(f"☁️ SENDING MCP MESSAGE via {event}: {data.get('method')}")
 
-            await self.sio.emit(emit_event, data, namespace=self.namespace)
+            await self.sio.emit(event, data, namespace=self.namespace)
             # If emit succeeds, we don't return True anymore; success is implied by no exception.
 
         except socketio.exceptions.SocketIOError as e:
