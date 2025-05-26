@@ -1004,7 +1004,6 @@ class DynamicAdditionServer(Server):
         self._last_servers_dir_mtime = server_mtime
         # First identify running vs. non-running servers using proper accessor
         self._last_active_server_keys = set(await self.server_manager.get_running_servers()) # Store active server keys
-        logger.info(f"💾 TOOL LIST (functions ts: {current_mtime}; servers ts: {server_mtime})")
 
         return tools_list
 
