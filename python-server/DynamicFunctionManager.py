@@ -43,6 +43,11 @@ import utils  # Utility module for dynamic functions
 # Directory to store dynamic function files
 PARENT_PACKAGE_NAME = "dynamic_functions"
 
+# --- Identity Decorator Definition ---
+def _mcp_identity_decorator(f):
+    """A simple identity decorator that returns the function unchanged. Used as a placeholder for @chat, @public, etc."""
+    return f
+
 class DynamicFunctionManager:
     def __init__(self, functions_dir):
         # State that was previously global
@@ -721,6 +726,19 @@ async def {name}():
                 try:
                     module = importlib.util.module_from_spec(spec)
                     sys.modules[module_name] = module # Add to sys.modules before exec
+
+                    # Inject 'atlantis' implementation into the module's scope
+                    if hasattr(self, 'atlantis_impl'):
+                        setattr(module, 'atlantis', self.atlantis_impl)
+                    else:
+                        logger.warning("Atlantis implementation (self.atlantis_impl) not found during module injection.")
+
+                    # Inject identity decorators for known decorator names
+                    # This makes @chat, @public, etc., resolvable during module load
+                    module.__dict__['chat'] = _mcp_identity_decorator
+                    module.__dict__['public'] = _mcp_identity_decorator
+                    # Add other known decorator names here if they arise
+
                     spec.loader.exec_module(module)
                 except Exception as load_err:
                     if module_name in sys.modules:
