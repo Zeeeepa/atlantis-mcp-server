@@ -84,7 +84,7 @@ from state import (
 CLOUD_SERVER_HOST = "ws.projectatlantis.ai"
 CLOUD_SERVER_PORT = 3010
 CLOUD_SERVER_URL = f"{CLOUD_SERVER_HOST}:{CLOUD_SERVER_PORT}"
-CLOUD_SERVICE_NAMESPACE = "/service"  # Socket.IO namespace for service-to-service communication
+CLOUD_SERVICE_NAMESPACE = "/"  # Socket.IO namespace for service-to-service communication
 CLOUD_CONNECTION_RETRY_SECONDS = 5  # Initial delay in seconds
 CLOUD_CONNECTION_MAX_RETRIES = None  # Maximum number of retries before giving up (None for infinite)
 CLOUD_CONNECTION_MAX_BACKOFF_SECONDS = 15  # Maximum delay for exponential backoff
