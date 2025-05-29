@@ -40,6 +40,14 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from mcp.shared.exceptions import McpError # <--- ADD THIS IMPORT
 
+# Import shared state and utilities
+from state import (
+    logger, # Use the configured logger from state
+    HOST, PORT,
+    FUNCTIONS_DIR, SERVERS_DIR, is_shutting_down,
+    SERVER_REQUEST_TIMEOUT
+)
+
 # --- Add dynamic_functions parent to sys.path for imports ---
 import sys
 import os
@@ -72,13 +80,6 @@ except Exception as e:
 # Import Uvicorn for running the server
 import uvicorn
 
-# Import shared state and utilities
-from state import (
-    logger, # Use the configured logger from state
-    HOST, PORT,
-    FUNCTIONS_DIR, SERVERS_DIR, is_shutting_down,
-    SERVER_REQUEST_TIMEOUT
-)
 
 # Cloud server configuration
 CLOUD_SERVER_HOST = "ws.projectatlantis.ai"
