@@ -10,6 +10,7 @@ import signal
 import sys
 import time
 import random
+import socket
 import socketio
 import argparse
 import uuid
@@ -20,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import datetime
 
 # Version
-SERVER_VERSION = "0.1.0"
+SERVER_VERSION = "2.0.0"
 
 from mcp.server import Server
 
@@ -294,6 +295,8 @@ class DynamicAdditionServer(Server):
 
     # Initialization for function discovery
     async def initialize(self, params={}):
+
+
         """Initialize the server, sending a toolsList notification with initial tools"""
         logger.info(f"{CYAN}🔧 === ENTERING SERVER INITIALIZE METHOD ==={RESET}")
         logger.info(f"🚀 Server initialized with version {SERVER_VERSION}")
@@ -1639,6 +1642,7 @@ class ServiceClient:
         """Maintains the connection to the cloud server with retries"""
         while self.connection_active and not is_shutting_down:
             logger.info("☁️ Starting _maintain_connection loop iteration") # DEBUG ADDED
+            # logger.info(f"☁️ Socket.IO version: {socketio.__version__}") # Commented out for debugging freeze
             try:
                 # Create a new Socket.IO client instance
                 self.sio = socketio.AsyncClient()
@@ -1649,7 +1653,7 @@ class ServiceClient:
                 logger.info(f"☁️ Attempting connection to cloud server (attempt {self.retry_count + 1})")
 
                 # Connect with authentication data including hostname
-                import socket
+
                 hostname = socket.gethostname()
                 await self.sio.connect(
                     self.server_url,
@@ -2389,6 +2393,12 @@ if __name__ == "__main__":
     # Set up the event loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+
+    logger.info(f"")
+    logger.info(f"{BRIGHT_WHITE}================{RESET}")
+    logger.info(f"{BRIGHT_WHITE}REMOTE MCP {SERVER_VERSION}{RESET}")
+    logger.info(f"{BRIGHT_WHITE}================{RESET}")
+    logger.info(f"")
 
     # Initialize the MCP server
     logger.info(f"{BRIGHT_WHITE}🔧 === CALLING SERVER INITIALIZE FROM MAIN ==={RESET}")
