@@ -1757,6 +1757,9 @@ class ServiceClient:
             logger.info(f"{BOLD}{BRIGHT_WHITE}🚀✨🎉 CONNECTED TO ATLANTIS CLOUD SERVER! 🎉✨🚀{RESET}")
             logger.info(f"{BOLD}{CYAN}=================================================={RESET}")
             logger.info("") # Blank line after
+            logger.info(f"{BOLD}{BRIGHT_WHITE}REMOTE NAME: {self.serviceName}{RESET}")
+            logger.info("") # Blank line after
+            logger.info("") # Blank line after
 
             # --- ADDED: Register this connection with the MCP server ---
             cloud_sid = self.sio.sid if self.sio else 'unknown_sid' # Get Socket.IO session ID if available
