@@ -658,6 +658,10 @@ class DynamicAdditionServer(Server):
                          decorators_from_info = function_info.get("decorators")
                          if decorators_from_info: # Only add if list is not None and not empty
                              tool_annotations["decorators"] = decorators_from_info
+                         # Add app_name to annotations if present in function_info
+                         app_name_from_info = function_info.get("app_name")
+                         if app_name_from_info is not None:
+                             tool_annotations["app_name"] = app_name_from_info
                     elif is_valid and not function_info:
                          # Valid syntax but failed to extract info (should ideally not happen)
                          tool_description = f"Dynamic function: {tool_name_from_file} (Details unavailable)"
@@ -692,7 +696,7 @@ class DynamicAdditionServer(Server):
                         name=tool_name,
                         description=tool_description,
                         inputSchema=tool_input_schema,
-                        annotations=tool_annotations
+                        annotations=tool_annotations # app_name is now inside annotations
                     )
                     tools_list.append(tool_obj)
                     logger.debug(f"📝 Added dynamic tool: {tool_name}, valid: {is_valid}")

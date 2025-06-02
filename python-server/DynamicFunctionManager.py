@@ -48,6 +48,22 @@ def _mcp_identity_decorator(f):
     """A simple identity decorator that returns the function unchanged. Used as a placeholder for @chat, @public, etc."""
     return f
 
+# --- App Decorator Definition ---
+def app(name: str):
+    """Decorator to associate a dynamic function with an application name.
+    Usage: @app(name="your_app_name")
+    """
+    def decorator(func_to_decorate):
+        setattr(func_to_decorate, '_app_name', name)
+        # functools.update_wrapper(decorator, func_to_decorate) # Not strictly needed for AST parsing but good practice
+        return func_to_decorate
+    return decorator
+
+# Make the app decorator available for dynamic functions to import/use.
+# This is a simplified way; a more robust way might involve adding it to a shared module
+# that dynamic functions can import from, or injecting it into their global scope upon loading.
+# For now, this definition here allows _code_validate_syntax to recognize it by name 'app'.
+
 class DynamicFunctionManager:
     def __init__(self, functions_dir):
         # State that was previously global
@@ -472,15 +488,45 @@ class DynamicFunctionManager:
                 docstring = ast.get_docstring(func_def_node)
                 input_schema = {"type": "object"} # Default empty schema
 
-                # Extract decorators
+                # Extract decorators and app_name
                 decorator_names = []
+                app_name_from_decorator = None # Initialize app_name
                 if func_def_node.decorator_list:
                     for decorator_node in func_def_node.decorator_list:
-                        if isinstance(decorator_node, ast.Name):
+                        if isinstance(decorator_node, ast.Name): # e.g. @public
                             decorator_names.append(decorator_node.id)
-                        # elif isinstance(decorator_node, ast.Call): # For decorators with arguments
-                        #     if isinstance(decorator_node.func, ast.Name):
-                        #         decorator_names.append(decorator_node.func.id) # Just using the name for now
+                        elif isinstance(decorator_node, ast.Call): # e.g. @app(name="foo") or @app("foo")
+                            if isinstance(decorator_node.func, ast.Name):
+                                decorator_func_name = decorator_node.func.id
+                                if decorator_func_name == 'app':
+                                    # Extract 'name' argument from @app(name="...") or @app("...")
+                                    if decorator_node.keywords: # Check keyword arguments like name="foo"
+                                        for kw in decorator_node.keywords:
+                                            if kw.arg == 'name' and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                                                if app_name_from_decorator is not None:
+                                                    logger.warning(f"⚠️ Multiple @app name specifications for {func_def_node.name}. Using first one: {app_name_from_decorator}")
+                                                else:
+                                                    app_name_from_decorator = kw.value.value
+                                    # Positional arguments like @app("foo")
+                                    if not app_name_from_decorator and decorator_node.args:
+                                        if len(decorator_node.args) == 1 and isinstance(decorator_node.args[0], ast.Constant) and isinstance(decorator_node.args[0].value, str):
+                                            if app_name_from_decorator is not None: # Should not happen if logic is correct, but for safety
+                                                logger.warning(f"⚠️ Multiple @app name specifications for {func_def_node.name}. Using first one: {app_name_from_decorator}")
+                                            else:
+                                                app_name_from_decorator = decorator_node.args[0].value
+                                        else:
+                                            logger.warning(f"⚠️ @app decorator for {func_def_node.name} has unexpected positional arguments. Expected a single string.")
+                                    
+                                    if app_name_from_decorator is None:
+                                        logger.warning(f"⚠️ @app decorator used on {func_def_node.name} but 'name' argument was not found or not a string.")
+                                    # We don't add 'app' to decorator_names, as it's handled separately by app_name_from_decorator
+                                else: # It's a call decorator but not 'app'
+                                    decorator_names.append(decorator_func_name)
+                            else: # Decorator call but func is not a simple Name (e.g. @obj.deco())
+                                # Try to reconstruct its name, could be complex e.g. ast.Attribute
+                                # For now, we'll log and skip complex decorator calls for simplicity
+                                logger.debug(f"Skipping complex decorator call structure: {ast.dump(decorator_node.func)}")
+                        # Skipping other decorator types for now (e.g. ast.Attribute)
 
                 # Generate schema from arguments
                 try:
@@ -495,7 +541,8 @@ class DynamicFunctionManager:
                     "name": func_name,
                     "description": docstring or "(No description provided)", # Provide default
                     "inputSchema": input_schema,
-                    "decorators": decorator_names # Add extracted decorators here
+                    "decorators": decorator_names, # Add extracted decorators here
+                    "app_name": app_name_from_decorator # Add extracted app_name
                 }
                 return True, None, function_info
             else:
