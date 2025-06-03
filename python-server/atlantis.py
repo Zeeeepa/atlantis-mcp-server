@@ -3,6 +3,7 @@ import inspect # Ensure inspect is imported
 from typing import Callable, Optional, Any
 from utils import client_log as util_client_log # For client_log, client_image, client_html
 from utils import execute_client_command_awaitable # For client_command
+import uuid
 
 # --- Context Variables ---
 # client_log_func: Holds the partially bound client_log function for the current request
@@ -178,6 +179,118 @@ def image_to_base64(image_path: str) -> str:
         print(f"Error converting image to base64: {e}")
         # Re-raise to allow caller to handle
         raise
+
+async def stream_start() -> str:
+    """Starts a new stream and returns a unique stream_id.
+    Sends a 'stream_start' message to the client.
+    """
+    stream_id_to_send = str(uuid.uuid4())
+    actual_client_id = _client_id_var.get() # Get the actual client ID from context
+    
+    request_id = _request_id_var.get()
+    entry_point_name = _entry_point_name_var.get() or "unknown_entry_point"
+    
+    caller_name = "unknown_caller"
+    try:
+        frame = inspect.currentframe()
+        if frame and frame.f_back:
+            caller_name = frame.f_back.f_code.co_name
+        del frame
+    except Exception as inspect_err:
+        print(f"WARNING: Could not inspect caller frame for stream_start: {inspect_err}")
+
+    current_seq = _log_seq_num_var.get()
+    _log_seq_num_var.set(current_seq + 1)
+
+    try:
+        await util_client_log(
+            message={"status": "started"}, 
+            level="INFO",
+            logger_name=caller_name,
+            request_id=request_id,
+            client_id_for_routing=actual_client_id, # Route using actual client_id
+            seq_num=current_seq,
+            entry_point_name=entry_point_name,
+            message_type='stream_start',
+            stream_id=stream_id_to_send # Pass the generated stream_id separately
+        )
+        return stream_id_to_send # Return the generated stream_id to the caller
+    except Exception as e:
+        print(f"ERROR: Failed during async stream_start call: {e}")
+        raise
+
+async def stream(message: str, stream_id_param: str):
+    """Sends a stream message snippet back to the client using a provided stream_id.
+    """
+    actual_client_id = _client_id_var.get() # Get the actual client ID from context
+    request_id = _request_id_var.get()
+    entry_point_name = _entry_point_name_var.get() or "unknown_entry_point"
+    
+    caller_name = "unknown_caller" 
+    try:
+        frame = inspect.currentframe()
+        if frame and frame.f_back:
+            caller_name = frame.f_back.f_code.co_name
+        del frame
+    except Exception as inspect_err:
+        print(f"WARNING: Could not inspect caller frame for stream: {inspect_err}")
+
+    current_seq = _log_seq_num_var.get()
+    _log_seq_num_var.set(current_seq + 1)
+
+    try:
+        result = await util_client_log(
+            message=message,
+            level="INFO", 
+            logger_name=caller_name,
+            request_id=request_id,
+            client_id_for_routing=actual_client_id, # Route using actual client_id
+            seq_num=current_seq,
+            entry_point_name=entry_point_name,
+            message_type='stream',
+            stream_id=stream_id_param # Pass the provided stream_id separately
+        )
+        return result
+    except Exception as e:
+        print(f"ERROR: Failed during async stream call: {e}")
+        raise
+
+async def stream_end(stream_id_param: str):
+    """Sends a stream_end message to the client, indicating the end of a stream, using a provided stream_id.
+    """
+    actual_client_id = _client_id_var.get() # Get the actual client ID from context
+    request_id = _request_id_var.get()
+    entry_point_name = _entry_point_name_var.get() or "unknown_entry_point"
+    
+    caller_name = "unknown_caller"
+    try:
+        frame = inspect.currentframe()
+        if frame and frame.f_back:
+            caller_name = frame.f_back.f_code.co_name
+        del frame
+    except Exception as inspect_err:
+        print(f"WARNING: Could not inspect caller frame for stream_end: {inspect_err}")
+
+    current_seq = _log_seq_num_var.get()
+    _log_seq_num_var.set(current_seq + 1)
+
+    try:
+        result = await util_client_log(
+            message="", 
+            level="INFO",
+            logger_name=caller_name,
+            request_id=request_id,
+            client_id_for_routing=actual_client_id, # Route using actual client_id
+            seq_num=current_seq,
+            entry_point_name=entry_point_name,
+            message_type='stream_end',
+            stream_id=stream_id_param # Pass the provided stream_id separately
+        )
+        return result
+    except Exception as e:
+        print(f"ERROR: Failed during async stream_end call: {e}")
+        raise
+
 
 async def client_command(command: str, data: Any = None) -> Any:
     """Sends a command message to the client and waits for a specific acknowledgment and result.

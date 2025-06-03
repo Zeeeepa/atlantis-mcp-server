@@ -1033,7 +1033,8 @@ class DynamicAdditionServer(Server):
                               client_id: str = None,
                               seq_num: Optional[int] = None,
                               entry_point_name: Optional[str] = None,
-                              message_type: str = "text" # Message content type
+                              message_type: str = "text", # Message content type
+                              stream_id: Optional[str] = None # Stream identifier
                               ):
         """Send a log message notification to connected clients using direct WebSocket communication.
 
@@ -1046,6 +1047,7 @@ class DynamicAdditionServer(Server):
             seq_num: Optional sequence number for client-side ordering
             entry_point_name: Optional name of the top-level function originally called
             message_type: Type of message content ("text", "json", "image/png", etc.). Default is "text"
+            stream_id: Optional stream identifier for the message
         """
         try:
             # Normalize level to uppercase for consistency
@@ -1064,6 +1066,10 @@ class DynamicAdditionServer(Server):
             # Add seqNum if provided
             if seq_num is not None:
                 params["seqNum"] = seq_num
+
+            # Add streamId if provided
+            if stream_id is not None:
+                params["streamId"] = stream_id
 
             notification = {
                 "jsonrpc": "2.0",

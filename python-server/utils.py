@@ -53,7 +53,8 @@ async def client_log(
     client_id_for_routing: str = None,
     seq_num: int = None,
     entry_point_name: str = None,
-    message_type: str = "text"
+    message_type: str = "text",
+    stream_id: Optional[str] = None
     ):
     """
     Send a log message to the client.
@@ -108,7 +109,8 @@ async def client_log(
                 client_id_for_routing,
                 seq_num,
                 entry_point_name,
-                message_type
+                message_type,
+                stream_id
             )
 
             logger.info(f"📋 CLIENT LOG/COMMAND (AWAITABLE) SENT, result: {result}")
