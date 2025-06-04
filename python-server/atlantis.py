@@ -1,6 +1,7 @@
 import contextvars
 import inspect # Ensure inspect is imported
-from typing import Callable, Optional, Any
+import asyncio # Added for Lock
+from typing import Callable, Optional, Any, List # Added List
 from utils import client_log as util_client_log # For client_log, client_image, client_html
 from utils import execute_client_command_awaitable # For client_command
 import uuid
@@ -12,8 +13,10 @@ _client_log_var: contextvars.ContextVar[Optional[Callable]] = contextvars.Contex
 _request_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_request_id_var", default=None)
 # client_id: The ID of the client that initiated the current request
 _client_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_client_id_var", default=None)
-# log_seq_num: A counter for log messages within the current request context
-_log_seq_num_var: contextvars.ContextVar[int] = contextvars.ContextVar("_log_seq_num_var", default=0)
+# log_seq_num: A counter for log messages within the current request context. Holds a list [int] to be mutable across tasks.
+# It is initialized to [0] in server.py at the start of each request.
+_log_seq_num_var: contextvars.ContextVar[Optional[List[int]]] = contextvars.ContextVar("_log_seq_num_var", default=None)
+_seq_num_lock = asyncio.Lock() # Lock for synchronizing sequence number increments
 
 # entry_point_name: The name of the top-level dynamic function called by the request
 _entry_point_name_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_entry_point_name_var", default=None)
@@ -53,21 +56,29 @@ async def client_log(message: Any, level: str = "INFO", message_type: str = "tex
         except Exception as inspect_err:
             print(f"WARNING: Could not inspect caller frame for client_log: {inspect_err}")
 
+        current_seq_to_send = -1 # Default to an invalid sequence number
         try:
             # Get current sequence number and increment it for the next call
-            current_seq = _log_seq_num_var.get()
-            _log_seq_num_var.set(current_seq + 1)
+            async with _seq_num_lock:
+                seq_list_container = _log_seq_num_var.get()
+                if seq_list_container is not None:
+                    current_seq_to_send = seq_list_container[0]
+                    seq_list_container[0] += 1
+                else:
+                    # This error print is outside the critical path of successful lock acquisition/increment
+                    # but indicates a problem if _log_seq_num_var is None.
+                    print(f"ERROR: client_log - _log_seq_num_var is None. Cannot get sequence number.")
+                    # Handle error appropriately, perhaps by returning or raising an exception
+                    # For now, it will proceed with current_seq_to_send = -1, which might be caught by the receiver or cause issues
 
-            # Call the underlying utils.client_log function, passing seq num, caller name, entry point name, AND message type.
-            # This is the key connection between atlantis.client_log and utils.client_log.
-            # utils.client_log is now async and returns a result.
             result = await util_client_log(
                 client_id_for_routing=_client_id_var.get(),
                 request_id=_request_id_var.get(),
                 entry_point_name=entry_point_name,
                 message_type=message_type,
                 message=message,
-                level=level
+                level=level,
+                seq_num=current_seq_to_send # Pass the obtained sequence number
             )
             return result # Return the result from utils.client_log
         except Exception as e:
@@ -94,30 +105,39 @@ def get_user() -> Optional[str]:
 # --- Setter Functions (primarily for internal use by dynamic_function_manager) ---
 
 def set_context(client_log_func: Callable, request_id: str, client_id: str, entry_point_name: str, user: Optional[str] = None):
-    """Sets the context variables for the current execution scope.
-    Returns tokens to be used for resetting.
-    """
+    """Sets all context variables and returns a tuple of their tokens for resetting."""
     client_log_token = _client_log_var.set(client_log_func)
     request_id_token = _request_id_var.set(request_id)
     client_id_token = _client_id_var.set(client_id)
-    log_seq_num_token = _log_seq_num_var.set(0)
-    # Set the entry point name context
+    # Initialize _log_seq_num_var with a new list [0] for each call context
+    log_seq_num_token = _log_seq_num_var.set([0])
     entry_point_token = _entry_point_name_var.set(entry_point_name)
-    # Set the user context
-    user_token = _user_var.set(user)
+    
+    # Handle optional user context
+    # Ensure _user_var is always set, even if to None, to get a valid token for reset_context
+    actual_user = user if user is not None else None # Explicitly use None if user is not provided
+    user_token = _user_var.set(actual_user)
+        
     return (client_log_token, request_id_token, client_id_token, log_seq_num_token, entry_point_token, user_token)
 
-def reset_context(tokens):
-    """Resets the context variables using the provided tokens."""
+def reset_context(tokens: tuple):
+    """Resets the context variables using the provided tuple of tokens."""
+    # Expected order: client_log, request_id, client_id, log_seq_num, entry_point, user
+    if not isinstance(tokens, tuple) or len(tokens) != 6:
+        print(f"ERROR: reset_context expected a tuple of 6 tokens, got {tokens}")
+        # Add more robust error handling or logging as needed
+        return
+
+    # Unpack tokens
     client_log_token, request_id_token, client_id_token, log_seq_num_token, entry_point_token, user_token = tokens
+    
+    # Reset each context variable if its token is present (not strictly necessary with .set(None) giving a token)
     _client_log_var.reset(client_log_token)
     _request_id_var.reset(request_id_token)
     _client_id_var.reset(client_id_token)
     _log_seq_num_var.reset(log_seq_num_token)
-    # Reset the entry point name context
     _entry_point_name_var.reset(entry_point_token)
-    # Reset the user context
-    _user_var.reset(user_token)
+    _user_var.reset(user_token) # user_token will be valid even if user was None
 
 
 # --- Utility Functions ---
@@ -186,10 +206,10 @@ async def stream_start() -> str:
     """
     stream_id_to_send = str(uuid.uuid4())
     actual_client_id = _client_id_var.get() # Get the actual client ID from context
-    
+
     request_id = _request_id_var.get()
     entry_point_name = _entry_point_name_var.get() or "unknown_entry_point"
-    
+
     caller_name = "unknown_caller"
     try:
         frame = inspect.currentframe()
@@ -199,17 +219,23 @@ async def stream_start() -> str:
     except Exception as inspect_err:
         print(f"WARNING: Could not inspect caller frame for stream_start: {inspect_err}")
 
-    current_seq = _log_seq_num_var.get()
-    _log_seq_num_var.set(current_seq + 1)
+    current_seq_to_send = -1 # Default to an invalid sequence number
+    async with _seq_num_lock:
+        seq_list_container = _log_seq_num_var.get()
+        if seq_list_container is not None:
+            current_seq_to_send = seq_list_container[0]
+            seq_list_container[0] += 1
+        else:
+            print(f"ERROR: stream_start - _log_seq_num_var is None. Cannot get sequence number.")
 
     try:
         await util_client_log(
-            message={"status": "started"}, 
+            seq_num=current_seq_to_send, # Pass the obtained sequence number
+            message={"status": "started"},
             level="INFO",
             logger_name=caller_name,
             request_id=request_id,
             client_id_for_routing=actual_client_id, # Route using actual client_id
-            seq_num=current_seq,
             entry_point_name=entry_point_name,
             message_type='stream_start',
             stream_id=stream_id_to_send # Pass the generated stream_id separately
@@ -225,8 +251,8 @@ async def stream(message: str, stream_id_param: str):
     actual_client_id = _client_id_var.get() # Get the actual client ID from context
     request_id = _request_id_var.get()
     entry_point_name = _entry_point_name_var.get() or "unknown_entry_point"
-    
-    caller_name = "unknown_caller" 
+
+    caller_name = "unknown_caller"
     try:
         frame = inspect.currentframe()
         if frame and frame.f_back:
@@ -235,17 +261,23 @@ async def stream(message: str, stream_id_param: str):
     except Exception as inspect_err:
         print(f"WARNING: Could not inspect caller frame for stream: {inspect_err}")
 
-    current_seq = _log_seq_num_var.get()
-    _log_seq_num_var.set(current_seq + 1)
+    current_seq_to_send = -1 # Default to an invalid sequence number
+    async with _seq_num_lock:
+        seq_list_container = _log_seq_num_var.get()
+        if seq_list_container is not None:
+            current_seq_to_send = seq_list_container[0]
+            seq_list_container[0] += 1
+        else:
+            print(f"ERROR: stream - _log_seq_num_var is None. Cannot get sequence number.")
 
     try:
         result = await util_client_log(
+            seq_num=current_seq_to_send, # Pass the obtained sequence number
             message=message,
-            level="INFO", 
+            level="INFO",
             logger_name=caller_name,
             request_id=request_id,
             client_id_for_routing=actual_client_id, # Route using actual client_id
-            seq_num=current_seq,
             entry_point_name=entry_point_name,
             message_type='stream',
             stream_id=stream_id_param # Pass the provided stream_id separately
@@ -261,7 +293,7 @@ async def stream_end(stream_id_param: str):
     actual_client_id = _client_id_var.get() # Get the actual client ID from context
     request_id = _request_id_var.get()
     entry_point_name = _entry_point_name_var.get() or "unknown_entry_point"
-    
+
     caller_name = "unknown_caller"
     try:
         frame = inspect.currentframe()
@@ -271,17 +303,23 @@ async def stream_end(stream_id_param: str):
     except Exception as inspect_err:
         print(f"WARNING: Could not inspect caller frame for stream_end: {inspect_err}")
 
-    current_seq = _log_seq_num_var.get()
-    _log_seq_num_var.set(current_seq + 1)
+    current_seq_to_send = -1 # Default to an invalid sequence number
+    async with _seq_num_lock:
+        seq_list_container = _log_seq_num_var.get()
+        if seq_list_container is not None:
+            current_seq_to_send = seq_list_container[0]
+            seq_list_container[0] += 1
+        else:
+            print(f"ERROR: stream_end - _log_seq_num_var is None. Cannot get sequence number.")
 
     try:
         result = await util_client_log(
-            message="", 
+            seq_num=current_seq_to_send, # Pass the obtained sequence number
+            message="",
             level="INFO",
             logger_name=caller_name,
             request_id=request_id,
             client_id_for_routing=actual_client_id, # Route using actual client_id
-            seq_num=current_seq,
             entry_point_name=entry_point_name,
             message_type='stream_end',
             stream_id=stream_id_param # Pass the provided stream_id separately
@@ -294,10 +332,10 @@ async def stream_end(stream_id_param: str):
 
 async def client_command(command: str, data: Any = None) -> Any:
     """Sends a command message to the client and waits for a specific acknowledgment and result.
-    
+
     This function is for commands that require the server to wait for completion
     or a specific response from the client before proceeding.
-    
+
     Args:
         command: The command string identifier.
         data: Optional JSON-serializable data associated with the command.

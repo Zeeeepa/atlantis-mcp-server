@@ -99,22 +99,31 @@ async def client_log(
 
             # Pass request_id, client_id_for_routing, AND seq_num to the server's method
             # Pass all parameters including message_type to the server's method
-            # ASSUMPTION: _server_instance.send_client_log is now an async def method
-            # that returns the actual result/status from the client/Atlantis.
-            result = await _server_instance.send_client_log(
-                level,
-                message,
-                logger_name,
-                request_id,
-                client_id_for_routing,
-                seq_num,
-                entry_point_name,
-                message_type,
-                stream_id
-            )
-
-            logger.info(f"📋 CLIENT LOG/COMMAND (AWAITABLE) SENT, result: {result}")
-            return result # Return the result from the server call
+            # Create a task to send the client log without awaiting its completion here.
+            # This makes utils.client_log effectively fire-and-forget from the caller's perspective.
+            async def send_log_task():
+                try:
+                    task_result = await _server_instance.send_client_log(
+                        level,
+                        message,
+                        logger_name,
+                        request_id,
+                        client_id_for_routing,
+                        seq_num,
+                        entry_point_name,
+                        message_type,
+                        stream_id
+                    )
+                    logger.info(f"📋 CLIENT LOG/COMMAND (TASK) SENT, result: {task_result}")
+                except Exception as task_e:
+                    logger.error(f"❌ Error in send_log_task: {task_e}")
+                    logger.error(f"❌ Exception details: {type(task_e).__name__}: {task_e}")
+                    import traceback
+                    logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            
+            asyncio.create_task(send_log_task())
+            logger.info(f"📋 CLIENT LOG/COMMAND TASK CREATED for client_id={client_id_for_routing}, request_id={request_id}, seq_num={seq_num}")
+            return None # Return immediately, indicating task creation
         except Exception as e:
             logger.error(f"❌ Error in awaitable client_log: {e}")
             logger.error(f"❌ Exception details: {type(e).__name__}: {e}")

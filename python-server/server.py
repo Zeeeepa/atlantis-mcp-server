@@ -55,6 +55,10 @@ import os
 
 try:
 
+    import sys
+    print(f"DEBUG: Python version running server.py: {sys.version}")
+
+
     # Get the current timestamp of the dynamic_functions directory
     current_mtime = 0.0
     server_mtime = 0.0
