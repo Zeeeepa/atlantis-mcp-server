@@ -1800,7 +1800,6 @@ class ServiceClient:
         async def disconnect(): # Ensure handler is async
             logger.warning("⚠️ DISCONNECTED FROM CLOUD SERVER! (disconnect event)") # DEBUG ADDED
             self.is_connected = False
-            logger.info("☁️ DISCONNECTED FROM CLOUD SERVER!") # DEBUG ADDED
 
             # --- ADDED: Unregister this connection from the MCP server ---
             cloud_sid = self.sio.sid if self.sio else 'unknown_sid'
