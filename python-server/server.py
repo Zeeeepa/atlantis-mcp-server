@@ -1767,7 +1767,9 @@ class ServiceClient:
             logger.info(f"{BOLD}{BRIGHT_WHITE}🚀✨🎉 CONNECTED TO ATLANTIS CLOUD SERVER! 🎉✨🚀{RESET}")
             logger.info(f"{BOLD}{CYAN}=================================================={RESET}")
             logger.info("") # Blank line after
-            logger.info(f"{BOLD}{BRIGHT_WHITE}REMOTE NAME: {self.serviceName}{RESET}")
+            logger.info(f"{BOLD}{BRIGHT_WHITE}CLOUD URL   : {self.server_url}{RESET}")
+            logger.info(f"{BOLD}{BRIGHT_WHITE}LOGIN       : {self.email}{RESET}")
+            logger.info(f"{BOLD}{BRIGHT_WHITE}REMOTE NAME : {self.serviceName}{RESET}")
             logger.info("") # Blank line after
             logger.info("") # Blank line after
 
