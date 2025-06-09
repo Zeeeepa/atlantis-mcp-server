@@ -516,7 +516,7 @@ class DynamicFunctionManager:
                                                 app_name_from_decorator = decorator_node.args[0].value
                                         else:
                                             logger.warning(f"⚠️ @app decorator for {func_def_node.name} has unexpected positional arguments. Expected a single string.")
-                                    
+
                                     if app_name_from_decorator is None:
                                         logger.warning(f"⚠️ @app decorator used on {func_def_node.name} but 'name' argument was not found or not a string.")
                                     # We don't add 'app' to decorator_names, as it's handled separately by app_name_from_decorator
@@ -774,11 +774,6 @@ async def {name}():
                     module = importlib.util.module_from_spec(spec)
                     sys.modules[module_name] = module # Add to sys.modules before exec
 
-                    # Inject 'atlantis' implementation into the module's scope
-                    if hasattr(self, 'atlantis_impl'):
-                        setattr(module, 'atlantis', self.atlantis_impl)
-                    else:
-                        logger.warning("Atlantis implementation (self.atlantis_impl) not found during module injection.")
 
                     # Inject identity decorators for known decorator names
                     # This makes @chat, @public, etc., resolvable during module load

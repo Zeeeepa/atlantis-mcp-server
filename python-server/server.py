@@ -1443,14 +1443,9 @@ class DynamicAdditionServer(Server):
 
         except Exception as e:
             logger.error(f"❌ Error in _execute_tool for '{name}': {str(e)}", exc_info=True)
-            # Return a generic error message as TextContent with tool_error annotation dict
-            error_message = f"Error executing tool '{name}': {str(e)}"
-            error_annotations = {
-                "tool_error": {"tool_name": name, "message": str(e)} # Use original exception message
-            }
-            final_result = [TextContent(type="text", text=error_message, annotations=error_annotations)]
-            logger.debug(f"<--- _execute_tool RETURNING error result: {final_result!r}") # <-- ADD THIS LINE
-            return final_result
+            # Re-raise the exception so that ServiceClient._process_mcp_request can handle it
+            # and construct a proper JSON-RPC error response.
+            raise
 
     async def _notify_tool_list_changed(self, change_type: str, tool_name: str):
         """Send a 'notifications/tools/list_changed' notification with details to all connected clients."""
