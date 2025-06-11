@@ -407,7 +407,7 @@ class DynamicAdditionServer(Server):
             self.awaitable_requests.pop(correlation_id, None) # Ensure cleanup
             if isinstance(e, McpError):
                 raise
-            raise McpError(f"Error processing awaitable command '{command}': {e}")
+            raise e # Re-raise the original exception that already contains the cloud error
         finally:
             # Final cleanup, though most paths should handle it.
             if correlation_id in self.awaitable_requests:
@@ -1840,11 +1840,11 @@ class ServiceClient:
                             client_error_details = params["error"] # This could be a string from the cloud
                             logger.error(f"❌☁️ Received cloud error for awaitable command (correlationId: {correlation_id}): {client_error_details}")
                             if isinstance(client_error_details, Exception):
-                                future.set_exception(client_error_details)
+                                future.set_exception(McpError(client_error_details))
                             elif isinstance(client_error_details, dict) and "message" in client_error_details:
                                 future.set_exception(McpError(client_error_details.get("message", "Unknown cloud error")))
                             else: # Handle string error or other non-Exception types
-                                future.set_exception(McpError(f"Cloud client error: {str(client_error_details)}"))
+                                future.set_exception(Exception(f"Cloud client error: {str(client_error_details)}"))
                         else:
                             logger.warning(f"⚠️☁️ Received cloud commandResult for {correlation_id} without 'result' or 'error'. Treating as error.")
                             future.set_exception(McpError(f"Malformed commandResult from cloud client for {correlation_id}"))
