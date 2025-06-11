@@ -1844,7 +1844,7 @@ class ServiceClient:
                             elif isinstance(client_error_details, dict) and "message" in client_error_details:
                                 future.set_exception(McpError(client_error_details.get("message", "Unknown cloud error")))
                             else: # Handle string error or other non-Exception types
-                                future.set_exception(Exception(f"Cloud client error: {str(client_error_details)}"))
+                                future.set_exception(Exception(f"{str(client_error_details)}"))
                         else:
                             logger.warning(f"⚠️☁️ Received cloud commandResult for {correlation_id} without 'result' or 'error'. Treating as error.")
                             future.set_exception(McpError(f"Malformed commandResult from cloud client for {correlation_id}"))
