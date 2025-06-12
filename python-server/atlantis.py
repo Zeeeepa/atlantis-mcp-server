@@ -23,6 +23,9 @@ _entry_point_name_var: contextvars.ContextVar[Optional[str]] = contextvars.Conte
 # user: The user who made the call (from the 'user' field in tools/call requests)
 _user_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_user_var", default=None)
 
+# Simple task collection for logging tasks
+_log_tasks_var: contextvars.ContextVar[List[asyncio.Task]] = contextvars.ContextVar("_log_tasks_var", default=None)
+
 # --- Accessor Functions ---
 
 async def client_log(message: Any, level: str = "INFO", message_type: str = "text"):
@@ -81,6 +84,15 @@ async def client_log(message: Any, level: str = "INFO", message_type: str = "tex
                 seq_num=current_seq_to_send # Pass the obtained sequence number
             )
             # task is the asyncio.Task returned by utils.client_log
+            
+            # Track the task if we have one
+            if task is not None:
+                tasks = _log_tasks_var.get()
+                if tasks is None:
+                    # Initialize task list if not already done
+                    tasks = []
+                    _log_tasks_var.set(tasks)
+                tasks.append(task)
 
             return None # Return None in either case
         except Exception as e:
@@ -401,3 +413,39 @@ async def client_html(html_content: str, level: str = "INFO"):
     # client_log is now async and returns a result
     result = await client_log(html_content, level=level, message_type="html")
     return result
+
+async def gather_logs():
+    """Wait for all pending client log tasks to complete.
+    
+    This is useful if you want to ensure all logs are sent before returning from
+    a dynamic function or before starting a new operation that depends on logs
+    being delivered.
+    
+    Returns:
+        bool: True if tasks were gathered, False if no tasks to gather
+    
+    Example:
+        ```python
+        # Send some logs
+        await atlantis.client_log("Log 1")
+        await atlantis.client_log("Log 2")
+        
+        # Wait for them all to be sent
+        await atlantis.gather_logs()
+        ```
+    """
+    tasks = _log_tasks_var.get()
+    if not tasks:
+        return False
+    
+    # Create a copy of the tasks list
+    tasks_to_gather = tasks.copy()
+    # Clear the original list
+    tasks.clear()
+    
+    # Wait for all tasks to complete
+    if tasks_to_gather:
+        await asyncio.gather(*tasks_to_gather)
+        return True
+    
+    return False
