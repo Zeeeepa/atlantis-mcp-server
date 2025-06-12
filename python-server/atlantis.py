@@ -26,6 +26,29 @@ _user_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_user
 # Simple task collection for logging tasks
 _log_tasks_var: contextvars.ContextVar[List[asyncio.Task]] = contextvars.ContextVar("_log_tasks_var", default=None)
 
+# --- Helper Functions ---
+
+async def get_and_increment_seq_num(context_name: str = "operation") -> int:
+    """Get and increment the sequence number in a thread-safe way.
+
+    Args:
+        context_name: Name of the calling context for error reporting
+
+    Returns:
+        The current sequence number before incrementing, or -1 if error
+    """
+    current_seq_to_send = -1  # Default to an invalid sequence number
+
+    #async with _seq_num_lock:
+    seq_list_container = _log_seq_num_var.get()
+    if seq_list_container is not None:
+        current_seq_to_send = seq_list_container[0]  # Get current value
+        seq_list_container[0] += 1  # Increment for next call
+    else:
+        print(f"ERROR: {context_name} - _log_seq_num_var is None. Cannot get sequence number.")
+
+    return current_seq_to_send
+
 # --- Accessor Functions ---
 
 async def client_log(message: Any, level: str = "INFO", message_type: str = "text"):
@@ -59,20 +82,10 @@ async def client_log(message: Any, level: str = "INFO", message_type: str = "tex
         except Exception as inspect_err:
             print(f"WARNING: Could not inspect caller frame for client_log: {inspect_err}")
 
-        current_seq_to_send = -1 # Default to an invalid sequence number
         try:
             # Get current sequence number and increment it for the next call
-            async with _seq_num_lock:
-                seq_list_container = _log_seq_num_var.get()
-                if seq_list_container is not None:
-                    current_seq_to_send = seq_list_container[0]
-                    seq_list_container[0] += 1
-                else:
-                    # This error print is outside the critical path of successful lock acquisition/increment
-                    # but indicates a problem if _log_seq_num_var is None.
-                    print(f"ERROR: client_log - _log_seq_num_var is None. Cannot get sequence number.")
-                    # Handle error appropriately, perhaps by returning or raising an exception
-                    # For now, it will proceed with current_seq_to_send = -1, which might be caught by the receiver or cause issues
+            current_seq_to_send = await get_and_increment_seq_num(context_name="client_log")
+            # If current_seq_to_send is -1, the helper function already logged the error
 
             task = await util_client_log(
                 client_id_for_routing=_client_id_var.get(),
@@ -84,7 +97,7 @@ async def client_log(message: Any, level: str = "INFO", message_type: str = "tex
                 seq_num=current_seq_to_send # Pass the obtained sequence number
             )
             # task is the asyncio.Task returned by utils.client_log
-            
+
             # Track the task if we have one
             if task is not None:
                 tasks = _log_tasks_var.get()
@@ -233,14 +246,8 @@ async def stream_start() -> str:
     except Exception as inspect_err:
         print(f"WARNING: Could not inspect caller frame for stream_start: {inspect_err}")
 
-    current_seq_to_send = -1 # Default to an invalid sequence number
-    async with _seq_num_lock:
-        seq_list_container = _log_seq_num_var.get()
-        if seq_list_container is not None:
-            current_seq_to_send = seq_list_container[0]
-            seq_list_container[0] += 1
-        else:
-            print(f"ERROR: stream_start - _log_seq_num_var is None. Cannot get sequence number.")
+    # Get and increment sequence number using the helper function
+    current_seq_to_send = await get_and_increment_seq_num(context_name="stream_start")
 
     try:
         await util_client_log(
@@ -275,14 +282,8 @@ async def stream(message: str, stream_id_param: str):
     except Exception as inspect_err:
         print(f"WARNING: Could not inspect caller frame for stream: {inspect_err}")
 
-    current_seq_to_send = -1 # Default to an invalid sequence number
-    async with _seq_num_lock:
-        seq_list_container = _log_seq_num_var.get()
-        if seq_list_container is not None:
-            current_seq_to_send = seq_list_container[0]
-            seq_list_container[0] += 1
-        else:
-            print(f"ERROR: stream - _log_seq_num_var is None. Cannot get sequence number.")
+    # Get and increment sequence number using the helper function
+    current_seq_to_send = await get_and_increment_seq_num(context_name="stream")
 
     try:
         result = await util_client_log(
@@ -317,14 +318,8 @@ async def stream_end(stream_id_param: str):
     except Exception as inspect_err:
         print(f"WARNING: Could not inspect caller frame for stream_end: {inspect_err}")
 
-    current_seq_to_send = -1 # Default to an invalid sequence number
-    async with _seq_num_lock:
-        seq_list_container = _log_seq_num_var.get()
-        if seq_list_container is not None:
-            current_seq_to_send = seq_list_container[0]
-            seq_list_container[0] += 1
-        else:
-            print(f"ERROR: stream_end - _log_seq_num_var is None. Cannot get sequence number.")
+    # Get and increment sequence number using the helper function
+    current_seq_to_send = await get_and_increment_seq_num(context_name="stream_end")
 
     try:
         result = await util_client_log(
@@ -372,15 +367,9 @@ async def client_command(command: str, data: Any = None) -> Any:
         raise RuntimeError("Client ID or Request ID not found in context for client_command.")
 
     try:
-        # Get current sequence number and increment it for the next call, just like client_log
-        current_seq_to_send = -1  # Default to an invalid sequence number
-        async with _seq_num_lock:
-            seq_list_container = _log_seq_num_var.get()
-            if seq_list_container is not None:
-                current_seq_to_send = seq_list_container[0]
-                seq_list_container[0] += 1
-            else:
-                print(f"ERROR: client_command - _log_seq_num_var is None. Cannot get sequence number.")
+        # Get current sequence number and increment it for the next call
+        # Using the helper function for consistent sequence number management
+        current_seq_to_send = await get_and_increment_seq_num(context_name="client_command")
 
         print(f"INFO: Atlantis: Sending awaitable command '{command}' for client {client_id}, request {request_id}, seq {current_seq_to_send}")
         # Call the dedicated utility function for awaitable commands
@@ -416,20 +405,20 @@ async def client_html(html_content: str, level: str = "INFO"):
 
 async def gather_logs():
     """Wait for all pending client log tasks to complete.
-    
+
     This is useful if you want to ensure all logs are sent before returning from
     a dynamic function or before starting a new operation that depends on logs
     being delivered.
-    
+
     Returns:
         bool: True if tasks were gathered, False if no tasks to gather
-    
+
     Example:
         ```python
         # Send some logs
         await atlantis.client_log("Log 1")
         await atlantis.client_log("Log 2")
-        
+
         # Wait for them all to be sent
         await atlantis.gather_logs()
         ```
@@ -437,15 +426,15 @@ async def gather_logs():
     tasks = _log_tasks_var.get()
     if not tasks:
         return False
-    
+
     # Create a copy of the tasks list
     tasks_to_gather = tasks.copy()
     # Clear the original list
     tasks.clear()
-    
+
     # Wait for all tasks to complete
     if tasks_to_gather:
         await asyncio.gather(*tasks_to_gather)
         return True
-    
+
     return False
