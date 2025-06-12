@@ -71,7 +71,7 @@ async def client_log(message: Any, level: str = "INFO", message_type: str = "tex
                     # Handle error appropriately, perhaps by returning or raising an exception
                     # For now, it will proceed with current_seq_to_send = -1, which might be caught by the receiver or cause issues
 
-            result = await util_client_log(
+            task = await util_client_log(
                 client_id_for_routing=_client_id_var.get(),
                 request_id=_request_id_var.get(),
                 entry_point_name=entry_point_name,
@@ -80,7 +80,11 @@ async def client_log(message: Any, level: str = "INFO", message_type: str = "tex
                 level=level,
                 seq_num=current_seq_to_send # Pass the obtained sequence number
             )
-            return result # Return the result from utils.client_log
+            # task is the asyncio.Task returned by utils.client_log
+
+            await task # Await the task if requested
+
+            return None # Return None in either case
         except Exception as e:
             print(f"ERROR: Failed during async client_log call (after inspect): {e}")
             # Decide if to re-raise or return an error indicator
@@ -112,12 +116,12 @@ def set_context(client_log_func: Callable, request_id: str, client_id: str, entr
     # Initialize _log_seq_num_var with a new list [0] for each call context
     log_seq_num_token = _log_seq_num_var.set([0])
     entry_point_token = _entry_point_name_var.set(entry_point_name)
-    
+
     # Handle optional user context
     # Ensure _user_var is always set, even if to None, to get a valid token for reset_context
     actual_user = user if user is not None else None # Explicitly use None if user is not provided
     user_token = _user_var.set(actual_user)
-        
+
     return (client_log_token, request_id_token, client_id_token, log_seq_num_token, entry_point_token, user_token)
 
 def reset_context(tokens: tuple):
@@ -130,7 +134,7 @@ def reset_context(tokens: tuple):
 
     # Unpack tokens
     client_log_token, request_id_token, client_id_token, log_seq_num_token, entry_point_token, user_token = tokens
-    
+
     # Reset each context variable if its token is present (not strictly necessary with .set(None) giving a token)
     _client_log_var.reset(client_log_token)
     _request_id_var.reset(request_id_token)
