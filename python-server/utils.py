@@ -138,7 +138,9 @@ async def execute_client_command_awaitable(
     client_id_for_routing: str,
     request_id: str, # Original MCP request ID for client context
     command: str, # The command string for the client
-    command_data: Optional[Any] = None # Optional data for the command
+    command_data: Optional[Any] = None, # Optional data for the command
+    seq_num: Optional[int] = None, # Sequence number for client-side ordering
+    entry_point_name: Optional[str] = None # Entry point name for logging
     ) -> Any:
     """
     Sends a command to a specific client via the server and waits for a dedicated response.
@@ -150,6 +152,8 @@ async def execute_client_command_awaitable(
         request_id: The original MCP request ID, for client-side context.
         command: The command identifier string.
         command_data: Optional data payload for the command.
+        seq_num: Optional sequence number for client-side ordering.
+        entry_point_name: Optional name of the entry point function for logging.
 
     Returns:
         The result from the client's command execution, as returned by the server.
@@ -168,13 +172,15 @@ async def execute_client_command_awaitable(
         raise RuntimeError("Server instance is outdated or incorrect for awaitable commands.")
 
     try:
-        logger.info(f"🚀 Utils: Relaying dedicated awaitable command '{command}' to server for client {client_id_for_routing}")
+        logger.info(f"🚀 Utils: Relaying dedicated awaitable command '{command}' to server for client {client_id_for_routing}, seq_num={seq_num}")
         # This specifically calls the method designed for awaitable command-response cycles
         result = await _server_instance.send_awaitable_client_command(
             client_id_for_routing=client_id_for_routing,
             request_id=request_id,
             command=command,
-            command_data=command_data
+            command_data=command_data,
+            seq_num=seq_num,
+            entry_point_name=entry_point_name
         )
         logger.info(f"✅ Utils: Received result for dedicated awaitable command '{command}' from server.")
         return result

@@ -319,11 +319,13 @@ class DynamicAdditionServer(Server):
         }
 
     async def send_awaitable_client_command(self,
-                                          client_id_for_routing: str,
-                                          request_id: str, # Original MCP request ID for client context
-                                          command: str, # The command string for the client
-                                          command_data: Optional[Any] = None # Optional data for the command
-                                          ) -> Any:
+                                      client_id_for_routing: str,
+                                      request_id: str, # Original MCP request ID for client context
+                                      command: str, # The command string for the client
+                                      command_data: Optional[Any] = None, # Optional data for the command
+                                      seq_num: Optional[int] = None, # Sequence number for client-side ordering
+                                      entry_point_name: Optional[str] = None # Entry point name for logging
+                                      ) -> Any:
         """Sends a command to a specific client and waits for a response with a correlation ID.
 
         Args:
@@ -331,6 +333,8 @@ class DynamicAdditionServer(Server):
             request_id: The original MCP request ID, for client-side context.
             command: The command identifier string.
             command_data: Optional data payload for the command.
+            seq_num: Optional sequence number for client-side ordering.
+            entry_point_name: Optional name of the entry point function for logging.
 
         Returns:
             The result from the client's command execution.
@@ -381,6 +385,18 @@ class DynamicAdditionServer(Server):
                     "command": command,            # The actual command string
                     "data": command_data           # Associated data for the command
                 }
+                
+                # Add seqNum if provided
+                if seq_num is not None:
+                    cloud_notification_params["seqNum"] = seq_num
+                else:
+                    # Log an error if seq_num is None - this shouldn't happen
+                    logger.error(f"❌ Missing sequence number in send_awaitable_client_command for command '{command}', client {client_id_for_routing}, request {request_id}")
+                    # We continue without seqNum for backward compatibility, but this is an error condition
+                    
+                # Add entryPoint if provided
+                if entry_point_name is not None:
+                    cloud_notification_params["entryPoint"] = entry_point_name
                 cloud_wrapper_payload = {
                     "jsonrpc": "2.0",
                     "method": "notifications/message",
@@ -1070,6 +1086,10 @@ class DynamicAdditionServer(Server):
             # Add seqNum if provided
             if seq_num is not None:
                 params["seqNum"] = seq_num
+            else:
+                # Log an error if seq_num is None - this shouldn't happen
+                logger.error(f"❌ Missing sequence number in send_client_log for message type '{message_type}', client {client_id}, request {request_id}")
+                # We continue without seqNum for backward compatibility, but this is an error condition
 
             # Add streamId if provided
             if stream_id is not None:

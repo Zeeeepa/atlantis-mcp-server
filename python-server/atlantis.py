@@ -82,8 +82,6 @@ async def client_log(message: Any, level: str = "INFO", message_type: str = "tex
             )
             # task is the asyncio.Task returned by utils.client_log
 
-            await task # Await the task if requested
-
             return None # Return None in either case
         except Exception as e:
             print(f"ERROR: Failed during async client_log call (after inspect): {e}")
@@ -354,7 +352,7 @@ async def client_command(command: str, data: Any = None) -> Any:
     # Get necessary context for routing and correlation
     client_id = _client_id_var.get()
     request_id = _request_id_var.get()
-    # entry_point_name = _entry_point_name_var.get() # Not strictly needed by execute_client_command_awaitable's signature but good for logging if it were
+    entry_point_name = _entry_point_name_var.get() # Now needed for logging with seq_num
 
     if not client_id or not request_id:
         # This should ideally not happen if called within a proper request context
@@ -362,13 +360,25 @@ async def client_command(command: str, data: Any = None) -> Any:
         raise RuntimeError("Client ID or Request ID not found in context for client_command.")
 
     try:
-        print(f"INFO: Atlantis: Sending awaitable command '{command}' for client {client_id}, request {request_id}")
+        # Get current sequence number and increment it for the next call, just like client_log
+        current_seq_to_send = -1  # Default to an invalid sequence number
+        async with _seq_num_lock:
+            seq_list_container = _log_seq_num_var.get()
+            if seq_list_container is not None:
+                current_seq_to_send = seq_list_container[0]
+                seq_list_container[0] += 1
+            else:
+                print(f"ERROR: client_command - _log_seq_num_var is None. Cannot get sequence number.")
+
+        print(f"INFO: Atlantis: Sending awaitable command '{command}' for client {client_id}, request {request_id}, seq {current_seq_to_send}")
         # Call the dedicated utility function for awaitable commands
         result = await execute_client_command_awaitable(
             client_id_for_routing=client_id,
             request_id=request_id,
             command=command,
-            command_data=data
+            command_data=data,
+            seq_num=current_seq_to_send,  # Pass the sequence number
+            entry_point_name=entry_point_name  # Pass the entry point name for logging
         )
         print(f"INFO: Atlantis: Received result for awaitable command '{command}': {result}")
         return result
