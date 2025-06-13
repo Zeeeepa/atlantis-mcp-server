@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import datetime
 
 # Version
-SERVER_VERSION = "2.0.1"
+SERVER_VERSION = "2.0.2"
 
 from mcp.server import Server
 
@@ -385,7 +385,7 @@ class DynamicAdditionServer(Server):
                     "command": command,            # The actual command string
                     "data": command_data           # Associated data for the command
                 }
-                
+
                 # Add seqNum if provided
                 if seq_num is not None:
                     cloud_notification_params["seqNum"] = seq_num
@@ -393,7 +393,7 @@ class DynamicAdditionServer(Server):
                     # Log an error if seq_num is None - this shouldn't happen
                     logger.error(f"❌ Missing sequence number in send_awaitable_client_command for command '{command}', client {client_id_for_routing}, request {request_id}")
                     # We continue without seqNum for backward compatibility, but this is an error condition
-                    
+
                 # Add entryPoint if provided
                 if entry_point_name is not None:
                     cloud_notification_params["entryPoint"] = entry_point_name
