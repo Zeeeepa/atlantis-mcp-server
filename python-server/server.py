@@ -522,6 +522,15 @@ class DynamicAdditionServer(Server):
                 }
             ),
             Tool(
+                name="_function_history",
+                description="Gets the call history of all tools from the log file.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            ),
+            Tool(
                 name="_server_get",
                 description="Gets the configuration JSON for a server",
                 inputSchema={
@@ -1343,6 +1352,27 @@ class DynamicAdditionServer(Server):
                         }
                         for tool in result_raw
                     ]
+            elif name == "_function_history":
+                logger.debug("---> Calling built-in: _function_history")
+                current_script_dir = os.path.dirname(os.path.abspath(__file__))
+                log_file_path = os.path.join(current_script_dir, "tool_call_log.json")
+                
+                if not os.path.exists(log_file_path):
+                    # Return an empty history dictionary
+                    result_raw = {"history": []}
+                else:
+                    try:
+                        with open(log_file_path, "r", encoding="utf-8") as f:
+                            # Read each line and parse as JSON, skipping empty lines
+                            log_entries = [json.loads(line) for line in f if line.strip()]
+                        
+                        # Return a dictionary that will be automatically serialized to JSON
+                        result_raw = {"history": log_entries}
+                    except (json.JSONDecodeError, IOError) as e:
+                        logger.error(f"Error reading or parsing tool_call_log.json: {e}")
+                        # Return an error message inside the tool response
+                        raise ValueError(f"Error accessing function history: {e}")
+
             # Handle MCP tool calls
             elif '.' in name or ' ' in name: # <<< UPDATED Condition
 
