@@ -1159,6 +1159,39 @@ class DynamicAdditionServer(Server):
         # ---> ADDED: Log entry and raw args
         logger.debug(f"---> _execute_tool ENTERED. Name: '{name}', Raw Args: {args!r}") # <-- ADD THIS LINE
 
+
+        # --- BEGIN TOOL CALL LOGGING ---
+        try:
+            # Ensure datetime, json, and os are available (they are imported at the top of server.py)
+            timestamp_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            
+            caller_identity = "unknown_caller" # Default
+            if user: # 'user' is an argument to _execute_tool
+                caller_identity = user
+            elif client_id: # 'client_id' is an argument to _execute_tool
+                caller_identity = f"client:{client_id}"
+
+            log_entry = {
+                "caller": caller_identity,
+                "tool_name": name, # 'name' is an argument to _execute_tool
+                "timestamp": timestamp_utc
+            }
+            
+            # Determine the directory of the current script (server.py)
+            # __file__ is the path to the current script
+            current_script_dir = os.path.dirname(os.path.abspath(__file__))
+            log_file_path = os.path.join(current_script_dir, "tool_call_log.json")
+            
+            with open(log_file_path, "a", encoding="utf-8") as f:
+                json.dump(log_entry, f) # Writes the JSON object
+                f.write("\n")           # Adds a newline character for separation
+                
+        except Exception as e:
+            # Log the error but don't let logging failure break the main tool execution
+            logger.error(f"Failed to write to tool_call_log.json: {e}") # logger is already defined
+        # --- END TOOL CALL LOGGING ---
+
+
         try:
             result_raw = None # Initialize raw result variable
             # Handle built-in tool calls
@@ -1433,7 +1466,6 @@ class DynamicAdditionServer(Server):
             elif isinstance(result_raw, dict):
                 # Serialize dict to JSON string and wrap in TextContent
                 logger.debug(f"<--- Serializing dict result to JSON string for tool '{name}'.")
-                import json
                 try:
                     json_string = json.dumps(result_raw)
                     result_content = [TextContent(type="text", text=json_string, annotations={"sourceType": "json"})] # <--- CHANGE HERE
@@ -1447,7 +1479,6 @@ class DynamicAdditionServer(Server):
                 final_result = [] # Assign a default empty list
             else:
                 # Convert any other result to string
-                import json
                 try:
                     result_str = json.dumps(result_raw)
                     final_result = [TextContent(type="text", text=result_str, annotations={"sourceType": "json"})] # <--- CHANGE HERE
