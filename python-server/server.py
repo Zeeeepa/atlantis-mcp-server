@@ -1358,8 +1358,8 @@ class DynamicAdditionServer(Server):
                 log_file_path = os.path.join(current_script_dir, "tool_call_log.json")
 
                 if not os.path.exists(log_file_path):
-                    # Return an empty history dictionary
-                    result_raw = {"history": []}
+                    # Return an empty history array
+                    result_raw = []
                 else:
                     try:
                         with open(log_file_path, "r", encoding="utf-8") as f:
@@ -1367,7 +1367,7 @@ class DynamicAdditionServer(Server):
                             log_entries = [json.loads(line) for line in f if line.strip()]
 
                         # Return a dictionary that will be automatically serialized to JSON
-                        result_raw = {"history": log_entries}
+                        result_raw = log_entries
                     except (json.JSONDecodeError, IOError) as e:
                         logger.error(f"Error reading or parsing tool_call_log.json: {e}")
                         # Return an error message inside the tool response
