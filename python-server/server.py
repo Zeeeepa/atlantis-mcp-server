@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import datetime
 
 # Version
-SERVER_VERSION = "2.0.2"
+SERVER_VERSION = "2.0.4"
 
 from mcp.server import Server
 
@@ -1169,36 +1169,38 @@ class DynamicAdditionServer(Server):
         logger.debug(f"---> _execute_tool ENTERED. Name: '{name}', Raw Args: {args!r}") # <-- ADD THIS LINE
 
 
-        # --- BEGIN TOOL CALL LOGGING ---
-        try:
-            # Ensure datetime, json, and os are available (they are imported at the top of server.py)
-            timestamp_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
-            
-            caller_identity = "unknown_caller" # Default
-            if user: # 'user' is an argument to _execute_tool
-                caller_identity = user
-            elif client_id: # 'client_id' is an argument to _execute_tool
-                caller_identity = f"client:{client_id}"
 
-            log_entry = {
-                "caller": caller_identity,
-                "tool_name": name, # 'name' is an argument to _execute_tool
-                "timestamp": timestamp_utc
-            }
-            
-            # Determine the directory of the current script (server.py)
-            # __file__ is the path to the current script
-            current_script_dir = os.path.dirname(os.path.abspath(__file__))
-            log_file_path = os.path.join(current_script_dir, "tool_call_log.json")
-            
-            with open(log_file_path, "a", encoding="utf-8") as f:
-                json.dump(log_entry, f) # Writes the JSON object
-                f.write("\n")           # Adds a newline character for separation
-                
-        except Exception as e:
-            # Log the error but don't let logging failure break the main tool execution
-            logger.error(f"Failed to write to tool_call_log.json: {e}") # logger is already defined
-        # --- END TOOL CALL LOGGING ---
+        if not name.startswith('_'):
+            # --- BEGIN TOOL CALL LOGGING ---
+            try:
+                # Ensure datetime, json, and os are available (they are imported at the top of server.py)
+                timestamp_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+                caller_identity = "unknown_caller" # Default
+                if user: # 'user' is an argument to _execute_tool
+                    caller_identity = user
+                elif client_id: # 'client_id' is an argument to _execute_tool
+                    caller_identity = f"client:{client_id}"
+
+                log_entry = {
+                    "caller": caller_identity,
+                    "tool_name": name, # 'name' is an argument to _execute_tool
+                    "timestamp": timestamp_utc
+                }
+
+                # Determine the directory of the current script (server.py)
+                # __file__ is the path to the current script
+                current_script_dir = os.path.dirname(os.path.abspath(__file__))
+                log_file_path = os.path.join(current_script_dir, "tool_call_log.json")
+
+                with open(log_file_path, "a", encoding="utf-8") as f:
+                    json.dump(log_entry, f) # Writes the JSON object
+                    f.write("\n")           # Adds a newline character for separation
+
+            except Exception as e:
+                # Log the error but don't let logging failure break the main tool execution
+                logger.error(f"Failed to write to tool_call_log.json: {e}") # logger is already defined
+            # --- END TOOL CALL LOGGING ---
 
 
         try:
@@ -1356,18 +1358,18 @@ class DynamicAdditionServer(Server):
                 logger.debug("---> Calling built-in: _function_history")
                 current_script_dir = os.path.dirname(os.path.abspath(__file__))
                 log_file_path = os.path.join(current_script_dir, "tool_call_log.json")
-                
+
                 if not os.path.exists(log_file_path):
-                    # Return an empty history dictionary
-                    result_raw = {"history": []}
+                    # Return an empty history array
+                    result_raw = []
                 else:
                     try:
                         with open(log_file_path, "r", encoding="utf-8") as f:
                             # Read each line and parse as JSON, skipping empty lines
                             log_entries = [json.loads(line) for line in f if line.strip()]
-                        
+
                         # Return a dictionary that will be automatically serialized to JSON
-                        result_raw = {"history": log_entries}
+                        result_raw = log_entries
                     except (json.JSONDecodeError, IOError) as e:
                         logger.error(f"Error reading or parsing tool_call_log.json: {e}")
                         # Return an error message inside the tool response
