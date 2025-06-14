@@ -779,6 +779,8 @@ async def {name}():
                     # This makes @chat, @public, etc., resolvable during module load
                     module.__dict__['chat'] = _mcp_identity_decorator
                     module.__dict__['public'] = _mcp_identity_decorator
+                    # Add app decorator which takes parameters
+                    module.__dict__['app'] = app
                     # Add other known decorator names here if they arise
 
                     spec.loader.exec_module(module)
