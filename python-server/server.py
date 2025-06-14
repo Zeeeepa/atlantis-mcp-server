@@ -1169,36 +1169,38 @@ class DynamicAdditionServer(Server):
         logger.debug(f"---> _execute_tool ENTERED. Name: '{name}', Raw Args: {args!r}") # <-- ADD THIS LINE
 
 
-        # --- BEGIN TOOL CALL LOGGING ---
-        try:
-            # Ensure datetime, json, and os are available (they are imported at the top of server.py)
-            timestamp_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-            caller_identity = "unknown_caller" # Default
-            if user: # 'user' is an argument to _execute_tool
-                caller_identity = user
-            elif client_id: # 'client_id' is an argument to _execute_tool
-                caller_identity = f"client:{client_id}"
+        if not name.startswith('_'):
+            # --- BEGIN TOOL CALL LOGGING ---
+            try:
+                # Ensure datetime, json, and os are available (they are imported at the top of server.py)
+                timestamp_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-            log_entry = {
-                "caller": caller_identity,
-                "tool_name": name, # 'name' is an argument to _execute_tool
-                "timestamp": timestamp_utc
-            }
+                caller_identity = "unknown_caller" # Default
+                if user: # 'user' is an argument to _execute_tool
+                    caller_identity = user
+                elif client_id: # 'client_id' is an argument to _execute_tool
+                    caller_identity = f"client:{client_id}"
 
-            # Determine the directory of the current script (server.py)
-            # __file__ is the path to the current script
-            current_script_dir = os.path.dirname(os.path.abspath(__file__))
-            log_file_path = os.path.join(current_script_dir, "tool_call_log.json")
+                log_entry = {
+                    "caller": caller_identity,
+                    "tool_name": name, # 'name' is an argument to _execute_tool
+                    "timestamp": timestamp_utc
+                }
 
-            with open(log_file_path, "a", encoding="utf-8") as f:
-                json.dump(log_entry, f) # Writes the JSON object
-                f.write("\n")           # Adds a newline character for separation
+                # Determine the directory of the current script (server.py)
+                # __file__ is the path to the current script
+                current_script_dir = os.path.dirname(os.path.abspath(__file__))
+                log_file_path = os.path.join(current_script_dir, "tool_call_log.json")
 
-        except Exception as e:
-            # Log the error but don't let logging failure break the main tool execution
-            logger.error(f"Failed to write to tool_call_log.json: {e}") # logger is already defined
-        # --- END TOOL CALL LOGGING ---
+                with open(log_file_path, "a", encoding="utf-8") as f:
+                    json.dump(log_entry, f) # Writes the JSON object
+                    f.write("\n")           # Adds a newline character for separation
+
+            except Exception as e:
+                # Log the error but don't let logging failure break the main tool execution
+                logger.error(f"Failed to write to tool_call_log.json: {e}") # logger is already defined
+            # --- END TOOL CALL LOGGING ---
 
 
         try:
