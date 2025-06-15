@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import datetime
 
 # Version
-SERVER_VERSION = "2.0.4"
+SERVER_VERSION = "2.0.5"
 
 from mcp.server import Server
 
@@ -1755,7 +1755,8 @@ class ServiceClient:
                         "apiKey": self.api_key,
                         "serviceName": self.serviceName,
                         "hostname": hostname,
-                        "port": self.server_port # Send the stored port
+                        "port": self.server_port, # Send the stored port
+                        "serverVersion": SERVER_VERSION
                     },
                     retry=False # We handle retries manually with backoff
                 )
