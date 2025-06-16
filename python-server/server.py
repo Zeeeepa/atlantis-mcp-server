@@ -1718,6 +1718,7 @@ class ServiceClient:
         self.retry_count = 0
         self.connection_task = None
         self.is_connected = False
+        self.owner = None
         self.connection_active = True
         # Store creation time for stable client ID
         self._creation_time = int(time.time())
@@ -1832,10 +1833,17 @@ class ServiceClient:
         if not self.sio:
             return
 
+        @self.sio.event(namespace=self.namespace)
+        async def connect():
+            logger.info("Connected to server, waiting for welcome")
+            self.is_connected = True
+            # Emit the client event upon successful connection
+            await self.send_message('client', {'status': 'connected'})
+
         # Connection established event
         @self.sio.event(namespace=self.namespace)
-        async def connect(): # Ensure handler is async
-            self.is_connected = True
+        async def welcome(username): # Ensure handler is async
+            self.owner = username
             self.retry_count = 0  # Reset retry counter on successful connection
 
             self.print_ascii_art("../kitty.txt")
@@ -1846,8 +1854,9 @@ class ServiceClient:
             logger.info(f"{BOLD}{CYAN}=================================================={RESET}")
             logger.info("") # Blank line after
             logger.info(f"{BOLD}{BRIGHT_WHITE}CLOUD URL   : {self.server_url}{RESET}")
-            logger.info(f"{BOLD}{BRIGHT_WHITE}LOGIN       : {self.email}{RESET}")
             logger.info(f"{BOLD}{BRIGHT_WHITE}REMOTE NAME : {self.serviceName}{RESET}")
+            logger.info(f"{BOLD}{BRIGHT_WHITE}LOGIN       : {self.email}{RESET}")
+            logger.info(f"{BOLD}{BRIGHT_WHITE}USER        : {self.owner}{RESET}")
             logger.info("") # Blank line after
             logger.info("") # Blank line after
 
@@ -1867,8 +1876,6 @@ class ServiceClient:
             tool_names = [tool.name for tool in tools_list]
             logger.info(f"📊 REGISTERING {len(tools_list)} TOOLS WITH CLOUD: {', '.join(tool_names)}")
 
-            # Emit the client event upon successful connection
-            await self.send_message('client', {'status': 'connected'})
 
         # Connection error event
         @self.sio.event(namespace=self.namespace)
@@ -1897,6 +1904,8 @@ class ServiceClient:
                 # The _maintain_connection loop will handle the retry logic
             else:
                 logger.info("☁️ Disconnection was expected or shutdown initiated, not reconnecting.")
+
+
         # Service message event
         @self.sio.event(namespace=self.namespace)
         async def service_message(data):
