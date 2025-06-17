@@ -1525,6 +1525,33 @@ class DynamicAdditionServer(Server):
 
         except Exception as e:
             logger.error(f"❌ Error in _execute_tool for '{name}': {str(e)}", exc_info=True)
+            # --- BEGIN TOOL ERROR LOGGING ---
+            if not name.startswith('_'):
+                try:
+                    timestamp_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    caller_identity = "unknown_caller"
+                    if user:
+                        caller_identity = user
+                    elif client_id:
+                        caller_identity = f"client:{client_id}"
+
+                    error_log_entry = {
+                        "caller": caller_identity,
+                        "tool_name": name,
+                        "timestamp": timestamp_utc,
+                        "status": "error",
+                        "error_message": str(e)
+                    }
+
+                    os.makedirs(LOG_DIR, exist_ok=True)
+                    with open(TOOL_CALL_LOG_PATH, "a", encoding="utf-8") as f:
+                        json.dump(error_log_entry, f)
+                        f.write("\n")
+
+                except Exception as log_e:
+                    logger.error(f"CRITICAL: Failed to write ERROR to {TOOL_CALL_LOG_PATH}: {log_e}")
+            # --- END TOOL ERROR LOGGING ---
+
             # Re-raise the exception so that ServiceClient._process_mcp_request can handle it
             # and construct a proper JSON-RPC error response.
             raise
