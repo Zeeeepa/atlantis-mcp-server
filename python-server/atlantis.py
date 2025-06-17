@@ -23,6 +23,9 @@ _entry_point_name_var: contextvars.ContextVar[Optional[str]] = contextvars.Conte
 
 _user_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_user_var", default=None)
 
+# Owner of the remote server instance
+_owner: Optional[str] = ""
+
 
 # Simple task collection for logging tasks
 _log_tasks_var: contextvars.ContextVar[List[asyncio.Task]] = contextvars.ContextVar("_log_tasks_var", default=None)
@@ -130,13 +133,17 @@ def get_caller() -> Optional[str]:
     """Returns the user who called this function"""
     return _user_var.get()
 
-def get_owner() -> Optional[str]:
+def get_owner() -> str:
     """Returns the user who owns this remote"""
-    return "bart"
-
-
+    return _owner or ""
 
 # --- Setter Functions (primarily for internal use by dynamic_function_manager) ---
+
+def _set_owner(new_owner: str):
+    """Sets the owner of the remote server instance. For internal use."""
+    global _owner
+    _owner = new_owner
+
 
 def set_context(
         client_log_func: Callable,

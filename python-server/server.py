@@ -106,6 +106,7 @@ from DynamicServerManager import DynamicServerManager
 
 # Import our utility module for dynamic functions
 import utils
+import atlantis
 
 # NOTE: This server uses two different socket protocols:
 # 1. Standard WebSockets: When acting as a SERVER to accept connections from node-mcp-client
@@ -1843,7 +1844,7 @@ class ServiceClient:
         # Connection established event
         @self.sio.event(namespace=self.namespace)
         async def welcome(username): # Ensure handler is async
-            self.owner = username
+            atlantis._set_owner(username) # Update atlantis module
             self.retry_count = 0  # Reset retry counter on successful connection
 
             self.print_ascii_art("../kitty.txt")
@@ -1856,7 +1857,7 @@ class ServiceClient:
             logger.info(f"{BOLD}{BRIGHT_WHITE}CLOUD URL   : {self.server_url}{RESET}")
             logger.info(f"{BOLD}{BRIGHT_WHITE}REMOTE NAME : {self.serviceName}{RESET}")
             logger.info(f"{BOLD}{BRIGHT_WHITE}LOGIN       : {self.email}{RESET}")
-            logger.info(f"{BOLD}{BRIGHT_WHITE}USER        : {self.owner}{RESET}")
+            logger.info(f"{BOLD}{BRIGHT_WHITE}OWNER       : {atlantis._owner}{RESET}")
             logger.info("") # Blank line after
             logger.info("") # Blank line after
 
