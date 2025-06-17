@@ -1193,18 +1193,16 @@ class DynamicAdditionServer(Server):
                     "timestamp": timestamp_utc
                 }
 
-                # Determine the directory of the current script (server.py)
-                # __file__ is the path to the current script
-                current_script_dir = os.path.dirname(os.path.abspath(__file__))
-                log_file_path = os.path.join(current_script_dir, "tool_call_log.json")
+                # Ensure the log directory exists
+                os.makedirs(LOG_DIR, exist_ok=True)
 
-                with open(log_file_path, "a", encoding="utf-8") as f:
+                with open(TOOL_CALL_LOG_PATH, "a", encoding="utf-8") as f:
                     json.dump(log_entry, f) # Writes the JSON object
                     f.write("\n")           # Adds a newline character for separation
 
             except Exception as e:
                 # Log the error but don't let logging failure break the main tool execution
-                logger.error(f"Failed to write to tool_call_log.json: {e}") # logger is already defined
+                logger.error(f"Failed to write to {TOOL_CALL_LOG_PATH}: {e}") # logger is already defined
             # --- END TOOL CALL LOGGING ---
 
 
@@ -1361,15 +1359,12 @@ class DynamicAdditionServer(Server):
                     ]
             elif name == "_function_history":
                 logger.debug("---> Calling built-in: _function_history")
-                current_script_dir = os.path.dirname(os.path.abspath(__file__))
-                log_file_path = os.path.join(current_script_dir, "tool_call_log.json")
-
-                if not os.path.exists(log_file_path):
+                if not os.path.exists(TOOL_CALL_LOG_PATH):
                     # Return an empty history array
                     result_raw = []
                 else:
                     try:
-                        with open(log_file_path, "r", encoding="utf-8") as f:
+                        with open(TOOL_CALL_LOG_PATH, "r", encoding="utf-8") as f:
                             # Read each line and parse as JSON, skipping empty lines
                             log_entries = [json.loads(line) for line in f if line.strip()]
 
