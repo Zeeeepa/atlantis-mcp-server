@@ -1939,8 +1939,8 @@ class ServiceClient:
                             else: # Handle string error or other non-Exception types
                                 future.set_exception(Exception(f"{str(client_error_details)}"))
                         else:
-                            logger.warning(f"⚠️☁️ Received cloud commandResult for {correlation_id} without 'result' or 'error'. Treating as error.")
-                            future.set_exception(McpError(f"Malformed commandResult from cloud client for {correlation_id}"))
+                            # treat as result
+                            future.set_result(None)
                         logger.debug(f"📥☁️ Handled atlantis/commandResult for {correlation_id} from cloud. Returning from service_message.")
                         return # IMPORTANT: Return early, this message is handled.
                     elif future and future.done():
@@ -2208,8 +2208,8 @@ async def handle_websocket(websocket: WebSocket):
                                 logger.error(f"❌ Received error from client for awaitable command (correlationId: {correlation_id}): {client_error_details}")
                                 future.set_exception(McpError(f"Client error for command (correlationId: {correlation_id}): {client_error_details}"))
                             else:
-                                logger.warning(f"⚠️ Received commandResult for {correlation_id} without 'result' or 'error' key. Treating as error.")
-                                future.set_exception(McpError(f"Malformed commandResult from client for {correlation_id}"))
+                                # treat as result
+                                future.set_result(None)
                             # This message is handled, continue to next message in the loop
                             logger.debug(f"📥 Handled atlantis/commandResult for {correlation_id}, continuing WebSocket loop.")
                             continue
