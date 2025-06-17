@@ -20,8 +20,9 @@ _seq_num_lock = asyncio.Lock() # Lock for synchronizing sequence number incremen
 
 # entry_point_name: The name of the top-level dynamic function called by the request
 _entry_point_name_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_entry_point_name_var", default=None)
-# user: The user who made the call (from the 'user' field in tools/call requests)
+
 _user_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_user_var", default=None)
+
 
 # Simple task collection for logging tasks
 _log_tasks_var: contextvars.ContextVar[List[asyncio.Task]] = contextvars.ContextVar("_log_tasks_var", default=None)
@@ -118,20 +119,31 @@ async def client_log(message: Any, level: str = "INFO", message_type: str = "tex
 
 # --- Other Accessors ---
 def get_request_id() -> Optional[str]:
-    """Returns the request_id for the current context."""
+    """Returns the request_id"""
     return _request_id_var.get()
 
 def get_client_id() -> Optional[str]:
-    """Returns the client_id for the current context."""
+    """Returns the client_id"""
     return _client_id_var.get()
 
-def get_user() -> Optional[str]:
-    """Returns the user who made the call for the current context."""
+def get_caller() -> Optional[str]:
+    """Returns the user who called this function"""
     return _user_var.get()
+
+def get_owner() -> Optional[str]:
+    """Returns the user who owns this remote"""
+    return "bart"
+
+
 
 # --- Setter Functions (primarily for internal use by dynamic_function_manager) ---
 
-def set_context(client_log_func: Callable, request_id: str, client_id: str, entry_point_name: str, user: Optional[str] = None):
+def set_context(
+        client_log_func: Callable,
+        request_id: str,
+        client_id: str,
+        entry_point_name: str,
+        user: Optional[str] = None):
     """Sets all context variables and returns a tuple of their tokens for resetting."""
     client_log_token = _client_log_var.set(client_log_func)
     request_id_token = _request_id_var.set(request_id)
@@ -144,6 +156,7 @@ def set_context(client_log_func: Callable, request_id: str, client_id: str, entr
     # Ensure _user_var is always set, even if to None, to get a valid token for reset_context
     actual_user = user if user is not None else None # Explicitly use None if user is not provided
     user_token = _user_var.set(actual_user)
+
 
     return (client_log_token, request_id_token, client_id_token, log_seq_num_token, entry_point_token, user_token)
 
