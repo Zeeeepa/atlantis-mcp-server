@@ -49,6 +49,10 @@ from state import (
     SERVER_REQUEST_TIMEOUT
 )
 
+# --- Path Configuration ---
+LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "log")
+TOOL_CALL_LOG_PATH = os.path.join(LOG_DIR, "tool_call_log.json")
+
 # --- Add dynamic_functions parent to sys.path for imports ---
 import sys
 import os
