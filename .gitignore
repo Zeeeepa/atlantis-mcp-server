@@ -52,6 +52,6 @@ python-server/dynamic_servers/OLD/
 
 python-server2/
 
-tool_call_log.json
+log/
 
 *.db

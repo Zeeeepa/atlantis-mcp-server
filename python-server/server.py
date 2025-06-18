@@ -1548,6 +1548,21 @@ class DynamicAdditionServer(Server):
                         json.dump(error_log_entry, f)
                         f.write("\n")
 
+                    # --- ADDED: Log error to owner --- 
+                    try:
+                        owner_to_log = atlantis._owner # Get current owner
+                        if owner_to_log:
+                            error_message_for_owner = f"Error in tool '{name}': {str(e)}"
+                            # Construct a unique reference for this error instance if possible
+                            error_ref = request_id if request_id else str(uuid.uuid4())[:8]
+                            atlantis.log_to_owner(owner_to_log, error_message_for_owner, level="ERROR", tool_name=name, request_id=error_ref)
+                            logger.debug(f"Logged error for tool '{name}' to owner '{owner_to_log}'.")
+                        else:
+                            logger.warning(f"Could not log error for tool '{name}' to owner: Owner not set.")
+                    except Exception as owner_log_e:
+                        logger.error(f"CRITICAL: Failed to log ERROR to owner: {owner_log_e}")
+                    # --- END Owner Log --- 
+
                 except Exception as log_e:
                     logger.error(f"CRITICAL: Failed to write ERROR to {TOOL_CALL_LOG_PATH}: {log_e}")
             # --- END TOOL ERROR LOGGING ---
