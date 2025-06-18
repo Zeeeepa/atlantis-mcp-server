@@ -5,6 +5,9 @@ from typing import Callable, Optional, Any, List # Added List
 from utils import client_log as util_client_log # For client_log, client_image, client_html
 from utils import execute_client_command_awaitable # For client_command
 import uuid
+import os
+import json
+from datetime import datetime, timezone
 
 # --- Context Variables ---
 # client_log_func: Holds the partially bound client_log function for the current request
@@ -132,6 +135,10 @@ def get_client_id() -> Optional[str]:
 def get_caller() -> Optional[str]:
     """Returns the user who called this function"""
     return _user_var.get()
+
+def get_invoking_tool_name() -> Optional[str]:
+    """Returns the name of the tool that initiated the current execution chain."""
+    return _entry_point_name_var.get()
 
 def get_owner() -> str:
     """Returns the user who owns this remote"""
@@ -456,5 +463,65 @@ async def gather_logs():
     if tasks_to_gather:
         await asyncio.gather(*tasks_to_gather)
         return True
+
+    return False
+
+async def owner_log(message: str):
+    """
+    Appends a message to a JSON log file (log/owner_log.json), automatically including
+    the invoking tool name and username from the Atlantis context.
+
+    Args:
+        message: The string message to log.
+    """
+    invoking_tool_name = get_invoking_tool_name() or "unknown_tool"
+    username = get_caller() or "unknown_user"
+
+    # The log directory is relative to the server's execution path.
+    log_dir = "log"
+    log_file_path = os.path.join(log_dir, "owner_log.json")
+
+    try:
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+    except Exception as e:
+        # Using print as a fallback for logging since this is a logging function
+        print(f"Warning: Could not create directory {log_dir}. Error: {e}")
+
+    log_entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "invoking_tool": str(invoking_tool_name),
+        "username": str(username),
+        "message": str(message)
+    }
+
+    entries = []
+    if os.path.exists(log_file_path):
+        try:
+            with open(log_file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                if content.strip():
+                    loaded_json = json.loads(content)
+                    if isinstance(loaded_json, list):
+                        entries = loaded_json
+                    else:
+                        print(f"Warning: Log file {log_file_path} did not contain a JSON list. Re-initializing.")
+                        entries = []
+        except json.JSONDecodeError:
+            print(f"Warning: Could not decode JSON from {log_file_path}. Re-initializing log.")
+            entries = []
+        except Exception as e:
+            print(f"Error reading log file {log_file_path}: {e}. Re-initializing log.")
+            entries = []
+
+    entries.append(log_entry)
+
+    try:
+        with open(log_file_path, 'w', encoding='utf-8') as f:
+            json.dump(entries, f, indent=4)
+        return f"Message logged to {log_file_path}"
+    except Exception as e:
+        print(f"Critical: Error writing to log file {log_file_path}: {e}")
+        return f"Error writing to log file {log_file_path}: {e}"
 
     return False
