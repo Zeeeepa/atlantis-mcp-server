@@ -52,6 +52,7 @@ from state import (
 # --- Path Configuration ---
 LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "log")
 TOOL_CALL_LOG_PATH = os.path.join(LOG_DIR, "tool_call_log.json")
+OWNER_LOG_PATH = os.path.join(LOG_DIR, "owner_log.json")
 
 # --- Add dynamic_functions parent to sys.path for imports ---
 import sys
@@ -528,7 +529,16 @@ class DynamicAdditionServer(Server):
             ),
             Tool(
                 name="_function_history",
-                description="Gets the call history of all tools from the log file.",
+                description="Gets the tool call history",
+                inputSchema={
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            ),
+            Tool(
+                name="_function_log",
+                description="Gets the tool owner log",
                 inputSchema={
                     "type": "object",
                     "properties": {},
@@ -1375,6 +1385,28 @@ class DynamicAdditionServer(Server):
                         # Return an error message inside the tool response
                         raise ValueError(f"Error accessing function history: {e}")
 
+            elif name == "_function_log":
+                logger.debug("---> Calling built-in: _function_log")
+                if not os.path.exists(OWNER_LOG_PATH):
+                    # Return an empty history array
+                    result_raw = []
+                else:
+                    try:
+                        with open(OWNER_LOG_PATH, "r", encoding="utf-8") as f:
+                            file_content = f.read()
+                            # Handle empty file or file with only whitespace
+                            if not file_content.strip():
+                                log_entries = [] # Return empty list if file is effectively empty
+                            else:
+                                log_entries = json.loads(file_content) # Parse the string content
+
+                        # Return the list of log entries directly
+                        result_raw = log_entries
+                    except (json.JSONDecodeError, IOError) as e:
+                        logger.error(f"Error reading or parsing owner log: {e}")
+                        # Return an error message inside the tool response
+                        raise ValueError(f"Error accessing function history: {e}")
+
             # Handle MCP tool calls
             elif '.' in name or ' ' in name: # <<< UPDATED Condition
 
@@ -1548,7 +1580,7 @@ class DynamicAdditionServer(Server):
                         json.dump(error_log_entry, f)
                         f.write("\n")
 
-                    # --- ADDED: Log error to owner --- 
+                    # --- ADDED: Log error to owner ---
                     try:
                         owner_to_log = atlantis._owner # Get current owner
                         if owner_to_log:
@@ -1561,7 +1593,7 @@ class DynamicAdditionServer(Server):
                             logger.warning(f"Could not log error for tool '{name}' to owner: Owner not set.")
                     except Exception as owner_log_e:
                         logger.error(f"CRITICAL: Failed to log ERROR to owner: {owner_log_e}")
-                    # --- END Owner Log --- 
+                    # --- END Owner Log ---
 
                 except Exception as log_e:
                     logger.error(f"CRITICAL: Failed to write ERROR to {TOOL_CALL_LOG_PATH}: {log_e}")
