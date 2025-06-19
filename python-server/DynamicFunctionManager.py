@@ -64,6 +64,21 @@ def app(name: str):
 # that dynamic functions can import from, or injecting it into their global scope upon loading.
 # For now, this definition here allows _code_validate_syntax to recognize it by name 'app'.
 
+# --- Shared Module Decorator Definition ---
+def shared(func_or_module):
+    """
+    Decorator that marks a function or module as 'shared'. 
+    When applied, the function/module will not be reloaded when dynamic functions are invalidated.
+    
+    Usage: @shared
+           def my_persistent_function():
+               # This function will maintain its state
+               ...
+    """
+    # Mark the function/module as shared by setting an attribute
+    setattr(func_or_module, '_is_shared', True)
+    return func_or_module
+
 class DynamicFunctionManager:
     def __init__(self, functions_dir):
         # State that was previously global

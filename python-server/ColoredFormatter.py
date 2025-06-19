@@ -48,7 +48,11 @@ class ColoredFormatter(logging.Formatter):
         Returns:
             The formatted log message with appropriate colors.
         """
-        log_fmt = self.FORMATS.get(record.levelno, logging.BASIC_FORMAT)
+        # Special case for db logger INFO messages - use blue
+        if record.name == "db" and record.levelno == logging.INFO:
+            log_fmt = CYAN + "%(asctime)s [%(levelname)s] %(name)s: %(message)s" + RESET
+        else:
+            log_fmt = self.FORMATS.get(record.levelno, logging.BASIC_FORMAT)
         # Use a specific date format
         formatter = logging.Formatter(log_fmt, datefmt='%Y-%m-%d %H:%M:%S')
         return formatter.format(record)
