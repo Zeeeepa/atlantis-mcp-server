@@ -29,9 +29,39 @@ _user_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_user
 # Owner of the remote server instance
 _owner: Optional[str] = ""
 
-
 # Simple task collection for logging tasks
 _log_tasks_var: contextvars.ContextVar[List[asyncio.Task]] = contextvars.ContextVar("_log_tasks_var", default=None)
+
+# --- Shared Object Container ---
+# This container persists across dynamic function reloads and can store
+# shared resources like database connections, cache objects, etc.
+class SharedContainer:
+    """Container for objects that need to persist across dynamic function reloads"""
+    def __init__(self):
+        self._data = {}
+        
+    def get(self, key, default=None):
+        """Get a value from the shared container"""
+        return self._data.get(key, default)
+        
+    def set(self, key, value):
+        """Store a value in the shared container"""
+        self._data[key] = value
+        return value
+        
+    def remove(self, key):
+        """Remove a value from the shared container"""
+        if key in self._data:
+            del self._data[key]
+            return True
+        return False
+        
+    def keys(self):
+        """Get all keys in the shared container"""
+        return list(self._data.keys())
+
+# Initialize the shared container
+shared = SharedContainer()
 
 # --- Helper Functions ---
 
