@@ -490,8 +490,8 @@ async def owner_log(message: str):
 
     log_entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "invoking_tool": str(invoking_tool_name),
-        "username": str(username),
+        "tool_name": str(invoking_tool_name),
+        "caller": str(username),
         "message": str(message)
     }
 
