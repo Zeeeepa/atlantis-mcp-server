@@ -1851,10 +1851,6 @@ class ServiceClient:
                 detailed_error_info_message = "Check DEBUG logs for a full traceback."
                 error_message = str(e)
 
-                if CLOUD_CONNECTION_MAX_RETRIES is not None and self.retry_count >= CLOUD_CONNECTION_MAX_RETRIES:
-                    logger.error(f"❌ FAILED TO CONNECT TO CLOUD SERVER AFTER {self.retry_count} ATTEMPTS: {error_message}. {detailed_error_info_message}")
-                    logger.error("❌ GIVING UP ON CLOUD CONNECTION!")
-                    break
 
                 self.retry_count += 1
 
@@ -1876,8 +1872,8 @@ class ServiceClient:
                 logger.debug(f"Traceback: {traceback.format_exc()}")
 
                 # Calculate exponential backoff delay with jitter
-                backoff_delay = CLOUD_CONNECTION_RETRY_SECONDS * (1.2 ** self.retry_count)
-                jitter = random.uniform(0, 1) # Add random jitter (0-1 seconds)
+                backoff_delay = 5
+                jitter = 5 * random.uniform(0, 1) # Add random jitter (0-1 seconds)
                 actual_delay = min(backoff_delay + jitter, CLOUD_CONNECTION_MAX_BACKOFF_SECONDS)
 
                 # Wait before retrying
