@@ -702,6 +702,10 @@ class DynamicAdditionServer(Server):
                          decorators_from_info = function_info.get("decorators")
                          if decorators_from_info: # Only add if list is not None and not empty
                              tool_annotations["decorators"] = decorators_from_info
+                             # Skip this function if it has the @hidden decorator
+                             if "hidden" in decorators_from_info:
+                                 logger.info(f"🙈 Skipping hidden function: {tool_name}")
+                                 continue
                          # Add app_name to annotations if present in function_info
                          app_name_from_info = function_info.get("app_name")
                          if app_name_from_info is not None:

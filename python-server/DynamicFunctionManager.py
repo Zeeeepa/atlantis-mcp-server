@@ -79,6 +79,21 @@ def shared(func_or_module):
     setattr(func_or_module, '_is_shared', True)
     return func_or_module
 
+# --- Hidden Decorator Definition ---
+def hidden(func):
+    """
+    Decorator that marks a function as 'hidden'.
+    When applied, the function will not be included in the tools list.
+    
+    Usage: @hidden
+           def my_hidden_function():
+               # This function will not be visible in tools/list
+               ...
+    """
+    # Mark the function as hidden by setting an attribute
+    setattr(func, '_is_hidden', True)
+    return func
+
 class DynamicFunctionManager:
     def __init__(self, functions_dir):
         # State that was previously global
@@ -509,8 +524,9 @@ class DynamicFunctionManager:
                 app_name_from_decorator = None # Initialize app_name
                 if func_def_node.decorator_list:
                     for decorator_node in func_def_node.decorator_list:
-                        if isinstance(decorator_node, ast.Name): # e.g. @public
-                            decorator_names.append(decorator_node.id)
+                        if isinstance(decorator_node, ast.Name): # e.g. @public, @hidden
+                            decorator_name = decorator_node.id
+                            decorator_names.append(decorator_name)
                         elif isinstance(decorator_node, ast.Call): # e.g. @app(name="foo") or @app("foo")
                             if isinstance(decorator_node.func, ast.Name):
                                 decorator_func_name = decorator_node.func.id
@@ -797,6 +813,8 @@ async def {name}():
                     module.__dict__['public'] = _mcp_identity_decorator
                     # Add app decorator which takes parameters
                     module.__dict__['app'] = app
+                    # Add hidden decorator
+                    module.__dict__['hidden'] = hidden
                     # Add other known decorator names here if they arise
 
                     spec.loader.exec_module(module)
