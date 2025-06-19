@@ -21,6 +21,16 @@ ch.setFormatter(ColoredFormatter())
 # Add handler to the logger
 logger.addHandler(ch)
 
+# Configure the root logger to also use this handler and level
+root_logger = logging.getLogger()
+# Set root logger level (e.g., INFO to see messages from message_db.py)
+root_logger.setLevel(logging.INFO)
+
+# Add the same handler to the root logger if it doesn't have any
+# This ensures messages from 'logging.info()' etc. in other modules are also seen
+if not root_logger.hasHandlers():
+    root_logger.addHandler(ch)
+
 # Prevent logging from propagating to the root logger
 # (important if basicConfig was ever called or might be by libraries)
 logger.propagate = False
