@@ -1520,7 +1520,8 @@ class DynamicAdditionServer(Server):
                     logger.debug(f"<--- Dynamic function '{name}' RAW result: {result_raw} (type: {type(result_raw)})")
                 except Exception as e:
                     logger.error(f"❌ Error during dynamic function call '{name}': {str(e)}", exc_info=True)
-                    raise ValueError(f"Error executing function '{name}': {str(e)}") from e
+                    #raise ValueError(f"Error executing function '{name}': {str(e)}") from e
+                    raise ValueError(f"{str(e)}") from e
 
 
             else:
