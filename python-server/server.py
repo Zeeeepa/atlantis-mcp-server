@@ -1882,7 +1882,7 @@ class ServiceClient:
                 actual_delay = min(backoff_delay + jitter, CLOUD_CONNECTION_MAX_BACKOFF_SECONDS)
 
                 # Wait before retrying
-                logger.info(f"☁️ RETRYING CLOUD CONNECTION IN {actual_delay:.2f} SECONDS...")
+                logger.info(f"☁️ RETRYING {self.email} CLOUD CONNECTION IN {actual_delay:.2f} SECONDS...")
                 await asyncio.sleep(actual_delay)
 
         logger.info("☁️ Cloud connection giving up")
