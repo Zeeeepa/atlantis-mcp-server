@@ -460,6 +460,34 @@ async def client_html(html_content: str, level: str = "INFO"):
     result = await client_log(html_content, level=level, message_type="html")
     return result
 
+async def client_data(data: Any, level: str = "INFO"):
+    """Sends a Python object as serialized JSON back to the requesting client for the current context.
+    This function automatically serializes any Python object that can be converted to JSON.
+    
+    Args:
+        data: The Python object to serialize and send (must be JSON-serializable)
+        level: Log level (e.g., "INFO", "DEBUG")
+        
+    Returns:
+        The result returned by the underlying client_log function
+        
+    Raises:
+        TypeError: If the data cannot be serialized to JSON
+    """
+    try:
+        # Try to serialize the data to JSON to verify it's valid
+        json_str = json.dumps(data)
+        
+        # Send the serialized data with message_type set to 'data'
+        result = await client_log(json_str, level=level, message_type="data")
+        return result
+    except TypeError as e:
+        print(f"ERROR: Failed to serialize data to JSON: {e}")
+        raise TypeError(f"Data is not JSON-serializable: {e}")
+    except Exception as e:
+        print(f"ERROR: Failed during client_data call: {e}")
+        raise
+
 async def gather_logs():
     """Wait for all pending client log tasks to complete.
 
