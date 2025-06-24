@@ -818,7 +818,7 @@ class DynamicServerManager:
             raise ValueError(msg)
 
         if name not in self.server_tasks:
-            msg = f"Server '{name}' is either invalid or not started"
+            msg = f"MCP server '{name}' is either invalid or not started"
             logger.warning(f"⚠️ server_stop: {msg}")
             raise ValueError(msg)
 
@@ -834,7 +834,7 @@ class DynamicServerManager:
         task = task_info['task']
         if task.done():
             logger.info(f"🧹 Task for server '{name}' alrady stopped. Cleaning up entry.")
-            return [TextContent(type='text', text=f"Server '{name}' not running")]
+            return [TextContent(type='text', text=f"MCP server '{name}' not running")]
         else:
             logger.info(f"Attempting to cancel task for server '{name}'...")
 
