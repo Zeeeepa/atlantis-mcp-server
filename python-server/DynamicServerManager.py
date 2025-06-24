@@ -73,16 +73,30 @@ class DynamicServerManager:
         logger.info(f"💾 Saved server config for '{name}' to {file_path}")
         return file_path
 
-    async def _fs_load_server(self, name: str) -> Optional[str]:
+    async def _fs_load_server(self, name: str) -> str:
+        """Load server configuration from file.
+
+        Args:
+            name: Name of the server configuration to load
+
+        Returns:
+            The raw content of the configuration file
+
+        Raises:
+            FileNotFoundError: When the config file doesn't exist
+        """
         safe_name = f"{name}.json"
         file_path = os.path.join(self.servers_dir, safe_name)
+
         if not os.path.exists(file_path):
-            logger.info(f"⚠️ _fs_load_server: Config file not found for '{name}' at {file_path}")
+            error_msg = f"MCP server '{name}' not found (is it installed or spelled correctly?)"
+            logger.error(f"❌ _fs_load_server: {error_msg}")
             self._server_load_errors.pop(name, None)  # Clear potential old error if file is gone
-            return None
+            raise FileNotFoundError(error_msg)
 
         with open(file_path, 'r', encoding='utf-8') as f:
             raw_content = f.read()
+
         self._server_load_errors.pop(name, None) # Clear any previous load error for this name if read succeeds
         return raw_content
 
@@ -174,8 +188,16 @@ class DynamicServerManager:
         return await self._fs_load_server(name)
 
     async def server_get_valid(self, name: str) -> Dict[str, Any]:
-        # No validation, just return whatever _fs_load_server gives us
+        # Load server configuration
         config_txt = await self._fs_load_server(name)
+
+        # Check if the config exists before trying to validate it
+        if config_txt is None:
+            error_msg = f"Server configuration for '{name}' not found. Make sure the server exists."
+            logger.error(f"❌ server_get_valid: {error_msg}")
+            raise ValueError(error_msg)
+
+        # Now validate the existing config
         return await self.validate(config_txt)
 
 
@@ -783,7 +805,7 @@ class DynamicServerManager:
         logger.debug(f"▶️ server_start: Task info recorded for '{name}'. Start time will be added upon session init.")
 
         # Return success
-        return [TextContent(type='text', text=f"Starting MCP service '{name}'")]
+        return [TextContent(type='text', text=f"Attempting to start MCP service '{name}'; please check status")]
 
     async def server_stop(self, args: Dict[str, Any], server) -> List[TextContent]:
         name = args.get('name')
