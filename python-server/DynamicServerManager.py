@@ -120,7 +120,7 @@ class DynamicServerManager:
         # Don't use _fs_load_server which now raises exceptions for missing files
         safe_name = f"{name}.json"
         file_path = os.path.join(self.servers_dir, safe_name)
-        
+
         if os.path.exists(file_path):
             raise ValueError(f"⚠️ Server '{name}' already exists, not adding.")
 
@@ -818,7 +818,7 @@ class DynamicServerManager:
             raise ValueError(msg)
 
         if name not in self.server_tasks:
-            msg = f"Server '{name}' is not running or not managed."
+            msg = f"Server '{name}' is either invalid or not started"
             logger.warning(f"⚠️ server_stop: {msg}")
             raise ValueError(msg)
 
@@ -833,8 +833,8 @@ class DynamicServerManager:
 
         task = task_info['task']
         if task.done():
-            logger.info(f"🧹 Task for server '{name}' was already finished. Cleaning up entry.")
-            return [TextContent(type='text', text=f"Server '{name}' task was already finished.")]
+            logger.info(f"🧹 Task for server '{name}' alrady stopped. Cleaning up entry.")
+            return [TextContent(type='text', text=f"Server '{name}' not running")]
         else:
             logger.info(f"Attempting to cancel task for server '{name}'...")
 
