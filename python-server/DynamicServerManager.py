@@ -116,9 +116,12 @@ class DynamicServerManager:
     # --- 2. Config CRUD Methods ---
 
     async def server_add(self, name: str) -> bool:
-        # Check if server already exists
-        existing = await self._fs_load_server(name)
-        if existing is not None:
+        # Check if server already exists directly by checking the file
+        # Don't use _fs_load_server which now raises exceptions for missing files
+        safe_name = f"{name}.json"
+        file_path = os.path.join(self.servers_dir, safe_name)
+        
+        if os.path.exists(file_path):
             raise ValueError(f"⚠️ Server '{name}' already exists, not adding.")
 
         # Create a template config based on openweather example
