@@ -449,7 +449,7 @@ class DynamicServerManager:
                     try:
                         # Initialize the session
                         logger.debug(f"[{name}] ClientSession created. Initializing session...")
-                        await asyncio.wait_for(session.initialize(), timeout=15.0)  # Increased timeout for reliable init
+                        await asyncio.wait_for(session.initialize(), timeout=30.0)  # Increased timeout for reliable init
                         logger.info(f"[{name}] MCP Session initialized successfully.")
 
                         # Update server_tasks *after* successful initialization
