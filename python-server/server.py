@@ -1143,8 +1143,8 @@ class DynamicAdditionServer(Server):
                 notification_json = json.dumps(notification)
 
                 # Enhanced logging for client log routing
-                logger.info(f"📋 CLIENT LOG ROUTING: Sending to client_id={client_id}, request_id={request_id}")
-                logger.info(f"📋 KNOWN CLIENTS: {list(client_connections.keys())}")
+                logger.debug(f"📋 CLIENT LOG ROUTING: Sending to client_id={client_id}, request_id={request_id}")
+                logger.debug(f"📋 KNOWN CLIENTS: {list(client_connections.keys())}")
                 # Log the notification for debugging (now includes client_id if added)
                 #logger.debug(f"Sending client log notification: {notification_json}")
                 logger.debug(f"Sending client log notification")
@@ -2549,7 +2549,7 @@ if __name__ == "__main__":
     # Update host and port from command line arguments
     HOST = args.host
     PORT = args.port
-    
+
     # Update the logging level from command line argument
     from state import update_log_level
     update_log_level(args.log_level)

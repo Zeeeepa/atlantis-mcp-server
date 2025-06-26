@@ -6,14 +6,18 @@ from ColoredFormatter import ColoredFormatter
 
 # --- REMOVED basicConfig ---
 
+# Determine log level from environment variable if set, otherwise default to INFO
+default_level = os.environ.get('LOG_LEVEL', 'INFO')
+log_level = getattr(logging, default_level, logging.INFO)
+
 # Get our app logger
 logger = logging.getLogger("mcp_server")
-logger.setLevel(logging.INFO)
+logger.setLevel(log_level)
 
 # --- ADDED Handler setup ---
 # Create console handler
 ch = logging.StreamHandler(sys.stdout) # Use stdout
-ch.setLevel(logging.INFO) # Process all messages from logger
+ch.setLevel(log_level) # Process all messages from logger
 
 # Set the custom formatter
 ch.setFormatter(ColoredFormatter())
