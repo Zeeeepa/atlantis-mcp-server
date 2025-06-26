@@ -284,9 +284,12 @@ def image_to_base64(image_path: str) -> str:
         # Re-raise to allow caller to handle
         raise
 
-async def stream_start() -> str:
+async def stream_start(who: str) -> str:
     """Starts a new stream and returns a unique stream_id.
     Sends a 'stream_start' message to the client.
+    
+    Args:
+        who: String identifier for who/what is starting the stream
     """
     stream_id_to_send = str(uuid.uuid4())
     actual_client_id = _client_id_var.get() # Get the actual client ID from context
@@ -309,7 +312,7 @@ async def stream_start() -> str:
     try:
         await util_client_log(
             seq_num=current_seq_to_send, # Pass the obtained sequence number
-            message={"status": "started"},
+            message={"status": "started", "who": who},
             level="INFO",
             logger_name=caller_name,
             request_id=request_id,
