@@ -8,12 +8,12 @@ from ColoredFormatter import ColoredFormatter
 
 # Get our app logger
 logger = logging.getLogger("mcp_server")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 # --- ADDED Handler setup ---
 # Create console handler
 ch = logging.StreamHandler(sys.stdout) # Use stdout
-ch.setLevel(logging.DEBUG) # Process all messages from logger
+ch.setLevel(logging.INFO) # Process all messages from logger
 
 # Set the custom formatter
 ch.setFormatter(ColoredFormatter())
@@ -35,6 +35,22 @@ if not root_logger.hasHandlers():
 # (important if basicConfig was ever called or might be by libraries)
 logger.propagate = False
 # --- End Handler setup ---
+
+def update_log_level(level_name):
+    """Update the logging level of both loggers and handlers.
+    
+    Args:
+        level_name: String name of logging level ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+    """
+    level = getattr(logging, level_name)  # Convert string to logging level constant
+    logger.setLevel(level)
+    ch.setLevel(level)
+    
+    # Also update root logger if it's using our handler
+    if level_name != "DEBUG":  # Keep root at INFO or higher
+        root_logger.setLevel(level)
+    
+    logger.info(f"Log level updated to {level_name}")
 
 # Directory to store dynamic function files
 FUNCTIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dynamic_functions")

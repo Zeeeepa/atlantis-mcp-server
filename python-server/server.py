@@ -2543,11 +2543,16 @@ if __name__ == "__main__":
     parser.add_argument("--api-key", help="Service API key for cloud authentication")
     parser.add_argument("--service-name", help="Desired service name")
     parser.add_argument("--no-cloud", action="store_true", help="Disable cloud server connection")
+    parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], default="INFO", help="Set the logging level")
     args = parser.parse_args()
 
     # Update host and port from command line arguments
     HOST = args.host
     PORT = args.port
+    
+    # Update the logging level from command line argument
+    from state import update_log_level
+    update_log_level(args.log_level)
 
     # Initialize PID Manager with service name if provided
     pid_manager = PIDManager(service_name=args.service_name)

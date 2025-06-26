@@ -39,23 +39,23 @@ class SharedContainer:
     """Container for objects that need to persist across dynamic function reloads"""
     def __init__(self):
         self._data = {}
-        
+
     def get(self, key, default=None):
         """Get a value from the shared container"""
         return self._data.get(key, default)
-        
+
     def set(self, key, value):
         """Store a value in the shared container"""
         self._data[key] = value
         return value
-        
+
     def remove(self, key):
         """Remove a value from the shared container"""
         if key in self._data:
             del self._data[key]
             return True
         return False
-        
+
     def keys(self):
         """Get all keys in the shared container"""
         return list(self._data.keys())
@@ -287,7 +287,7 @@ def image_to_base64(image_path: str) -> str:
 async def stream_start(who: str) -> str:
     """Starts a new stream and returns a unique stream_id.
     Sends a 'stream_start' message to the client.
-    
+
     Args:
         who: String identifier for who/what is starting the stream
     """
@@ -441,7 +441,8 @@ async def client_command(command: str, data: Any = None) -> Any:
             seq_num=current_seq_to_send,  # Pass the sequence number
             entry_point_name=entry_point_name  # Pass the entry point name for logging
         )
-        print(f"INFO: Atlantis: Received result for awaitable command '{command}': {result}")
+        #print(f"INFO: Atlantis: Received result for awaitable command '{command}': {result}")
+        print(f"INFO: Atlantis: Received result for awaitable command '{command}'")
         return result
     except Exception as e:
         print(f"ERROR: Atlantis: Error in client_command for command '{command}': {type(e).__name__} - {e}")
@@ -466,15 +467,15 @@ async def client_html(html_content: str, level: str = "INFO"):
 async def client_data(description: str, data: Any, level: str = "INFO"):
     """Sends a Python object as serialized JSON back to the requesting client for the current context.
     This function automatically serializes any Python object that can be converted to JSON.
-    
+
     Args:
         description: A title/description of what the data represents
         data: The Python object to serialize and send (must be JSON-serializable)
         level: Log level (e.g., "INFO", "DEBUG")
-        
+
     Returns:
         The result returned by the underlying client_log function
-        
+
     Raises:
         TypeError: If the data cannot be serialized to JSON
     """
@@ -484,10 +485,10 @@ async def client_data(description: str, data: Any, level: str = "INFO"):
             "description": description,
             "data": data
         }
-        
+
         # Try to serialize the data to JSON to verify it's valid
         json_str = json.dumps(wrapped_data)
-        
+
         # Send the serialized data with message_type set to 'data'
         result = await client_log(json_str, level=level, message_type="data")
         return result
