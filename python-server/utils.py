@@ -90,8 +90,8 @@ async def client_log(
     if _server_instance is not None:
         try:
             # Enhanced logging for diagnostics
-            logger.info(f"📋 CLIENT LOG DIAGNOSTICS (AWAITABLE): Routing to client_id={client_id_for_routing}, request_id={request_id}")
-            logger.info(f"📋 SERVER INSTANCE TYPE (AWAITABLE): {type(_server_instance).__name__}")
+            logger.debug(f"📋 CLIENT LOG DIAGNOSTICS (AWAITABLE): Routing to client_id={client_id_for_routing}, request_id={request_id}")
+            logger.debug(f"📋 SERVER INSTANCE TYPE (AWAITABLE): {type(_server_instance).__name__}")
 
             # Await the server call to send the log/command and get a response
             if logger_name is None:
@@ -122,7 +122,7 @@ async def client_log(
                     logger.error(f"❌ Traceback: {traceback.format_exc()}")
 
             asyncio.create_task(send_log_task())
-            logger.info(f"📋 CLIENT LOG/COMMAND TASK CREATED for client_id={client_id_for_routing}, request_id={request_id}, seq_num={seq_num}")
+            logger.debug(f"📋 CLIENT LOG/COMMAND TASK CREATED for client_id={client_id_for_routing}, request_id={request_id}, seq_num={seq_num}")
             return None # Return immediately, indicating task creation
         except Exception as e:
             logger.error(f"❌ Error in awaitable client_log: {e}")
