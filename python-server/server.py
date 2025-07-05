@@ -1592,7 +1592,7 @@ class DynamicAdditionServer(Server):
                             error_message_for_owner = f"Error in tool '{name}': {str(e)}"
                             # Construct a unique reference for this error instance if possible
                             error_ref = request_id if request_id else str(uuid.uuid4())[:8]
-                            atlantis.log_to_owner(owner_to_log, error_message_for_owner, level="ERROR", tool_name=name, request_id=error_ref)
+                            await atlantis.owner_log(error_message_for_owner)
                             logger.debug(f"Logged error for tool '{name}' to owner '{owner_to_log}'.")
                         else:
                             logger.warning(f"Could not log error for tool '{name}' to owner: Owner not set.")
