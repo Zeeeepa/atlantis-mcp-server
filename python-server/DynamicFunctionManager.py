@@ -59,17 +59,28 @@ def app(name: str):
         return func_to_decorate
     return decorator
 
-# Make the app decorator available for dynamic functions to import/use.
+# --- Location Decorator Definition ---
+def location(name: str):
+    """Decorator to associate a dynamic function with a location name.
+    Usage: @location(name="your_location_name")
+    """
+    def decorator(func_to_decorate):
+        setattr(func_to_decorate, '_location_name', name)
+        # functools.update_wrapper(decorator, func_to_decorate) # Not strictly needed for AST parsing but good practice
+        return func_to_decorate
+    return decorator
+
+# Make the app and location decorators available for dynamic functions to import/use.
 # This is a simplified way; a more robust way might involve adding it to a shared module
 # that dynamic functions can import from, or injecting it into their global scope upon loading.
-# For now, this definition here allows _code_validate_syntax to recognize it by name 'app'.
+# For now, this definition here allows _code_validate_syntax to recognize them by name 'app' and 'location'.
 
 # --- Shared Module Decorator Definition ---
 def shared(func_or_module):
     """
-    Decorator that marks a function or module as 'shared'. 
+    Decorator that marks a function or module as 'shared'.
     When applied, the function/module will not be reloaded when dynamic functions are invalidated.
-    
+
     Usage: @shared
            def my_persistent_function():
                # This function will maintain its state
@@ -84,7 +95,7 @@ def hidden(func):
     """
     Decorator that marks a function as 'hidden'.
     When applied, the function will not be included in the tools list.
-    
+
     Usage: @hidden
            def my_hidden_function():
                # This function will not be visible in tools/list
@@ -519,15 +530,16 @@ class DynamicFunctionManager:
                 docstring = ast.get_docstring(func_def_node)
                 input_schema = {"type": "object"} # Default empty schema
 
-                # Extract decorators and app_name
+                # Extract decorators, app_name, and location_name
                 decorator_names = []
                 app_name_from_decorator = None # Initialize app_name
+                location_name_from_decorator = None # Initialize location_name
                 if func_def_node.decorator_list:
                     for decorator_node in func_def_node.decorator_list:
                         if isinstance(decorator_node, ast.Name): # e.g. @public, @hidden
                             decorator_name = decorator_node.id
                             decorator_names.append(decorator_name)
-                        elif isinstance(decorator_node, ast.Call): # e.g. @app(name="foo") or @app("foo")
+                        elif isinstance(decorator_node, ast.Call): # e.g. @app(name="foo") or @app("foo"), @location(name="bar") or @location("bar")
                             if isinstance(decorator_node.func, ast.Name):
                                 decorator_func_name = decorator_node.func.id
                                 if decorator_func_name == 'app':
@@ -552,7 +564,29 @@ class DynamicFunctionManager:
                                     if app_name_from_decorator is None:
                                         logger.warning(f"⚠️ @app decorator used on {func_def_node.name} but 'name' argument was not found or not a string.")
                                     # We don't add 'app' to decorator_names, as it's handled separately by app_name_from_decorator
-                                else: # It's a call decorator but not 'app'
+                                elif decorator_func_name == 'location':
+                                    # Extract 'name' argument from @location(name="...") or @location("...")
+                                    if decorator_node.keywords: # Check keyword arguments like name="foo"
+                                        for kw in decorator_node.keywords:
+                                            if kw.arg == 'name' and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                                                if location_name_from_decorator is not None:
+                                                    logger.warning(f"⚠️ Multiple @location name specifications for {func_def_node.name}. Using first one: {location_name_from_decorator}")
+                                                else:
+                                                    location_name_from_decorator = kw.value.value
+                                    # Positional arguments like @location("foo")
+                                    if not location_name_from_decorator and decorator_node.args:
+                                        if len(decorator_node.args) == 1 and isinstance(decorator_node.args[0], ast.Constant) and isinstance(decorator_node.args[0].value, str):
+                                            if location_name_from_decorator is not None: # Should not happen if logic is correct, but for safety
+                                                logger.warning(f"⚠️ Multiple @location name specifications for {func_def_node.name}. Using first one: {location_name_from_decorator}")
+                                            else:
+                                                location_name_from_decorator = decorator_node.args[0].value
+                                        else:
+                                            logger.warning(f"⚠️ @location decorator for {func_def_node.name} has unexpected positional arguments. Expected a single string.")
+
+                                    if location_name_from_decorator is None:
+                                        logger.warning(f"⚠️ @location decorator used on {func_def_node.name} but 'name' argument was not found or not a string.")
+                                    # We don't add 'location' to decorator_names, as it's handled separately by location_name_from_decorator
+                                else: # It's a call decorator but not 'app' or 'location'
                                     decorator_names.append(decorator_func_name)
                             else: # Decorator call but func is not a simple Name (e.g. @obj.deco())
                                 # Try to reconstruct its name, could be complex e.g. ast.Attribute
@@ -574,7 +608,8 @@ class DynamicFunctionManager:
                     "description": docstring or "(No description provided)", # Provide default
                     "inputSchema": input_schema,
                     "decorators": decorator_names, # Add extracted decorators here
-                    "app_name": app_name_from_decorator # Add extracted app_name
+                    "app_name": app_name_from_decorator, # Add extracted app_name
+                    "location_name": location_name_from_decorator # Add extracted location_name
                 }
                 return True, None, function_info
             else:
@@ -813,6 +848,8 @@ async def {name}():
                     module.__dict__['public'] = _mcp_identity_decorator
                     # Add app decorator which takes parameters
                     module.__dict__['app'] = app
+                    # Add location decorator which takes parameters
+                    module.__dict__['location'] = location
                     # Add hidden decorator
                     module.__dict__['hidden'] = hidden
                     # Add other known decorator names here if they arise

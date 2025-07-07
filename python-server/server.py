@@ -710,6 +710,10 @@ class DynamicAdditionServer(Server):
                          app_name_from_info = function_info.get("app_name")
                          if app_name_from_info is not None:
                              tool_annotations["app_name"] = app_name_from_info
+                         # Add location_name to annotations if present in function_info
+                         location_name_from_info = function_info.get("location_name")
+                         if location_name_from_info is not None:
+                             tool_annotations["location_name"] = location_name_from_info
                     elif is_valid and not function_info:
                          # Valid syntax but failed to extract info (should ideally not happen)
                          tool_description = f"Dynamic function: {tool_name_from_file} (Details unavailable)"
