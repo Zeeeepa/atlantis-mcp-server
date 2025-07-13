@@ -22,15 +22,42 @@ Provides easy access to client-side logging and other shared functionality.
 def clean_filename(name: str) -> str:
     """
     Cleans/sanitizes a filename for filesystem usage.
-    This is a placeholder function that will be implemented later.
+    Checks for double .py extensions and throws an exception if found.
+    Also provides basic filename sanitization.
 
     Args:
         name: The filename to clean
 
     Returns:
         Cleaned filename safe for filesystem usage
+
+    Raises:
+        ValueError: If the filename ends with .py.py (double extension)
     """
-    return name
+    if not name or not isinstance(name, str):
+        raise ValueError("Invalid filename: must be a non-empty string")
+
+    # Check for double .py extension
+    if name.endswith('.py.py'):
+        raise ValueError(f"Invalid filename '{name}': ends with double .py extension. Please provide a name without the .py suffix.")
+
+    # Basic sanitization - remove or replace problematic characters
+    # Replace spaces with underscores
+    cleaned = name.replace(' ', '_')
+
+    # Remove or replace other problematic characters
+    import re
+    # Remove characters that are problematic in filenames
+    cleaned = re.sub(r'[<>:"/\\|?*]', '', cleaned)
+
+    # Remove leading/trailing dots and spaces
+    cleaned = cleaned.strip('. ')
+
+    # Ensure the result is not empty
+    if not cleaned:
+        raise ValueError("Invalid filename: results in empty string after cleaning")
+
+    return cleaned
 
 # Global server reference to be set at startup
 _server_instance = None

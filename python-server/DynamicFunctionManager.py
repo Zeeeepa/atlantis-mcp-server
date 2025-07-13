@@ -113,6 +113,9 @@ class DynamicFunctionManager:
         self._dynamic_functions_cache = {}
         self._dynamic_load_lock = asyncio.Lock()
 
+        # NEW: Function-to-file mapping cache
+        self._function_file_mapping = {}  # function_name -> filename mapping
+        self._function_file_mapping_mtime = 0.0  # track when mapping was last built
 
         # Create directories if they don't exist
         os.makedirs(self.functions_dir, exist_ok=True)
@@ -500,15 +503,15 @@ class DynamicFunctionManager:
 
     def _code_validate_syntax(self, code_buffer):
         """
-        Validates syntax using ast.parse and extracts info about the *first* function definition found.
+        Validates syntax using ast.parse and extracts info about ALL function definitions found.
 
         Returns:
-            tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+            tuple[bool, Optional[str], Optional[List[Dict[str, Any]]]]:
             - is_valid (bool): True if syntax is correct.
             - error_message (Optional[str]): Error details if invalid, None otherwise.
-            - function_info (Optional[Dict[str, Any]]):
-                Dict with 'name', 'description', 'inputSchema' if valid and a function is found,
-                None otherwise.
+            - functions_info (Optional[List[Dict[str, Any]]]):
+                List of dicts with 'name', 'description', 'inputSchema' for each function found,
+                None if no functions found or invalid syntax.
         """
         if not code_buffer or not isinstance(code_buffer, str):
             return False, "Empty or invalid code buffer", None
@@ -517,101 +520,103 @@ class DynamicFunctionManager:
             tree = ast.parse(code_buffer)
             logger.debug("⚙️ Code validation successful (AST parse).")
 
-            func_def_node = None
-            # Find the first top-level function definition
+            functions_info = []
+            # Find ALL top-level function definitions
             for node in tree.body:
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     func_def_node = node
-                    break
+                    logger.debug(f"⚙️ Found function definition: {func_def_node.name}")
 
-            if func_def_node:
-                logger.debug(f"⚙️ Found function definition: {func_def_node.name}")
-                func_name = func_def_node.name
-                docstring = ast.get_docstring(func_def_node)
-                input_schema = {"type": "object"} # Default empty schema
+                    func_name = func_def_node.name
+                    docstring = ast.get_docstring(func_def_node)
+                    input_schema = {"type": "object"} # Default empty schema
 
-                # Extract decorators, app_name, and location_name
-                decorator_names = []
-                app_name_from_decorator = None # Initialize app_name
-                location_name_from_decorator = None # Initialize location_name
-                if func_def_node.decorator_list:
-                    for decorator_node in func_def_node.decorator_list:
-                        if isinstance(decorator_node, ast.Name): # e.g. @public, @hidden
-                            decorator_name = decorator_node.id
-                            decorator_names.append(decorator_name)
-                        elif isinstance(decorator_node, ast.Call): # e.g. @app(name="foo") or @app("foo"), @location(name="bar") or @location("bar")
-                            if isinstance(decorator_node.func, ast.Name):
-                                decorator_func_name = decorator_node.func.id
-                                if decorator_func_name == 'app':
-                                    # Extract 'name' argument from @app(name="...") or @app("...")
-                                    if decorator_node.keywords: # Check keyword arguments like name="foo"
-                                        for kw in decorator_node.keywords:
-                                            if kw.arg == 'name' and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
-                                                if app_name_from_decorator is not None:
+                    # Extract decorators, app_name, and location_name
+                    decorator_names = []
+                    app_name_from_decorator = None # Initialize app_name
+                    location_name_from_decorator = None # Initialize location_name
+                    if func_def_node.decorator_list:
+                        for decorator_node in func_def_node.decorator_list:
+                            if isinstance(decorator_node, ast.Name): # e.g. @public, @hidden
+                                decorator_name = decorator_node.id
+                                decorator_names.append(decorator_name)
+                            elif isinstance(decorator_node, ast.Call): # e.g. @app(name="foo") or @app("foo"), @location(name="bar") or @location("bar")
+                                if isinstance(decorator_node.func, ast.Name):
+                                    decorator_func_name = decorator_node.func.id
+                                    if decorator_func_name == 'app':
+                                        # Extract 'name' argument from @app(name="...") or @app("...")
+                                        if decorator_node.keywords: # Check keyword arguments like name="foo"
+                                            for kw in decorator_node.keywords:
+                                                if kw.arg == 'name' and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                                                    if app_name_from_decorator is not None:
+                                                        logger.warning(f"⚠️ Multiple @app name specifications for {func_def_node.name}. Using first one: {app_name_from_decorator}")
+                                                    else:
+                                                        app_name_from_decorator = kw.value.value
+                                        # Positional arguments like @app("foo")
+                                        if not app_name_from_decorator and decorator_node.args:
+                                            if len(decorator_node.args) == 1 and isinstance(decorator_node.args[0], ast.Constant) and isinstance(decorator_node.args[0].value, str):
+                                                if app_name_from_decorator is not None: # Should not happen if logic is correct, but for safety
                                                     logger.warning(f"⚠️ Multiple @app name specifications for {func_def_node.name}. Using first one: {app_name_from_decorator}")
                                                 else:
-                                                    app_name_from_decorator = kw.value.value
-                                    # Positional arguments like @app("foo")
-                                    if not app_name_from_decorator and decorator_node.args:
-                                        if len(decorator_node.args) == 1 and isinstance(decorator_node.args[0], ast.Constant) and isinstance(decorator_node.args[0].value, str):
-                                            if app_name_from_decorator is not None: # Should not happen if logic is correct, but for safety
-                                                logger.warning(f"⚠️ Multiple @app name specifications for {func_def_node.name}. Using first one: {app_name_from_decorator}")
+                                                    app_name_from_decorator = decorator_node.args[0].value
                                             else:
-                                                app_name_from_decorator = decorator_node.args[0].value
-                                        else:
-                                            logger.warning(f"⚠️ @app decorator for {func_def_node.name} has unexpected positional arguments. Expected a single string.")
+                                                logger.warning(f"⚠️ @app decorator for {func_def_node.name} has unexpected positional arguments. Expected a single string.")
 
-                                    if app_name_from_decorator is None:
-                                        logger.warning(f"⚠️ @app decorator used on {func_def_node.name} but 'name' argument was not found or not a string.")
-                                    # We don't add 'app' to decorator_names, as it's handled separately by app_name_from_decorator
-                                elif decorator_func_name == 'location':
-                                    # Extract 'name' argument from @location(name="...") or @location("...")
-                                    if decorator_node.keywords: # Check keyword arguments like name="foo"
-                                        for kw in decorator_node.keywords:
-                                            if kw.arg == 'name' and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
-                                                if location_name_from_decorator is not None:
+                                        if app_name_from_decorator is None:
+                                            logger.warning(f"⚠️ @app decorator used on {func_def_node.name} but 'name' argument was not found or not a string.")
+                                        # We don't add 'app' to decorator_names, as it's handled separately by app_name_from_decorator
+                                    elif decorator_func_name == 'location':
+                                        # Extract 'name' argument from @location(name="...") or @location("...")
+                                        if decorator_node.keywords: # Check keyword arguments like name="foo"
+                                            for kw in decorator_node.keywords:
+                                                if kw.arg == 'name' and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                                                    if location_name_from_decorator is not None:
+                                                        logger.warning(f"⚠️ Multiple @location name specifications for {func_def_node.name}. Using first one: {location_name_from_decorator}")
+                                                    else:
+                                                        location_name_from_decorator = kw.value.value
+                                        # Positional arguments like @location("foo")
+                                        if not location_name_from_decorator and decorator_node.args:
+                                            if len(decorator_node.args) == 1 and isinstance(decorator_node.args[0], ast.Constant) and isinstance(decorator_node.args[0].value, str):
+                                                if location_name_from_decorator is not None: # Should not happen if logic is correct, but for safety
                                                     logger.warning(f"⚠️ Multiple @location name specifications for {func_def_node.name}. Using first one: {location_name_from_decorator}")
                                                 else:
-                                                    location_name_from_decorator = kw.value.value
-                                    # Positional arguments like @location("foo")
-                                    if not location_name_from_decorator and decorator_node.args:
-                                        if len(decorator_node.args) == 1 and isinstance(decorator_node.args[0], ast.Constant) and isinstance(decorator_node.args[0].value, str):
-                                            if location_name_from_decorator is not None: # Should not happen if logic is correct, but for safety
-                                                logger.warning(f"⚠️ Multiple @location name specifications for {func_def_node.name}. Using first one: {location_name_from_decorator}")
+                                                    location_name_from_decorator = decorator_node.args[0].value
                                             else:
-                                                location_name_from_decorator = decorator_node.args[0].value
-                                        else:
-                                            logger.warning(f"⚠️ @location decorator for {func_def_node.name} has unexpected positional arguments. Expected a single string.")
+                                                logger.warning(f"⚠️ @location decorator for {func_def_node.name} has unexpected positional arguments. Expected a single string.")
 
-                                    if location_name_from_decorator is None:
-                                        logger.warning(f"⚠️ @location decorator used on {func_def_node.name} but 'name' argument was not found or not a string.")
-                                    # We don't add 'location' to decorator_names, as it's handled separately by location_name_from_decorator
-                                else: # It's a call decorator but not 'app' or 'location'
-                                    decorator_names.append(decorator_func_name)
-                            else: # Decorator call but func is not a simple Name (e.g. @obj.deco())
-                                # Try to reconstruct its name, could be complex e.g. ast.Attribute
-                                # For now, we'll log and skip complex decorator calls for simplicity
-                                logger.debug(f"Skipping complex decorator call structure: {ast.dump(decorator_node.func)}")
-                        # Skipping other decorator types for now (e.g. ast.Attribute)
+                                        if location_name_from_decorator is None:
+                                            logger.warning(f"⚠️ @location decorator used on {func_def_node.name} but 'name' argument was not found or not a string.")
+                                        # We don't add 'location' to decorator_names, as it's handled separately by location_name_from_decorator
+                                    else: # It's a call decorator but not 'app' or 'location'
+                                        decorator_names.append(decorator_func_name)
+                                else: # Decorator call but func is not a simple Name (e.g. @obj.deco())
+                                    # Try to reconstruct its name, could be complex e.g. ast.Attribute
+                                    # For now, we'll log and skip complex decorator calls for simplicity
+                                    logger.debug(f"Skipping complex decorator call structure: {ast.dump(decorator_node.func)}")
+                            # Skipping other decorator types for now (e.g. ast.Attribute)
 
-                # Generate schema from arguments
-                try:
-                     schema_parts = self._ast_arguments_to_json_schema(func_def_node.args, docstring)
-                     input_schema["properties"] = schema_parts.get("properties", {})
-                     input_schema["required"] = schema_parts.get("required", [])
-                except Exception as schema_e:
-                     logger.warning(f"⚠️ Could not generate input schema for {func_name}: {schema_e}")
-                     input_schema["description"] = f"Schema generation error: {schema_e}"
+                    # Generate schema from arguments
+                    try:
+                         schema_parts = self._ast_arguments_to_json_schema(func_def_node.args, docstring)
+                         input_schema["properties"] = schema_parts.get("properties", {})
+                         input_schema["required"] = schema_parts.get("required", [])
+                    except Exception as schema_e:
+                         logger.warning(f"⚠️ Could not generate input schema for {func_name}: {schema_e}")
+                         input_schema["description"] = f"Schema generation error: {schema_e}"
 
-                function_info = {
-                    "name": func_name,
-                    "description": docstring or "(No description provided)", # Provide default
-                    "inputSchema": input_schema,
-                    "decorators": decorator_names, # Add extracted decorators here
-                    "app_name": app_name_from_decorator, # Add extracted app_name
-                    "location_name": location_name_from_decorator # Add extracted location_name
-                }
-                return True, None, function_info
+                    function_info = {
+                        "name": func_name,
+                        "description": docstring or "(No description provided)", # Provide default
+                        "inputSchema": input_schema,
+                        "decorators": decorator_names, # Add extracted decorators here
+                        "app_name": app_name_from_decorator, # Add extracted app_name
+                        "location_name": location_name_from_decorator # Add extracted location_name
+                    }
+                    functions_info.append(function_info)
+
+            if functions_info:
+                logger.debug(f"⚙️ Found {len(functions_info)} function(s) in file")
+                return True, None, functions_info
             else:
                 logger.warning("⚠️ Syntax valid, but no top-level function definition found.")
                 return True, "Syntax valid, but no function definition found", None
@@ -659,6 +664,59 @@ async def {name}():
         return stub
 
     # Cache management
+    async def invalidate_function_mapping_cache(self):
+        """Invalidate the function-to-file mapping cache."""
+        self._function_file_mapping.clear()
+        self._function_file_mapping_mtime = 0.0
+        logger.debug("🧹 Function-to-file mapping cache invalidated")
+
+    async def _build_function_file_mapping(self):
+        """Build the function-to-file mapping by scanning all files."""
+        try:
+            # Check if we need to rebuild the mapping
+            current_mtime = os.path.getmtime(self.functions_dir)
+            if (self._function_file_mapping and
+                current_mtime == self._function_file_mapping_mtime):
+                logger.debug("⚡ Using cached function-to-file mapping")
+                return
+
+            logger.info("🔍 Building function-to-file mapping...")
+            self._function_file_mapping.clear()
+
+            # Scan all Python files in the functions directory
+            for filename in os.listdir(self.functions_dir):
+                if not filename.endswith('.py'):
+                    continue
+
+                file_path = os.path.join(self.functions_dir, filename)
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        code = f.read()
+
+                    # Validate and extract function info
+                    is_valid, error_message, functions_info = self._code_validate_syntax(code)
+
+                    if is_valid and functions_info:
+                        for func_info in functions_info:
+                            func_name = func_info['name']
+                            self._function_file_mapping[func_name] = filename
+                            logger.debug(f"  📍 {func_name} -> {filename}")
+
+                except Exception as e:
+                    logger.warning(f"⚠️ Error processing {filename} for function mapping: {e}")
+                    continue
+
+            self._function_file_mapping_mtime = current_mtime
+            logger.info(f"✅ Built function-to-file mapping with {len(self._function_file_mapping)} functions")
+
+        except Exception as e:
+            logger.error(f"❌ Error building function-to-file mapping: {e}")
+
+    async def _find_file_containing_function(self, function_name: str) -> Optional[str]:
+        """Find which file contains the specified function."""
+        await self._build_function_file_mapping()
+        return self._function_file_mapping.get(function_name)
+
     async def invalidate_all_dynamic_module_cache(self):
         """Safely removes ALL dynamic function modules AND the parent package from sys.modules cache."""
 
@@ -688,6 +746,9 @@ async def {name}():
                 logger.debug(f"  Remaining dynamic keys (incl parent) in sys.modules after pop: {remaining_dynamic_keys}")
             else:
                 logger.debug("No dynamic modules (or parent) found in sys.modules to invalidate.")
+
+        # NEW: Also invalidate function mapping cache
+        await self.invalidate_function_mapping_cache()
 
     async def function_add(self, name: str, code: Optional[str] = None) -> bool:
         '''
@@ -795,13 +856,18 @@ async def {name}():
         if not secure_name:
             raise ValueError(f"Invalid function name '{name}' for calling.")
 
-        file_path = os.path.join(self.functions_dir, f"{secure_name}.py")
+        # NEW: Find which file contains this function
+        target_file = await self._find_file_containing_function(name)
+        if not target_file:
+            raise FileNotFoundError(f"Dynamic function '{name}' not found in any file")
 
+        file_path = os.path.join(self.functions_dir, target_file)
         if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Dynamic function '{secure_name}' not found at {file_path}")
+            raise FileNotFoundError(f"Dynamic function '{name}' not found at {file_path}")
 
         context_tokens = None
-        module_name = f"{PARENT_PACKAGE_NAME}.{secure_name}"
+        # Use the actual filename (without .py) for module name
+        module_name = f"{PARENT_PACKAGE_NAME}.{os.path.splitext(target_file)[0]}"
         module = None # Define module outside the lock
 
         # --- Clear ALL dynamic function child modules from cache FIRST ---
@@ -836,7 +902,7 @@ async def {name}():
                 logger.info(f"Loading module fresh: {module_name}")
                 spec = importlib.util.spec_from_file_location(module_name, file_path)
                 if spec is None or spec.loader is None:
-                    raise ImportError(f"Could not create module spec for {secure_name}")
+                    raise ImportError(f"Could not create module spec for {target_file}")
                 try:
                     module = importlib.util.module_from_spec(spec)
                     sys.modules[module_name] = module # Add to sys.modules before exec
@@ -889,21 +955,21 @@ async def {name}():
                 request_id=request_id,
                 client_id=client_id,
                 user=user,  # Pass the user who made the call - only works if atlantis.py has been updated
-                entry_point_name=secure_name # Pass the entry point name
+                entry_point_name=name # Pass the actual function name (not filename)
             )
 
             # --- Function Execution ---
-            logger.info(f"Attempting to get function '{secure_name}' from loaded module.")
-            function_to_call = getattr(module, secure_name, None)
+            logger.info(f"Attempting to get function '{name}' from loaded module.")
+            function_to_call = getattr(module, name, None)
             if not callable(function_to_call):
-                raise ValueError(f"No callable function '{secure_name}' found in module. "
-                              f"Please ensure the file contains a function matching its filename.")
+                raise ValueError(f"No callable function '{name}' found in module '{target_file}'. "
+                              f"Please ensure the file contains a function with this name.")
 
             # Log whether we have user context available
             if user:
-                logger.debug(f"Function '{secure_name}' will be called with user context: {user}")
+                logger.debug(f"Function '{name}' will be called with user context: {user}")
 
-            logger.info(f"Calling dynamic function '{secure_name}' with args: {kwargs.get('args', {})}")
+            logger.info(f"Calling dynamic function '{name}' with args: {kwargs.get('args', {})}")
 
             # Extract args from the kwargs dictionary
             function_args = kwargs.get('args', {})
@@ -913,7 +979,7 @@ async def {name}():
             else:
                 result = function_to_call(**function_args)
 
-            logger.info(f"Dynamic function '{secure_name}' executed successfully.")
+            logger.info(f"Dynamic function '{name}' executed successfully.")
             return result
 
         except Exception as exec_err:
@@ -937,7 +1003,7 @@ async def {name}():
     async def function_validate(self, name: str) -> Dict[str, Any]:
         '''
         Validates the syntax of a function file without executing it.
-        Returns a dictionary {'valid': bool, 'error': Optional[str], 'function_info': Optional[Dict]}
+        Returns a dictionary {'valid': bool, 'error': Optional[str], 'function_info': Optional[List[Dict]]}
         with detailed error messages and extracted function details on success.
         '''
         secure_name = utils.clean_filename(name)
@@ -953,12 +1019,12 @@ async def {name}():
             await self._write_error_log(name, error_msg)
             return {'valid': False, 'error': error_msg, 'function_info': None}
 
-        # _code_validate_syntax now returns: (is_valid, error_message, function_info)
-        is_valid, error_message, function_info = self._code_validate_syntax(code)
+        # _code_validate_syntax now returns: (is_valid, error_message, functions_info)
+        is_valid, error_message, functions_info = self._code_validate_syntax(code)
 
         if is_valid:
             # Successful validation
-            logger.info(f"Syntax validation successful for function '{secure_name}'")
+            logger.info(f"Syntax validation successful for function file '{secure_name}'")
 
             # If there was a previous error log, remove it since the function is now valid
             try:
@@ -969,12 +1035,12 @@ async def {name}():
             except Exception as e:
                 logger.debug(f"Failed to remove old error log for '{secure_name}': {e}")
 
-            # Return success and the extracted function info
-            return {'valid': True, 'error': None, 'function_info': function_info}
+            # Return success and the extracted function info (now a list)
+            return {'valid': True, 'error': None, 'function_info': functions_info}
         else:
             # Failed validation - write to the error log
             error_msg_full = f"Syntax validation failed: {error_message}"
-            logger.warning(f"{error_msg_full} Function: '{secure_name}'")
+            logger.warning(f"{error_msg_full} Function file: '{secure_name}'")
             await self._write_error_log(secure_name, error_msg_full)
 
             # Return the detailed error message
@@ -986,34 +1052,50 @@ async def {name}():
     async def function_set(self, args: Dict[str, Any], server: Any) -> Tuple[Optional[str], List[TextContent]]:
         """
         Handles the _function_set tool call.
-        Extracts the function name using basic regex, saves the provided code.
-        Returns the extracted function name (if successful) and a status message.
+        Extracts all function names using AST parsing, saves the provided code.
+        Supports optional filename parameter for multi-function files.
+        Returns the filename used (if successful) and a status message.
         Does *not* perform full syntax validation before saving.
         """
-        logger.info("⚙️ Handling _function_set call (using basic name extraction)")
+        logger.info("⚙️ Handling _function_set call (using AST parsing for all functions)")
         code_buffer = args.get("code")
-        extracted_function_name: Optional[str] = None # Keep track of extracted name
+        target_filename = args.get("filename")  # NEW: Optional filename parameter
 
         if not code_buffer or not isinstance(code_buffer, str):
             logger.warning("⚠️ function_set: Missing or invalid 'code' parameter.")
             # Return None for name, and the error message
             return None, [TextContent(type="text", text="Error: Missing or invalid 'code' parameter.")]
 
-        # 1. Extract function name using basic regex
-        metadata = self._code_extract_basic_metadata(code_buffer)
-        extracted_function_name = metadata.get('name') # Store extracted name
+        # 1. Extract ALL function names using AST parsing
+        is_valid, error_message, functions_info = self._code_validate_syntax(code_buffer)
 
-        if not extracted_function_name:
-            error_response = "Error: Could not extract function name from the provided code using basic parsing. Ensure it starts with 'def function_name(...):'"
-            logger.warning(f"⚠️ function_set: Failed to extract name via regex.")
-            # Return None for name, and the error message
+        if not is_valid:
+            error_response = f"Error: Could not parse function code: {error_message}"
+            logger.warning(f"⚠️ function_set: Failed to parse code via AST.")
             return None, [TextContent(type="text", text=error_response)]
 
-        logger.info(f"⚙️ Extracted function name via regex: {extracted_function_name}")
+        if not functions_info:
+            error_response = "Error: Could not extract any function names from the provided code. Ensure it contains at least one function definition."
+            logger.warning(f"⚠️ function_set: No functions found in code.")
+            return None, [TextContent(type="text", text=error_response)]
+
+        # Extract function names
+        function_names = [func_info['name'] for func_info in functions_info]
+        logger.info(f"⚙️ Extracted {len(function_names)} function(s) via AST: {', '.join(function_names)}")
+
+        # 2. Determine filename to save to
+        if target_filename:
+            # Use specified filename
+            filename_to_use = target_filename
+            logger.info(f"⚙️ Using specified filename: {filename_to_use}")
+        else:
+            # Use first function name as filename (backward compatibility)
+            filename_to_use = function_names[0]
+            logger.info(f"⚙️ Using first function name as filename (backward compatibility): {filename_to_use}")
 
         # --- Backup existing file before saving new one ---
-        secure_name = utils.clean_filename(extracted_function_name)
-        if secure_name: # Should always be true if extracted_function_name is valid
+        secure_name = utils.clean_filename(filename_to_use)
+        if secure_name: # Should always be true if filename_to_use is valid
             file_path = os.path.join(self.functions_dir, f"{secure_name}.py")
             if os.path.exists(file_path):
                 logger.info(f"💾 Found existing file for '{secure_name}', attempting backup...")
@@ -1036,37 +1118,38 @@ async def {name}():
             logger.warning("⚠️ Could not create secure filename for backup check in function_set.")
         # --- End Backup ---
 
-        # 2. Save the code (validation will happen later when tools are listed/called)
-        saved_path = await self._fs_save_code(extracted_function_name, code_buffer)
+        # 3. Save the code (validation will happen later when tools are listed/called)
+        saved_path = await self._fs_save_code(filename_to_use, code_buffer)
 
         if not saved_path:
-            error_response = f"Error saving function '{extracted_function_name}' to file."
+            error_response = f"Error saving functions to file '{filename_to_use}'."
             logger.error(f"❌ function_set: {error_response}")
-            # Return extracted name (as we got this far), but with error message
-            return extracted_function_name, [TextContent(type="text", text=error_response)]
+            # Return filename (as we got this far), but with error message
+            return filename_to_use, [TextContent(type="text", text=error_response)]
 
-        logger.info(f"💾 Function '{extracted_function_name}' code saved successfully to {saved_path}")
+        logger.info(f"💾 Functions saved successfully to {saved_path}")
 
-        # Clear any cached runtime error for this function, as it's been updated
-        self._runtime_errors.pop(extracted_function_name, None)
+        # Clear any cached runtime errors for all functions, as they've been updated
+        for func_name in function_names:
+            self._runtime_errors.pop(func_name, None)
 
-        # 3. Attempt AST parsing for immediate feedback (but save regardless)
+        # 4. Attempt AST parsing for immediate feedback (but save regardless)
         syntax_error = None
         try:
             ast.parse(code_buffer)
-            logger.info(f"✅ Basic syntax validation (AST parse) successful for '{extracted_function_name}'.")
+            logger.info(f"✅ Basic syntax validation (AST parse) successful for '{filename_to_use}'.")
         except SyntaxError as e:
             syntax_error = str(e)
-            logger.warning(f"⚠️ Basic syntax validation (AST parse) failed for '{extracted_function_name}': {syntax_error}")
+            logger.warning(f"⚠️ Basic syntax validation (AST parse) failed for '{filename_to_use}': {syntax_error}")
 
-        # 4. Clear cache (server needs to reload tools)
-        logger.info(f"🧹 Clearing tool cache on server due to function_set for '{extracted_function_name}'.")
+        # 5. Clear cache (server needs to reload tools)
+        logger.info(f"🧹 Clearing tool cache on server due to function_set for '{filename_to_use}'.")
         server._cached_tools = None
         server._last_functions_dir_mtime = None # Reset mtime to force reload
         server._last_servers_dir_mtime = None # Reset mtime to force reload
 
-        # 5. Prepare success message, including validation status
-        save_status = f"Function '{extracted_function_name}' saved."
+        # 6. Prepare success message, including validation status
+        save_status = f"Functions saved to '{filename_to_use}.py': {', '.join(function_names)}"
         annotations = None # Default to no annotations
         if syntax_error:
             # If validation failed, add structured error to annotations
@@ -1083,12 +1166,12 @@ async def {name}():
             logger.info(f"✅ {response_message}")
 
         # Return TextContent with text and potentially annotations
-        return extracted_function_name, [TextContent(type="text", text=response_message, annotations=annotations)]
+        return filename_to_use, [TextContent(type="text", text=response_message, annotations=annotations)]
 
     # Function to get code for a dynamic function
     async def get_function_code(self, args, mcp_server) -> list[TextContent]:
         """
-        Get the source code for a dynamic function by name using _fs_load_code.
+        Get the source code for a dynamic function by name using function-to-file mapping.
         Returns the code as a TextContent object.
         """
         # Get function name
@@ -1098,12 +1181,18 @@ async def {name}():
         if not name:
             raise ValueError("Missing required parameter: name")
 
-        # Load the code using the existing _fs_load_code utility
-        code = self._fs_load_code(name)
+        # NEW: Find which file contains this function
+        target_file = await self._find_file_containing_function(name)
+        if not target_file:
+            raise ValueError(f"Function '{name}' not found in any file")
+
+        # Load the code using the existing _fs_load_code utility with the filename
+        filename_without_ext = os.path.splitext(target_file)[0]
+        code = await self._fs_load_code(filename_without_ext)
         if code is None:
             raise ValueError(f"Function '{name}' not found or could not be read")
 
-        logger.info(f"📋 Retrieved code for function: {name}")
+        logger.info(f"📋 Retrieved code for function: {name} from {target_file}")
 
         # Return the code as text content
         return [TextContent(type="text", text=code)]

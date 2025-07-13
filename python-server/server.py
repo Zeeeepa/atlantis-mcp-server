@@ -208,6 +208,8 @@ class DynamicConfigEventHandler(FileSystemEventHandler):
                 logger.info(f"⚡ File watcher triggering flush of all dynamic function runtime caches due to change in {os.path.basename(file_path)}.")
                 try:
                     await self.mcp_server.function_manager.invalidate_all_dynamic_module_cache()
+                    # NEW: Also invalidate function mapping cache
+                    await self.mcp_server.function_manager.invalidate_function_mapping_cache()
                 except Exception as e:
                     logger.error(f"❌ Error invalidating all dynamic modules cache from file watcher: {e}")
             # --- End Runtime Cache Invalidation ---
@@ -670,7 +672,7 @@ class DynamicAdditionServer(Server):
             function_files = [f for f in os.listdir(FUNCTIONS_DIR) if f.endswith('.py')]
             logger.info(f"📝 FOUND {len(function_files)} POTENTIAL DYNAMIC FUNCTIONS")
 
-            # For each Python file, create a Tool entry
+            # For each Python file, create Tool entries
             for file_name in function_files:
                 tool_name_from_file = os.path.splitext(file_name)[0]
                 try:
@@ -682,76 +684,130 @@ class DynamicAdditionServer(Server):
                     validation_result = await self.function_manager.function_validate(tool_name_from_file)
                     is_valid = validation_result.get('valid', False)
                     error_message = validation_result.get('error')
-                    function_info = validation_result.get('function_info') # Should be a dict if valid
+                    functions_info = validation_result.get('function_info') # Should be a list if valid
 
-                    # --- Create Tool --- #
-                    tool_name = tool_name_from_file
-                    tool_description = f"Dynamic function: {tool_name_from_file}"
-                    tool_input_schema = {"type": "object", "properties": {}}
-                    tool_annotations = {}
+                    # NEW: Handle multiple functions per file
+                    if is_valid and functions_info:
+                        # Create one tool per function in the file
+                        for func_info in functions_info:
+                            # --- Create Tool --- #
+                            tool_name = func_info.get('name', tool_name_from_file) # Use AST name, fallback to filename
+                            tool_description = func_info.get('description', f"Dynamic function '{tool_name}'")
+                            tool_input_schema = func_info.get('inputSchema', {"type": "object", "properties": {}})
+                            tool_annotations = {}
 
-                    tool_annotations["type"] = "function"
+                            tool_annotations["type"] = "function"
+                            tool_annotations["validationStatus"] = "VALID"
+                            tool_annotations["sourceFile"] = file_name  # NEW: Track which file contains this function
 
-                    if is_valid and function_info:
-                         # Use extracted info if valid and available
-                         tool_name = function_info.get('name', tool_name_from_file) # Use AST name, fallback to filename
-                         tool_description = function_info.get('description', f"Dynamic function '{tool_name}'")
-                         tool_input_schema = function_info.get('inputSchema', {"type": "object", "properties": {}})
-                         tool_annotations["validationStatus"] = "VALID"
-                         # Add decorator info if present (opt-in)
-                         decorators_from_info = function_info.get("decorators")
-                         if decorators_from_info: # Only add if list is not None and not empty
-                             tool_annotations["decorators"] = decorators_from_info
-                             # Skip this function if it has the @hidden decorator
-                             if "hidden" in decorators_from_info:
-                                 logger.info(f"🙈 Skipping hidden function: {tool_name}")
-                                 continue
-                         # Add app_name to annotations if present in function_info
-                         app_name_from_info = function_info.get("app_name")
-                         if app_name_from_info is not None:
-                             tool_annotations["app_name"] = app_name_from_info
-                         # Add location_name to annotations if present in function_info
-                         location_name_from_info = function_info.get("location_name")
-                         if location_name_from_info is not None:
-                             tool_annotations["location_name"] = location_name_from_info
-                    elif is_valid and not function_info:
+                            # Add decorator info if present (opt-in)
+                            decorators_from_info = func_info.get("decorators")
+                            if decorators_from_info: # Only add if list is not None and not empty
+                                tool_annotations["decorators"] = decorators_from_info
+                                # Skip this function if it has the @hidden decorator
+                                if "hidden" in decorators_from_info:
+                                    logger.info(f"🙈 Skipping hidden function: {tool_name}")
+                                    continue
+                            # Add app_name to annotations if present in function_info
+                            app_name_from_info = func_info.get("app_name")
+                            if app_name_from_info is not None:
+                                tool_annotations["app_name"] = app_name_from_info
+                            # Add location_name to annotations if present in function_info
+                            location_name_from_info = func_info.get("location_name")
+                            if location_name_from_info is not None:
+                                tool_annotations["location_name"] = location_name_from_info
+
+                            # Add runtime error message if present in cache
+                            if tool_name in _runtime_errors:
+                                tool_annotations["runtimeError"] = _runtime_errors[tool_name]
+
+                            # Add server config load error if present in cache
+                            if tool_name in self.server_manager._server_load_errors:
+                                tool_annotations["loadError"] = self.server_manager._server_load_errors[tool_name]
+
+                            # Add common annotations
+                            try:
+                                tool_annotations["lastModified"] = datetime.datetime.fromtimestamp(
+                                    os.path.getmtime(os.path.join(FUNCTIONS_DIR, file_name))
+                                ).isoformat()
+                            except Exception:
+                                pass # Ignore if file stat fails
+
+                            # Create and add the tool object
+                            tool_obj = Tool(
+                                name=tool_name,
+                                description=tool_description,
+                                inputSchema=tool_input_schema,
+                                annotations=tool_annotations # app_name is now inside annotations
+                            )
+                            tools_list.append(tool_obj)
+                            logger.debug(f"📝 Added dynamic tool: {tool_name} from {file_name}, valid: {is_valid}")
+
+                    elif is_valid and not functions_info:
                          # Valid syntax but failed to extract info (should ideally not happen)
                          tool_description = f"Dynamic function: {tool_name_from_file} (Details unavailable)"
                          tool_input_schema = {"type": "object", "description": "Could not parse arguments."}
-                         tool_annotations["validationStatus"] = "VALID_SYNTAX_UNKNOWN_STRUCTURE"
+                         tool_annotations = {"validationStatus": "VALID_SYNTAX_UNKNOWN_STRUCTURE"}
+
+                         # Add runtime error message if present in cache (check by filename for backward compatibility)
+                         if tool_name_from_file in _runtime_errors:
+                             tool_annotations["runtimeError"] = _runtime_errors[tool_name_from_file]
+
+                         # Add server config load error if present in cache
+                         if tool_name_from_file in self.server_manager._server_load_errors:
+                             tool_annotations["loadError"] = self.server_manager._server_load_errors[tool_name_from_file]
+
+                         # Add common annotations
+                         try:
+                             tool_annotations["lastModified"] = datetime.datetime.fromtimestamp(
+                                 os.path.getmtime(os.path.join(FUNCTIONS_DIR, file_name))
+                             ).isoformat()
+                         except Exception:
+                             pass # Ignore if file stat fails
+
+                         # Create and add the tool object
+                         tool_obj = Tool(
+                             name=tool_name_from_file,
+                             description=tool_description,
+                             inputSchema=tool_input_schema,
+                             annotations=tool_annotations
+                         )
+                         tools_list.append(tool_obj)
+                         logger.debug(f"📝 Added dynamic tool: {tool_name_from_file}, valid: {is_valid}")
+
                     else:
                          # Invalid syntax
                          tool_description = f"Dynamic function: {tool_name_from_file} (INVALID)"
                          tool_input_schema = {"type": "object", "description": "Function has syntax errors."}
-                         tool_annotations["validationStatus"] = "INVALID"
+                         tool_annotations = {"validationStatus": "INVALID"}
                          if error_message:
                              tool_annotations["errorMessage"] = error_message
 
-                    # Add runtime error message if present in cache
-                    if tool_name_from_file in _runtime_errors:
-                        tool_annotations["runtimeError"] = _runtime_errors[tool_name_from_file]
+                         # Add runtime error message if present in cache (check by filename for backward compatibility)
+                         if tool_name_from_file in _runtime_errors:
+                             tool_annotations["runtimeError"] = _runtime_errors[tool_name_from_file]
 
-                    # Add server config load error if present in cache
-                    if tool_name_from_file in self.server_manager._server_load_errors:
-                        tool_annotations["loadError"] = self.server_manager._server_load_errors[tool_name_from_file]
+                         # Add server config load error if present in cache
+                         if tool_name_from_file in self.server_manager._server_load_errors:
+                             tool_annotations["loadError"] = self.server_manager._server_load_errors[tool_name_from_file]
 
-                    # Add common annotations
-                    try:
-                        tool_annotations["lastModified"] = datetime.datetime.fromtimestamp(
-                            os.path.getmtime(os.path.join(FUNCTIONS_DIR, file_name))
-                        ).isoformat()
-                    except Exception:
-                        pass # Ignore if file stat fails
+                         # Add common annotations
+                         try:
+                             tool_annotations["lastModified"] = datetime.datetime.fromtimestamp(
+                                 os.path.getmtime(os.path.join(FUNCTIONS_DIR, file_name))
+                             ).isoformat()
+                         except Exception:
+                             pass # Ignore if file stat fails
 
-                    # Create and add the tool object
-                    tool_obj = Tool(
-                        name=tool_name,
-                        description=tool_description,
-                        inputSchema=tool_input_schema,
-                        annotations=tool_annotations # app_name is now inside annotations
-                    )
-                    tools_list.append(tool_obj)
-                    logger.debug(f"📝 Added dynamic tool: {tool_name}, valid: {is_valid}")
+                         # Create and add the tool object
+                         tool_obj = Tool(
+                             name=tool_name_from_file,
+                             description=tool_description,
+                             inputSchema=tool_input_schema,
+                             annotations=tool_annotations
+                         )
+                         tools_list.append(tool_obj)
+                         logger.debug(f"📝 Added dynamic tool: {tool_name_from_file}, valid: {is_valid}")
 
                 except Exception as e:
                     logger.warning(f"⚠️ Error processing potential tool file {file_name}: {str(e)}")
@@ -767,6 +823,12 @@ class DynamicAdditionServer(Server):
         except Exception as e:
             logger.error(f"❌ Error scanning for dynamic functions: {str(e)}")
             # Continue with just the built-in tools
+
+        # NEW: Build function-to-file mapping after processing all files
+        try:
+            await self.function_manager._build_function_file_mapping()
+        except Exception as e:
+            logger.warning(f"⚠️ Error building function-to-file mapping: {str(e)}")
 
         # --- DEBUG: Log current server_tasks state before processing servers ---
         # Access server_tasks via module namespace
@@ -1506,10 +1568,8 @@ class DynamicAdditionServer(Server):
                      # Maybe return a specific error message here instead of raising ValueError?
                      # Creating an error TextContent for consistency
 
-                # Check if function exists
-                function_path = os.path.join(FUNCTIONS_DIR, f"{name}.py")
-                if not os.path.exists(function_path):
-                    raise ValueError(f"Function '{name}' not found")
+                # NEW: Function calling now uses function-to-file mapping internally
+                # No need to check if {name}.py exists since function_call handles that
 
                 # Call the dynamic function
                 try:
