@@ -670,7 +670,27 @@ class DynamicFunctionManager:
                     # Add a pointer to the exact error position
                     error_msg += f"\n{' ' * (e.offset-1)}^"
             logger.warning(f"⚠️ Code validation failed (AST parse): {error_msg}")
-            return False, error_msg, None
+
+            # Try to extract function info using existing regex method as fallback when AST fails
+            functions_info = []
+            try:
+                # Use the existing _code_extract_basic_metadata method
+                metadata = self._code_extract_basic_metadata(code_buffer)
+                if metadata.get('name'):
+                    function_info = {
+                        "name": metadata['name'],
+                        "description": metadata.get('description') or "(No description provided)",
+                        "inputSchema": {"type": "object", "description": "Schema extraction failed due to syntax errors"},
+                        "decorators": [],
+                        "app_name": app_name_from_path,
+                        "location_name": None
+                    }
+                    functions_info.append(function_info)
+                    logger.debug(f"⚙️ Extracted function info for '{metadata['name']}' using existing regex method")
+            except Exception as regex_e:
+                logger.debug(f"⚠️ Regex fallback also failed: {regex_e}")
+
+            return False, error_msg, functions_info
         except Exception as e:
             error_msg = f"Unexpected error during validation or AST processing: {str(e)}"
             logger.error(f"❌ {error_msg}\n{traceback.format_exc()}") # Log full traceback
@@ -742,11 +762,19 @@ async def {name}():
                         # Validate and extract function info
                         is_valid, error_message, functions_info = self._code_validate_syntax(code, rel_path)
 
-                        if is_valid and functions_info:
+                        if functions_info:
+                            # Add all functions to mapping regardless of validity
                             for func_info in functions_info:
                                 func_name = func_info['name']
                                 self._function_file_mapping[func_name] = rel_path
-                                logger.debug(f"  📍 {func_name} -> {rel_path}")
+                                logger.debug(f"  📍 {func_name} -> {rel_path} (valid: {is_valid})")
+                        elif not is_valid:
+                            # If syntax is invalid but we can't extract function info,
+                            # try to extract function name from filename as fallback
+                            filename_without_ext = os.path.splitext(os.path.basename(rel_path))[0]
+                            if filename_without_ext and not filename_without_ext.startswith('_'):
+                                self._function_file_mapping[filename_without_ext] = rel_path
+                                logger.debug(f"  📍 {filename_without_ext} -> {rel_path} (invalid syntax, using filename)")
 
                     except Exception as e:
                         logger.warning(f"⚠️ Error processing {rel_path} for function mapping: {e}")
@@ -1065,7 +1093,8 @@ async def {name}():
             error_msg_full = f"Syntax validation failed: {error_message}"
             logger.warning(f"{error_msg_full} Function file: '{name}'")
             await self._write_error_log(name, error_msg_full)
-            return {'valid': False, 'error': error_message, 'function_info': None}
+            # Return function_info even for invalid functions so they can appear in tool list
+            return {'valid': False, 'error': error_message, 'function_info': functions_info}
 
     import inspect # Add import
     import atlantis
