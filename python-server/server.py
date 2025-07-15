@@ -166,8 +166,9 @@ class DynamicConfigEventHandler(FileSystemEventHandler):
 
     def _trigger_reload(self, event_path):
         # Check if the change is relevant (Python file in functions dir or JSON file in servers dir)
-        is_function_change = event_path.endswith(".py") and os.path.dirname(event_path) == FUNCTIONS_DIR
-        is_server_change = event_path.endswith(".json") and os.path.dirname(event_path) == SERVERS_DIR
+        # Now supports subdirectories within these directories
+        is_function_change = event_path.endswith(".py") and event_path.startswith(FUNCTIONS_DIR)
+        is_server_change = event_path.endswith(".json") and event_path.startswith(SERVERS_DIR)
 
         if not is_function_change and not is_server_change:
             # logger.debug(f"Ignoring irrelevant change: {event_path}")
@@ -200,9 +201,9 @@ class DynamicConfigEventHandler(FileSystemEventHandler):
         # Clear the cache - Must run in the main event loop
         async def _process_file_change(file_path: str):
             # --- Invalidate ALL Dynamic Function Runtime Caches ---
-            # Check if the change was in the functions or servers directory
-            is_function_change = file_path.endswith(".py") and os.path.dirname(file_path) == FUNCTIONS_DIR
-            is_server_change = file_path.endswith(".json") and os.path.dirname(file_path) == SERVERS_DIR
+            # Check if the change was in the functions or servers directory (including subdirectories)
+            is_function_change = file_path.endswith(".py") and file_path.startswith(FUNCTIONS_DIR)
+            is_server_change = file_path.endswith(".json") and file_path.startswith(SERVERS_DIR)
 
             if is_function_change:
                 logger.info(f"⚡ File watcher triggering flush of all dynamic function runtime caches due to change in {os.path.basename(file_path)}.")
@@ -668,19 +669,30 @@ class DynamicAdditionServer(Server):
             # Ensure the functions directory exists
             os.makedirs(FUNCTIONS_DIR, exist_ok=True)
 
-            # Get all Python files in the directory
-            function_files = [f for f in os.listdir(FUNCTIONS_DIR) if f.endswith('.py')]
+            # Get all Python files in subdirectories (skip root directory)
+            function_files = []
+            for root, dirs, files in os.walk(FUNCTIONS_DIR):
+                # Skip the root directory itself - only scan subdirectories
+                if root == FUNCTIONS_DIR:
+                    continue
+
+                for f in files:
+                    if f.endswith('.py'):
+                        rel_path = os.path.relpath(os.path.join(root, f), FUNCTIONS_DIR)
+                        function_files.append(rel_path)
+
             logger.info(f"📝 FOUND {len(function_files)} POTENTIAL DYNAMIC FUNCTIONS")
 
             # For each Python file, create Tool entries
             for file_name in function_files:
-                tool_name_from_file = os.path.splitext(file_name)[0]
+                # Extract just the filename without path for tool name fallback
+                tool_name_from_file = os.path.splitext(os.path.basename(file_name))[0]
                 try:
                     # Skip if this seems to be a utility file
                     if tool_name_from_file.startswith('_') or tool_name_from_file == '__init__' or tool_name_from_file == '__pycache__':
                         continue
 
-                    # Validate function syntax without actually loading it
+                    # Use the function name (from AST or filename) and rely on mapping for validation
                     validation_result = await self.function_manager.function_validate(tool_name_from_file)
                     is_valid = validation_result.get('valid', False)
                     error_message = validation_result.get('error')
@@ -698,7 +710,7 @@ class DynamicAdditionServer(Server):
 
                             tool_annotations["type"] = "function"
                             tool_annotations["validationStatus"] = "VALID"
-                            tool_annotations["sourceFile"] = file_name  # NEW: Track which file contains this function
+                            tool_annotations["sourceFile"] = file_name  # Track which file contains this function
 
                             # Add decorator info if present (opt-in)
                             decorators_from_info = func_info.get("decorators")
@@ -2663,10 +2675,10 @@ if __name__ == "__main__":
     # Start the file watcher
     event_handler = DynamicConfigEventHandler(mcp_server, loop)
     observer = Observer()
-    observer.schedule(event_handler, FUNCTIONS_DIR, recursive=False) # Don't watch subdirs
-    observer.schedule(event_handler, SERVERS_DIR, recursive=False)
+    observer.schedule(event_handler, FUNCTIONS_DIR, recursive=True) # Watch subdirectories
+    observer.schedule(event_handler, SERVERS_DIR, recursive=True)
     observer.start()
-    logger.info(f"👁️ Watching for changes in {FUNCTIONS_DIR} and {SERVERS_DIR}...")
+    logger.info(f"👁️ Watching for changes in {FUNCTIONS_DIR} and {SERVERS_DIR} (including subdirectories)...")
 
     # Start the Uvicorn server
     config = uvicorn.Config(app, host=HOST, port=PORT, log_level="warning")
