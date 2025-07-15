@@ -783,6 +783,15 @@ async def {name}():
             self._function_file_mapping_mtime = current_mtime
             logger.info(f"✅ Built function-to-file mapping with {len(self._function_file_mapping)} functions")
 
+            # Periodically clean up orphaned log files (every 10 builds)
+            if hasattr(self, '_build_count'):
+                self._build_count += 1
+            else:
+                self._build_count = 1
+
+            if self._build_count % 10 == 0:
+                await self._cleanup_orphaned_logs()
+
         except Exception as e:
             logger.error(f"❌ Error building function-to-file mapping: {e}")
 
@@ -865,13 +874,8 @@ async def {name}():
             logger.info(f"🗑️ Function '{name}' removed. Moved from {file_path} to {old_file_path}")
             await self.invalidate_all_dynamic_module_cache() # Invalidate cache
 
-            log_file_path = file_path.replace('.py', '.log') # Use self.functions_dir for log
-            if os.path.exists(log_file_path):
-                try:
-                    os.remove(log_file_path)
-                    logger.debug(f"🗑️ Removed log file {log_file_path}")
-                except OSError as e:
-                    logger.warning(f"⚠️ Could not remove log file {log_file_path}: {e}")
+            # Clean up error log since function is being removed
+            await self._cleanup_error_log(name)
             return True
         except Exception as e:
             logger.error(f"❌ function_remove: Failed to remove function '{name}': {e}")
@@ -901,6 +905,80 @@ async def {name}():
         except Exception as e:
             # Don't let logging errors disrupt the main flow
             logger.error(f"Failed to write error log for '{secure_name}': {e}")
+
+    async def _cleanup_error_log(self, name: str) -> None:
+        '''
+        Remove the error log file for a function if it exists.
+        Called when a function becomes valid or is removed.
+        '''
+        secure_name = utils.clean_filename(name)
+        if not secure_name:
+            logger.debug("Cannot cleanup error log: invalid function name provided.")
+            return
+
+        log_file_path = os.path.join(self.functions_dir, f"{secure_name}.log")
+        if os.path.exists(log_file_path):
+            try:
+                os.remove(log_file_path)
+                logger.debug(f"🧹 Cleaned up error log for '{name}': {log_file_path}")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not remove error log for '{name}': {e}")
+
+    async def _cleanup_orphaned_logs(self) -> None:
+        '''
+        Clean up log files for functions that no longer exist.
+        Called periodically to remove stale log files.
+        '''
+        try:
+            # Get all .log files in the functions directory
+            log_files = []
+            for root, dirs, files in os.walk(self.functions_dir):
+                for file in files:
+                    if file.endswith('.log'):
+                        log_files.append(os.path.join(root, file))
+
+            cleaned_count = 0
+            for log_file_path in log_files:
+                # Extract function name from log file path
+                log_filename = os.path.basename(log_file_path)
+                function_name = os.path.splitext(log_filename)[0]  # Remove .log extension
+
+                # Check if the corresponding function file exists
+                function_exists = False
+                for root, dirs, files in os.walk(self.functions_dir):
+                    for file in files:
+                        if file.endswith('.py'):
+                            file_path = os.path.join(root, file)
+                            rel_path = os.path.relpath(file_path, self.functions_dir)
+
+                            # Check if this file contains the function
+                            try:
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    code = f.read()
+                                metadata = self._code_extract_basic_metadata(code)
+                                if metadata.get('name') == function_name:
+                                    function_exists = True
+                                    break
+                            except Exception:
+                                continue
+
+                    if function_exists:
+                        break
+
+                # If function doesn't exist, remove the log file
+                if not function_exists:
+                    try:
+                        os.remove(log_file_path)
+                        cleaned_count += 1
+                        logger.debug(f"🧹 Cleaned up orphaned log file: {log_file_path}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not remove orphaned log file {log_file_path}: {e}")
+
+            if cleaned_count > 0:
+                logger.info(f"🧹 Cleaned up {cleaned_count} orphaned log files")
+
+        except Exception as e:
+            logger.warning(f"⚠️ Error during orphaned log cleanup: {e}")
 
     async def function_call(self, name: str, client_id: str, request_id: str, user: str = None, **kwargs) -> Any:
         '''
@@ -1081,13 +1159,8 @@ async def {name}():
         is_valid, error_message, functions_info = self._code_validate_syntax(code, rel_path)
         if is_valid:
             logger.info(f"Syntax validation successful for function file '{name}'")
-            try:
-                log_path = file_path.replace('.py', '.log')
-                if os.path.exists(log_path):
-                    os.remove(log_path)
-                    logger.debug(f"Removed error log for '{name}' as validation now passes")
-            except Exception as e:
-                logger.debug(f"Failed to remove old error log for '{name}': {e}")
+            # Clean up error log since function is now valid
+            await self._cleanup_error_log(name)
             return {'valid': True, 'error': None, 'function_info': functions_info}
         else:
             error_msg_full = f"Syntax validation failed: {error_message}"
@@ -1183,6 +1256,8 @@ async def {name}():
         # Clear any cached runtime errors for all functions, as they've been updated
         for func_name in function_names:
             self._runtime_errors.pop(func_name, None)
+            # Clean up error logs for functions that were successfully set
+            await self._cleanup_error_log(func_name)
 
         # 4. Attempt AST parsing for immediate feedback (but save regardless)
         syntax_error = None
