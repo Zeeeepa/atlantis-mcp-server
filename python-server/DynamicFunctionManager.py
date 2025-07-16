@@ -852,71 +852,50 @@ async def {name}():
             logger.debug(traceback.format_exc())
             return False
 
+    def _get_log_file_path(self, rel_path: str) -> str:
+        """
+        Given a function's relative path (e.g., 'Home/foo.py'), return the corresponding log file path (e.g., 'Home/foo.log').
+        """
+        if rel_path.endswith('.py'):
+            log_rel_path = rel_path[:-3] + '.log'
+        else:
+            log_rel_path = rel_path + '.log'
+        return os.path.join(self.functions_dir, log_rel_path)
 
-    async def function_remove(self, name: str) -> bool:
-        await self._build_function_file_mapping()
-        rel_path = self._function_file_mapping.get(name)
-        if not rel_path:
-            logger.error(f"Remove failed: No mapping found for function '{name}'")
-            return False
-        file_path = os.path.join(self.functions_dir, rel_path)
-        old_file_path = os.path.join(self.old_dir, f"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}_{os.path.basename(rel_path)}")
-
-
-        if not os.path.exists(file_path):
-            logger.warning(f"⚠️ function_remove: File not found for '{name}' at {file_path}")
-            return False
-        try:
-            # Ensure the OLD directory exists (it should be created by __init__)
-            os.makedirs(self.old_dir, exist_ok=True)
-
-            shutil.move(file_path, old_file_path)
-            logger.info(f"🗑️ Function '{name}' removed. Moved from {file_path} to {old_file_path}")
-            await self.invalidate_all_dynamic_module_cache() # Invalidate cache
-
-            # Clean up error log since function is being removed
-            await self._cleanup_error_log(name)
-            return True
-        except Exception as e:
-            logger.error(f"❌ function_remove: Failed to remove function '{name}': {e}")
-            logger.debug(traceback.format_exc())
-            await self._write_error_log(name, f"Failed to remove: {e}") # Use self._write_error_log
-            return False
-
-    async def _write_error_log(self, name: str, error_message: str) -> None: # Made it async to match caller, added self
+    async def _write_error_log(self, name: str, error_message: str, rel_path: str = None) -> None:
         '''
-        Write an error message to a function-specific log file in the dynamic_functions folder.
+        Write an error message to a function-specific log file in the dynamic_functions folder/subfolder.
         Overwrites any existing log to only keep the latest error.
-        Creates a log file named {name}.log with timestamp.
+        Creates a log file named {rel_path}.log with timestamp.
         '''
-        secure_name = utils.clean_filename(name)
-        if not secure_name:
-            logger.error("Cannot write error log: invalid function name provided.")
-            return
-
-        log_file_path = os.path.join(self.functions_dir, f"{secure_name}.log") # Use self.functions_dir
+        if rel_path is None:
+            await self._build_function_file_mapping()
+            rel_path = self._function_file_mapping.get(name)
+            if not rel_path:
+                logger.error(f"Cannot write error log: no mapping for function '{name}'")
+                return
+        log_file_path = self._get_log_file_path(rel_path)
+        os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_content = f"[{timestamp}] ERROR: {error_message}\n"
-
         try:
             with open(log_file_path, 'w', encoding='utf-8') as f:
                 f.write(log_content)
             logger.debug(f"Wrote error log to {log_file_path}")
         except Exception as e:
-            # Don't let logging errors disrupt the main flow
-            logger.error(f"Failed to write error log for '{secure_name}': {e}")
+            logger.error(f"Failed to write error log for '{name}': {e}")
 
-    async def _cleanup_error_log(self, name: str) -> None:
+    async def _cleanup_error_log(self, name: str, rel_path: str = None) -> None:
         '''
         Remove the error log file for a function if it exists.
-        Called when a function becomes valid or is removed.
         '''
-        secure_name = utils.clean_filename(name)
-        if not secure_name:
-            logger.debug("Cannot cleanup error log: invalid function name provided.")
-            return
-
-        log_file_path = os.path.join(self.functions_dir, f"{secure_name}.log")
+        if rel_path is None:
+            await self._build_function_file_mapping()
+            rel_path = self._function_file_mapping.get(name)
+            if not rel_path:
+                logger.debug(f"Cannot cleanup error log: no mapping for function '{name}'")
+                return
+        log_file_path = self._get_log_file_path(rel_path)
         if os.path.exists(log_file_path):
             try:
                 os.remove(log_file_path)
@@ -927,56 +906,30 @@ async def {name}():
     async def _cleanup_orphaned_logs(self) -> None:
         '''
         Clean up log files for functions that no longer exist.
-        Called periodically to remove stale log files.
         '''
         try:
-            # Get all .log files in the functions directory
+            # Get all .log files in the functions directory and subdirectories
             log_files = []
             for root, dirs, files in os.walk(self.functions_dir):
                 for file in files:
                     if file.endswith('.log'):
                         log_files.append(os.path.join(root, file))
-
             cleaned_count = 0
             for log_file_path in log_files:
-                # Extract function name from log file path
-                log_filename = os.path.basename(log_file_path)
-                function_name = os.path.splitext(log_filename)[0]  # Remove .log extension
-
-                # Check if the corresponding function file exists
-                function_exists = False
-                for root, dirs, files in os.walk(self.functions_dir):
-                    for file in files:
-                        if file.endswith('.py'):
-                            file_path = os.path.join(root, file)
-                            rel_path = os.path.relpath(file_path, self.functions_dir)
-
-                            # Check if this file contains the function
-                            try:
-                                with open(file_path, 'r', encoding='utf-8') as f:
-                                    code = f.read()
-                                metadata = self._code_extract_basic_metadata(code)
-                                if metadata.get('name') == function_name:
-                                    function_exists = True
-                                    break
-                            except Exception:
-                                continue
-
-                    if function_exists:
-                        break
-
-                # If function doesn't exist, remove the log file
-                if not function_exists:
+                # Get the relative path from functions_dir
+                rel_log_path = os.path.relpath(log_file_path, self.functions_dir)
+                # Convert .log to .py
+                rel_func_path = rel_log_path[:-4] + '.py' if rel_log_path.endswith('.log') else rel_log_path
+                func_file_path = os.path.join(self.functions_dir, rel_func_path)
+                if not os.path.exists(func_file_path):
                     try:
                         os.remove(log_file_path)
                         cleaned_count += 1
                         logger.debug(f"🧹 Cleaned up orphaned log file: {log_file_path}")
                     except Exception as e:
                         logger.warning(f"⚠️ Could not remove orphaned log file {log_file_path}: {e}")
-
             if cleaned_count > 0:
                 logger.info(f"🧹 Cleaned up {cleaned_count} orphaned log files")
-
         except Exception as e:
             logger.warning(f"⚠️ Error during orphaned log cleanup: {e}")
 
@@ -1142,35 +1095,54 @@ async def {name}():
         rel_path = self._function_file_mapping.get(name)
         if not rel_path:
             error_msg = f"No mapping found for function '{name}'"
-            await self._write_error_log(name, error_msg)
+            await self._write_error_log(name, error_msg, rel_path=None)
             return {'valid': False, 'error': error_msg, 'function_info': None}
         file_path = os.path.join(self.functions_dir, rel_path)
         if not os.path.exists(file_path):
             error_msg = f"Function '{name}' not found at {file_path}"
-            await self._write_error_log(name, error_msg)
+            await self._write_error_log(name, error_msg, rel_path)
             return {'valid': False, 'error': error_msg, 'function_info': None}
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 code = f.read()
         except FileNotFoundError as e:
             error_msg = str(e)
-            await self._write_error_log(name, error_msg)
+            await self._write_error_log(name, error_msg, rel_path)
             return {'valid': False, 'error': error_msg, 'function_info': None}
         is_valid, error_message, functions_info = self._code_validate_syntax(code, rel_path)
         if is_valid:
             logger.info(f"Syntax validation successful for function file '{name}'")
-            # Clean up error log since function is now valid
-            await self._cleanup_error_log(name)
+            await self._cleanup_error_log(name, rel_path)
             return {'valid': True, 'error': None, 'function_info': functions_info}
         else:
             error_msg_full = f"Syntax validation failed: {error_message}"
             logger.warning(f"{error_msg_full} Function file: '{name}'")
-            await self._write_error_log(name, error_msg_full)
-            # Return function_info even for invalid functions so they can appear in tool list
+            await self._write_error_log(name, error_msg_full, rel_path)
             return {'valid': False, 'error': error_message, 'function_info': functions_info}
 
-    import inspect # Add import
-    import atlantis
+    async def function_remove(self, name: str) -> bool:
+        await self._build_function_file_mapping()
+        rel_path = self._function_file_mapping.get(name)
+        if not rel_path:
+            logger.error(f"Remove failed: No mapping found for function '{name}'")
+            return False
+        file_path = os.path.join(self.functions_dir, rel_path)
+        old_file_path = os.path.join(self.old_dir, f"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}_{os.path.basename(rel_path)}")
+        if not os.path.exists(file_path):
+            logger.warning(f"⚠️ function_remove: File not found for '{name}' at {file_path}")
+            return False
+        try:
+            os.makedirs(self.old_dir, exist_ok=True)
+            shutil.move(file_path, old_file_path)
+            logger.info(f"🗑️ Function '{name}' removed. Moved from {file_path} to {old_file_path}")
+            await self.invalidate_all_dynamic_module_cache()
+            await self._cleanup_error_log(name, rel_path)
+            return True
+        except Exception as e:
+            logger.error(f"❌ function_remove: Failed to remove function '{name}': {e}")
+            logger.debug(traceback.format_exc())
+            await self._write_error_log(name, f"Failed to remove: {e}", rel_path)
+            return False
 
     async def function_set(self, args: Dict[str, Any], server: Any) -> Tuple[Optional[str], List[TextContent]]:
         """
@@ -1257,7 +1229,9 @@ async def {name}():
         for func_name in function_names:
             self._runtime_errors.pop(func_name, None)
             # Clean up error logs for functions that were successfully set
-            await self._cleanup_error_log(func_name)
+            rel_path = self._function_file_mapping.get(func_name)
+            if rel_path:
+                await self._cleanup_error_log(func_name, rel_path)
 
         # 4. Attempt AST parsing for immediate feedback (but save regardless)
         syntax_error = None
