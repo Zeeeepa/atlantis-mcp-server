@@ -15,6 +15,7 @@ The centerpiece this project is a Python MCP host (which I call a 'remote') that
 
 1. Prerequisites - need to install Python for the server and Node for the MCP client; you should also install uv/uvx and node/npx since it seems that MCP needs both
 
+
 2. Python 3.12 seems to be most stable right now, 3.13 is iffy
 
 3. Edit the runServer script in the `python-server` folder and set the email and service name:
@@ -29,13 +30,28 @@ python server.py  \
   --cloud-port=443  \
   --service-name=home                        # remote name, can be anything but must be unique across all machines
 ```
+4. To use this as a regular standalone MCP server, add the following config:
 
+```json
+   "mcpServers": {
+      "atlantis": {
+         "command": "npx",
+         "args": [
+            "atlantis-mcp",
+            "--port",
+            "8000"
+            ]
+      },
+   }
+```
 
-4. Sign into https://www.projectatlantis.ai under the same email
+5. To connect to Atlantis, sign into https://www.projectatlantis.ai under the same email
 
-5. Your remote(s) should autoconnect using email and default api key = 'foobar' (see '\user api_key' command to change). The first server to connect will be assigned your 'default' unless you manually change it later
+6. Your remote(s) should autoconnect using email and default api key = 'foobar' (see '\user api_key' command to change). The first server to connect will be assigned your 'default' unless you manually change it later
 
-6. Initially the functions and servers folders will be empty except for some examples
+7. Initially the functions and servers folders will be empty except for some examples
+
+8. You can run this standalone MCP or accessed from the cloud or both
 
 ### Architecture
 
@@ -61,7 +77,7 @@ Note that MCP auth and security are still being worked out so using the cloud fo
    - lets you treat the remote like any another MCP
    - uses npx (easy to install into claude or cursor)
    - cloud connection not needed - although it may complain
-   - only supports a small subset of the spec
+   - only supports a subset of the spec
    - can only see tools on the local box (at least right now) or shared
      tools set to 'public'
 
@@ -70,22 +86,9 @@ Note that MCP auth and security are still being worked out so using the cloud fo
 
 #### Dynamic Functions
 
-- gives users the ability to create and maintain custom functions-as-tools, which are kept in the `dynamic_functions/` folder
-- functions are loaded on start and should be automatically reloaded when modified
-- you can either edit functions locally and the server will automatically detect changes, or edit remotely in the Atlantis cloud
-- the first comment found in the function is used as the tool description
-- dynamic functions can import each other and the server should correctly handle hot-loaded dependency changes, within the constraints of the Python VM
-- every dynamic function has access to a generic `atlantis` utility module:
+Dynamic functions give users the ability to create and maintain custom functions-as-tools, which are kept in the `dynamic_functions/` folder. Functions are loaded on start and automatically reloaded when modified.
 
-  ```python
-  import atlantis
-
-  ...
-
-  atlantis.client_log("This message will appear in the Atlantis cloud console!")
-  ```
--  the MCP spec is in flux and so the protocol between our MCP server and the cloud is a superset (we rely heavily on annotations)
-- a lot of this stuff here may end up getting lumped under MCP "Resources" or something
+For detailed information about creating and using dynamic functions, see the [README in the python-server folder](python-server/README.dynamic_functions.md).
 
 #### Dynamic MCP Servers
 
