@@ -30,7 +30,7 @@ _user_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_user
 _owner: Optional[str] = ""
 
 # Simple task collection for logging tasks
-_log_tasks_var: contextvars.ContextVar[List[asyncio.Task]] = contextvars.ContextVar("_log_tasks_var", default=None)
+_log_tasks_var: contextvars.ContextVar[Optional[List[asyncio.Task]]] = contextvars.ContextVar("_log_tasks_var", default=None)
 
 # --- Shared Object Container ---
 # This container persists across dynamic function reloads and can store
@@ -124,9 +124,17 @@ async def client_log(message: Any, level: str = "INFO", message_type: str = "tex
             current_seq_to_send = await get_and_increment_seq_num(context_name="client_log")
             # If current_seq_to_send is -1, the helper function already logged the error
 
+            # Get context values with null checks
+            client_id = _client_id_var.get()
+            request_id = _request_id_var.get()
+
+            if client_id is None or request_id is None:
+                print(f"WARNING: Missing context data - client_id: {client_id}, request_id: {request_id}")
+                return None
+
             task = await util_client_log(
-                client_id_for_routing=_client_id_var.get(),
-                request_id=_request_id_var.get(),
+                client_id_for_routing=client_id,
+                request_id=request_id,
                 entry_point_name=entry_point_name,
                 message_type=message_type,
                 message=message,
@@ -295,9 +303,13 @@ async def stream_start(sid: str, who: str) -> str:
     """
     stream_id_to_send = str(uuid.uuid4())
     actual_client_id = _client_id_var.get() # Get the actual client ID from context
-
     request_id = _request_id_var.get()
     entry_point_name = _entry_point_name_var.get() or "unknown_entry_point"
+
+    # Check for required context data
+    if actual_client_id is None or request_id is None:
+        print(f"WARNING: Missing context data in stream_start - client_id: {actual_client_id}, request_id: {request_id}")
+        raise ValueError("Missing required context data for stream_start")
 
     caller_name = "unknown_caller"
     try:
@@ -337,6 +349,11 @@ async def stream(message: str, stream_id_param: str):
     request_id = _request_id_var.get()
     entry_point_name = _entry_point_name_var.get() or "unknown_entry_point"
 
+    # Check for required context data
+    if actual_client_id is None or request_id is None:
+        print(f"WARNING: Missing context data in stream - client_id: {actual_client_id}, request_id: {request_id}")
+        raise ValueError("Missing required context data for stream")
+
     caller_name = "unknown_caller"
     try:
         frame = inspect.currentframe()
@@ -372,6 +389,11 @@ async def stream_end(stream_id_param: str):
     actual_client_id = _client_id_var.get() # Get the actual client ID from context
     request_id = _request_id_var.get()
     entry_point_name = _entry_point_name_var.get() or "unknown_entry_point"
+
+    # Check for required context data
+    if actual_client_id is None or request_id is None:
+        print(f"WARNING: Missing context data in stream_end - client_id: {actual_client_id}, request_id: {request_id}")
+        raise ValueError("Missing required context data for stream_end")
 
     caller_name = "unknown_caller"
     try:

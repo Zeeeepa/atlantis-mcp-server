@@ -61,7 +61,8 @@ import os
 try:
 
     import sys
-    print(f"DEBUG: Python version running server.py: {sys.version}")
+    # Comment out debug print to avoid interfering with JSON-RPC communication
+    # print(f"DEBUG: Python version running server.py: {sys.version}")
 
 
     # Get the current timestamp of the dynamic_functions directory
@@ -1593,15 +1594,20 @@ class DynamicAdditionServer(Server):
                 logger.error(f"❓ Unknown or unhandled tool name: {name}")
                 raise ValueError(f"Unknown or unhandled tool name: {name}")
 
-            # ---> ADDED: Process raw result into final_result format (List[TextContent])
+            # ---> ADDED: Process raw result into final_result format (List[TextContent]) with June 2025 MCP spec support
             if isinstance(result_raw, str):
                 final_result = [TextContent(type="text", text=result_raw)]
             elif isinstance(result_raw, dict):
-                # Serialize dict to JSON string and wrap in TextContent
-                logger.debug(f"<--- Serializing dict result to JSON string for tool '{name}'.")
+                # Support new June 2025 MCP spec: provide both serialized JSON and structuredContent
+                logger.debug(f"<--- Creating structured content result for tool '{name}' (June 2025 MCP spec).")
                 try:
                     json_string = json.dumps(result_raw)
-                    result_content = [TextContent(type="text", text=json_string, annotations={"sourceType": "json"})] # <--- CHANGE HERE
+                    # Create TextContent with both text and structured content for backwards compatibility
+                    annotations = {
+                        "sourceType": "json",
+                        "structuredContent": result_raw  # New June 2025 spec feature
+                    }
+                    result_content = [TextContent(type="text", text=json_string, annotations=annotations)]
                 except TypeError as e:
                     logger.error(f"Error serializing dictionary result to JSON for tool '{name}': {e}")
                     result_content = [TextContent(type="error", text=f"Error serializing result: {e}")]
@@ -1611,10 +1617,15 @@ class DynamicAdditionServer(Server):
             elif result_raw is None:
                 final_result = [] # Assign a default empty list
             else:
-                # Convert any other result to string
+                # Convert any other result to string with structured content support
                 try:
+                    # Try to serialize as JSON first for structured content
                     result_str = json.dumps(result_raw)
-                    final_result = [TextContent(type="text", text=result_str, annotations={"sourceType": "json"})] # <--- CHANGE HERE
+                    annotations = {
+                        "sourceType": "json",
+                        "structuredContent": result_raw  # New June 2025 spec feature
+                    }
+                    final_result = [TextContent(type="text", text=result_str, annotations=annotations)]
                 except TypeError:
                     result_str = str(result_raw) # Fallback to plain string conversion
                     logger.warning(f"⚠️ Tool '{name}' returned non-standard type {type(result_raw)}. Converting to string: {result_str}")
@@ -1759,14 +1770,15 @@ async def get_all_tools_for_response(server: 'DynamicAdditionServer', caller_con
             tool_dict = tool.model_dump(mode='json') # Use mode='json' for better serialization
 
             # Debug log for server tools AFTER serialization
-            if tool_dict.get('annotations', {}).get('type') == 'server':
+            annotations = tool_dict.get('annotations') if tool_dict else None
+            if tool_dict and annotations and isinstance(annotations, dict) and annotations.get('type') == 'server':
                 logger.debug(f"🔍 SERIALIZED SERVER TOOL '{tool_dict.get('name')}' to dict: {tool_dict}")
                 # Check if started_at is in annotations
-                if 'started_at' in tool_dict.get('annotations', {}):
-                    logger.debug(f"✅ Started_at preserved in serialized tool dict for '{tool_dict.get('name')}': {tool_dict['annotations']['started_at']}")
+                if annotations and 'started_at' in annotations:
+                    logger.debug(f"✅ Started_at preserved in serialized tool dict for '{tool_dict.get('name')}': {annotations['started_at']}")
 
                     # If started_at is in annotations but not at the top level, add it to the top level
-                    started_at_val = tool_dict['annotations']['started_at']
+                    started_at_val = annotations['started_at']
                     if 'started_at' not in tool_dict:
                         logger.debug(f"🔎 Adding started_at to TOP LEVEL for '{tool_dict.get('name')}': {started_at_val}")
                         tool_dict['started_at'] = started_at_val
