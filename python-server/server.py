@@ -38,7 +38,7 @@ from starlette.applications import Starlette
 from starlette.routing import WebSocketRoute, Route
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from mcp.shared.exceptions import McpError # <--- ADD THIS IMPORT
 
 # Import shared state and utilities
@@ -320,10 +320,15 @@ class DynamicAdditionServer(Server):
 
         tools_list = await self._get_tools_list(caller_context="initialize_method")
         logger.info(f"{CYAN}🔧 Server initialize method completed.{RESET}")
-        # Return required InitializeResult fields
+        # Return required InitializeResult fields with proper server capabilities
         return {
             "protocolVersion": params.get("protocolVersion"),
-            "capabilities": params.get("capabilities"),
+            "capabilities": {
+                "tools": {},
+                "prompts": {},
+                "resources": {},
+                "logging": {}
+            },
             "serverInfo": {"name": self.name, "version": SERVER_VERSION}
         }
 
@@ -484,7 +489,7 @@ class DynamicAdditionServer(Server):
              logger.error(f"❌ Error checking FUNCTIONS_DIR mtime: {e}. Proceeding without cache.")
              current_mtime = time.time() # Use current time to force regeneration
 
-        # Start with our built-in tools
+                # Start with our built-in tools
         tools_list = [
             Tool(
                 name="_function_set",
@@ -532,6 +537,7 @@ class DynamicAdditionServer(Server):
             ),
             Tool(
                 name="_function_history",
+                title="_function_history",
                 description="Gets the tool call history",
                 inputSchema={
                     "type": "object",
@@ -541,6 +547,7 @@ class DynamicAdditionServer(Server):
             ),
             Tool(
                 name="_function_log",
+                title="_function_log",
                 description="Gets the tool owner log",
                 inputSchema={
                     "type": "object",
@@ -550,6 +557,7 @@ class DynamicAdditionServer(Server):
             ),
             Tool(
                 name="_server_get",
+                title="_server_get",
                 description="Gets the configuration JSON for a server",
                 inputSchema={
                     "type": "object",
@@ -561,6 +569,7 @@ class DynamicAdditionServer(Server):
             ),
             Tool(
                 name="_server_add",
+                title="_server_add",
                 description="Adds a new MCP server configuration",
                 inputSchema={
                     "type": "object",
@@ -572,6 +581,7 @@ class DynamicAdditionServer(Server):
             ),
             Tool(
                 name="_server_remove",
+                title="_server_remove",
                 description="Removes an MCP server configuration",
                 inputSchema={
                     "type": "object",
@@ -583,6 +593,7 @@ class DynamicAdditionServer(Server):
             ),
             Tool(
                 name="_server_set",
+                title="_server_set",
                 description="Sets (adds or updates) an MCP server configuration",
                 inputSchema={
                     "type": "object",
@@ -616,6 +627,7 @@ class DynamicAdditionServer(Server):
             ),
             Tool(
                 name="_server_validate",
+                title="_server_validate",
                 description="Validates an MCP server configuration",
                 inputSchema={
                     "type": "object",
@@ -627,6 +639,7 @@ class DynamicAdditionServer(Server):
             ),
             Tool(
                 name="_server_start",
+                title="_server_start",
                 description="Starts a managed MCP server background task using its configuration name.",
                 inputSchema={
                     "type": "object",
@@ -638,6 +651,7 @@ class DynamicAdditionServer(Server):
             ),
             Tool(
                 name="_server_stop",
+                title="_server_stop",
                 description="Stops a managed MCP server background task by its configuration name.",
                 inputSchema={
                     "type": "object",
@@ -649,6 +663,7 @@ class DynamicAdditionServer(Server):
             ),
             Tool(
                 name="_server_get_tools",
+                title="_server_get_tools",
                 description="Gets the list of tools from a specific *running* managed server.",
                 inputSchema={
                     "type": "object",
@@ -731,16 +746,25 @@ class DynamicAdditionServer(Server):
                                 tool_annotations["lastModified"] = datetime.datetime.fromtimestamp(
                                     os.path.getmtime(os.path.join(FUNCTIONS_DIR, file_name))
                                 ).isoformat()
-                            except Exception:
+                                logger.debug(f"🔍 SET lastModified for {tool_name}: {tool_annotations['lastModified']}")
+                            except Exception as e:
+                                logger.warning(f"⚠️ Failed to get lastModified for {tool_name}: {e}")
                                 pass # Ignore if file stat fails
 
                             # Create and add the tool object
+                            logger.debug(f"🔍 Creating Tool {tool_name} with annotations: {tool_annotations}")
+                            logger.debug(f"🔍 Tool {tool_name} lastModified before Tool creation: {tool_annotations.get('lastModified', 'NOT_SET')}")
                             tool_obj = Tool(
                                 name=tool_name,
                                 description=tool_description,
                                 inputSchema=tool_input_schema,
                                 annotations=tool_annotations # app_name is now inside annotations
                             )
+                            logger.debug(f"🔍 Tool {tool_name} annotations after creation: {tool_obj.annotations}")
+                            logger.debug(f"🔍 Tool {tool_name} lastModified after Tool creation: {getattr(tool_obj.annotations, 'lastModified', 'NOT_FOUND') if hasattr(tool_obj.annotations, 'lastModified') else 'NO_ATTR'}")
+                            logger.debug(f"🔍 Tool {tool_name} annotations type: {type(tool_obj.annotations)}")
+                            if hasattr(tool_obj.annotations, '__dict__'):
+                                logger.debug(f"🔍 Tool {tool_name} annotations __dict__: {tool_obj.annotations.__dict__}")
                             tools_list.append(tool_obj)
                             logger.debug(f"📝 Added dynamic tool: {tool_name} from {file_name}, valid: {is_valid}")
 
@@ -1120,6 +1144,137 @@ class DynamicAdditionServer(Server):
                      logger.warning(f"❓ Unexpected result type from get_server_tools for '{server_name}': {type(result)}")
 
         logger.info(f"📝 FOUND {len(tools_list)} TOTAL TOOLS (including from servers)")
+
+                        # Patch all tools with missing required fields for MCP client compatibility
+        logger.info(f"🔧 Patching {len(tools_list)} tools with required MCP fields")
+        for i, tool in enumerate(tools_list):
+            logger.debug(f"🔧 Patching tool {i+1}/{len(tools_list)}: {tool.name}")
+
+            # Log original annotations before patching
+            original_annotations = getattr(tool, 'annotations', None)
+            logger.debug(f"  -> Original annotations: {original_annotations}")
+            logger.debug(f"  -> Original annotations type: {type(original_annotations)}")
+            logger.debug(f"  -> Is annotations a dict? {isinstance(original_annotations, dict)}")
+            if original_annotations and isinstance(original_annotations, dict):
+                logger.debug(f"  -> Original lastModified: {original_annotations.get('lastModified', 'NOT_FOUND')}")
+                logger.debug(f"  -> Original type: {original_annotations.get('type', 'NOT_FOUND')}")
+            elif hasattr(original_annotations, 'lastModified'):
+                logger.debug(f"  -> Original lastModified (attr): {getattr(original_annotations, 'lastModified', 'NOT_FOUND')}")
+            else:
+                logger.debug(f"  -> No lastModified found in original annotations")
+
+            # Add title if missing
+            if not hasattr(tool, 'title') or tool.title is None:
+                tool.title = tool.name
+                logger.debug(f"  -> Added title: {tool.title}")
+
+            # Add outputSchema if missing
+            if not hasattr(tool, 'outputSchema') or tool.outputSchema is None:
+                tool.outputSchema = {"type": "object"}
+                logger.debug(f"  -> Added outputSchema")
+
+            # Add annotations if missing
+            if not hasattr(tool, 'annotations') or tool.annotations is None:
+                tool.annotations = {}
+                logger.debug(f"  -> Created empty annotations")
+
+            # Ensure annotations is a dict (but preserve existing data)
+            if not isinstance(tool.annotations, dict):
+                # If it's not a dict, convert it properly while preserving all data
+                old_annotations = tool.annotations
+                logger.debug(f"  -> Converting non-dict annotations of type {type(old_annotations)}")
+                logger.debug(f"  -> Old annotations lastModified before conversion: {getattr(old_annotations, 'lastModified', 'NOT_FOUND') if hasattr(old_annotations, 'lastModified') else 'NO_ATTR'}")
+                logger.debug(f"  -> Old annotations has __dict__: {hasattr(old_annotations, '__dict__')}")
+                logger.debug(f"  -> Old annotations has model_dump: {hasattr(old_annotations, 'model_dump')}")
+                logger.debug(f"  -> Old annotations has dict: {hasattr(old_annotations, 'dict')}")
+                logger.debug(f"  -> Old annotations dir(): {[attr for attr in dir(old_annotations) if not attr.startswith('_')]}")
+
+                if hasattr(old_annotations, 'model_dump'):
+                    # Handle Pydantic models - this preserves all fields including extra ones
+                    tool.annotations = old_annotations.model_dump()
+                    logger.debug(f"  -> Converted Pydantic annotations to dict: {tool.annotations}")
+                    logger.debug(f"  -> lastModified after model_dump conversion: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
+                elif hasattr(old_annotations, 'dict'):
+                    # Handle older Pydantic models
+                    tool.annotations = old_annotations.dict()
+                    logger.debug(f"  -> Converted Pydantic annotations to dict: {tool.annotations}")
+                    logger.debug(f"  -> lastModified after dict() conversion: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
+                elif hasattr(old_annotations, '__dict__'):
+                    # Convert object attributes to dictionary (fallback for non-Pydantic objects)
+                    tool.annotations = old_annotations.__dict__.copy()
+                    logger.debug(f"  -> Converted annotations object to dict: {tool.annotations}")
+                    logger.debug(f"  -> lastModified after __dict__ conversion: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
+                else:
+                    # Try to convert to dict using vars() or get all attributes
+                    try:
+                        tool.annotations = vars(old_annotations)
+                        logger.debug(f"  -> Converted annotations using vars(): {tool.annotations}")
+                        logger.debug(f"  -> lastModified after vars() conversion: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
+                    except TypeError:
+                        # Last resort: try to get all attributes manually
+                        tool.annotations = {}
+                        logger.debug(f"  -> Attempting manual conversion of annotations object")
+                        for attr in dir(old_annotations):
+                            if not attr.startswith('_'):
+                                try:
+                                    value = getattr(old_annotations, attr)
+                                    if not callable(value):
+                                        tool.annotations[attr] = value
+                                        logger.debug(f"  -> Added attribute {attr}: {value}")
+                                except Exception as e:
+                                    logger.debug(f"  -> Failed to get attribute {attr}: {e}")
+                        logger.debug(f"  -> Converted annotations manually: {tool.annotations}")
+                        logger.debug(f"  -> lastModified after manual conversion: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
+            else:
+                logger.debug(f"  -> Annotations already a dict, lastModified: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
+
+            # Add required annotation fields (preserve existing ones)
+            if 'title' not in tool.annotations or tool.annotations['title'] is None:
+                tool.annotations['title'] = tool.name
+                logger.debug(f"  -> Added annotations.title: {tool.name}")
+            if 'readOnlyHint' not in tool.annotations or tool.annotations['readOnlyHint'] is None:
+                tool.annotations['readOnlyHint'] = False
+                logger.debug(f"  -> Added annotations.readOnlyHint: False")
+            if 'destructiveHint' not in tool.annotations or tool.annotations['destructiveHint'] is None:
+                tool.annotations['destructiveHint'] = False
+                logger.debug(f"  -> Added annotations.destructiveHint: False")
+            if 'idempotentHint' not in tool.annotations or tool.annotations['idempotentHint'] is None:
+                tool.annotations['idempotentHint'] = True
+                logger.debug(f"  -> Added annotations.idempotentHint: True")
+            if 'openWorldHint' not in tool.annotations or tool.annotations['openWorldHint'] is None:
+                tool.annotations['openWorldHint'] = False
+                logger.debug(f"  -> Added annotations.openWorldHint: False")
+
+            # Ensure dynamic function annotations are preserved
+            if original_annotations and isinstance(original_annotations, dict):
+                # Preserve all original annotations that aren't being overwritten by required fields
+                for key, value in original_annotations.items():
+                    if key not in ['title', 'readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint']:
+                        if key not in tool.annotations:
+                            tool.annotations[key] = value
+                            logger.debug(f"  -> Preserved original annotation {key}: {value}")
+                        else:
+                            logger.debug(f"  -> Annotation {key} already present, keeping existing value")
+
+            # Log final annotations after patching
+            logger.debug(f"  -> Final annotations: {tool.annotations}")
+            logger.debug(f"  -> Final lastModified: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
+            logger.debug(f"  -> Final type: {tool.annotations.get('type', 'NOT_FOUND')}")
+            if original_annotations and isinstance(original_annotations, dict) and 'lastModified' in original_annotations:
+                if 'lastModified' not in tool.annotations:
+                    logger.error(f"❌ LOST lastModified for tool {tool.name}!")
+                    logger.error(f"❌ Original had: {original_annotations['lastModified']}")
+                    logger.error(f"❌ Final annotations: {tool.annotations}")
+                else:
+                    logger.debug(f"  -> Preserved lastModified: {tool.annotations['lastModified']}")
+            elif original_annotations and hasattr(original_annotations, 'lastModified'):
+                if 'lastModified' not in tool.annotations:
+                    logger.error(f"❌ LOST lastModified for tool {tool.name} (from object attr)!")
+                    logger.error(f"❌ Original had: {getattr(original_annotations, 'lastModified')}")
+                else:
+                    logger.debug(f"  -> Preserved lastModified: {tool.annotations['lastModified']}")
+            else:
+                logger.debug(f"  -> No lastModified in original annotations for {tool.name}")
 
         # --- Update Cache --- #
         self._cached_tools = list(tools_list) # Store a copy
@@ -1759,18 +1914,22 @@ async def get_all_tools_for_response(server: 'DynamicAdditionServer', caller_con
     tools_dict_list: List[Dict[str, Any]] = []
     for tool in raw_tool_list:
         try:
-            # Debug log to see server tools and their annotations BEFORE serialization
-            if hasattr(tool, 'annotations') and isinstance(tool.annotations, dict) and tool.annotations.get('type') == 'server':
-                logger.debug(f"🔍 SERIALIZING SERVER TOOL '{tool.name}' with annotations: {tool.annotations}")
-                # Check if started_at is in annotations
-                if 'started_at' in tool.annotations:
-                    logger.debug(f"✅ Found started_at in annotations for '{tool.name}': {tool.annotations['started_at']}")
+            # Debug log to see all tools and their annotations BEFORE serialization
+            logger.debug(f"🔍 SERIALIZING TOOL '{tool.name}' with annotations: {getattr(tool, 'annotations', None)}")
+            if hasattr(tool, 'annotations') and isinstance(tool.annotations, dict):
+                logger.debug(f"🔍 Tool '{tool.name}' lastModified before serialization: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
+                logger.debug(f"🔍 Tool '{tool.name}' type before serialization: {tool.annotations.get('type', 'NOT_FOUND')}")
+            elif hasattr(tool, 'annotations') and hasattr(tool.annotations, 'lastModified'):
+                logger.debug(f"🔍 Tool '{tool.name}' lastModified (attr) before serialization: {getattr(tool.annotations, 'lastModified', 'NOT_FOUND')}")
 
             # Ensure model_dump is called correctly for each tool
             tool_dict = tool.model_dump(mode='json') # Use mode='json' for better serialization
 
-            # Debug log for server tools AFTER serialization
+            # Debug log for all tools AFTER serialization
             annotations = tool_dict.get('annotations') if tool_dict else None
+            logger.debug(f"🔍 Tool '{tool.name}' lastModified after serialization: {annotations.get('lastModified', 'NOT_FOUND') if annotations else 'NO_ANNOTATIONS'}")
+            logger.debug(f"🔍 Tool '{tool.name}' type after serialization: {annotations.get('type', 'NOT_FOUND') if annotations else 'NO_ANNOTATIONS'}")
+
             if tool_dict and annotations and isinstance(annotations, dict) and annotations.get('type') == 'server':
                 logger.debug(f"🔍 SERIALIZED SERVER TOOL '{tool_dict.get('name')}' to dict: {tool_dict}")
                 # Check if started_at is in annotations
@@ -2600,10 +2759,84 @@ async def handle_registration(request: Request) -> JSONResponse:
         logger.error(f"❌ Registration failed: {str(e)}", exc_info=True)
         return JSONResponse({"error": "internal_server_error", "error_description": "Internal server error during registration"}, status_code=500)
 
+async def handle_mcp_http(request: Request) -> Response:
+    """Handle MCP requests over HTTP (POST /mcp).
+
+    This endpoint accepts MCP JSON-RPC requests and processes them using the same
+    logic as the WebSocket handler, but returns HTTP responses.
+    """
+    try:
+        # Only accept POST requests
+        if request.method != "POST":
+            return JSONResponse(
+                {"error": "method_not_allowed", "message": "Only POST method is supported for MCP HTTP endpoint"},
+                status_code=405
+            )
+
+        # Parse the JSON-RPC request
+        try:
+            request_data = await request.json()
+        except json.JSONDecodeError:
+            return JSONResponse(
+                {"error": "invalid_json", "message": "Invalid JSON in request body"},
+                status_code=400
+            )
+
+        # Validate JSON-RPC format
+        if not isinstance(request_data, dict):
+            return JSONResponse(
+                {"error": "invalid_request", "message": "Request must be a JSON object"},
+                status_code=400
+            )
+
+        if request_data.get("jsonrpc") != "2.0":
+            return JSONResponse(
+                {"error": "invalid_request", "message": "Invalid JSON-RPC version"},
+                status_code=400
+            )
+
+        # Generate a client ID for HTTP requests (using request IP and user agent)
+        client_ip = request.client.host if request.client else "unknown"
+        user_agent = request.headers.get("user-agent", "unknown")
+        client_id = f"http_{client_ip}_{hash(user_agent) % 10000}"
+
+        logger.info(f"🌐 HTTP MCP request from {client_id}: {request_data.get('method', 'unknown')}")
+
+        # Process the MCP request using the same logic as WebSocket
+        response_data = await process_mcp_request(mcp_server, request_data, client_id)
+
+        if response_data:
+            return JSONResponse(response_data)
+        else:
+            # For notifications (no response expected)
+            return Response(status_code=204)
+
+    except Exception as e:
+        logger.error(f"❌ Error handling HTTP MCP request: {str(e)}", exc_info=True)
+        return JSONResponse(
+            {"error": "internal_server_error", "message": "Internal server error"},
+            status_code=500
+        )
+
+async def handle_health_check(request: Request) -> JSONResponse:
+    """Simple health check endpoint."""
+    return JSONResponse({
+        "status": "healthy",
+        "version": SERVER_VERSION,
+        "endpoints": {
+            "websocket": "/mcp",
+            "http": "/mcp",
+            "health": "/health",
+            "register": "/register"
+        }
+    })
+
 app = Starlette(
     routes=[
         WebSocketRoute("/mcp", endpoint=handle_websocket),
-        Route("/register", endpoint=handle_registration, methods=["POST"])
+        Route("/register", endpoint=handle_registration, methods=["POST"]),
+        Route("/mcp", endpoint=handle_mcp_http, methods=["POST"]),
+        Route("/health", endpoint=handle_health_check, methods=["GET"])
     ]
 )
 
@@ -2690,7 +2923,10 @@ if __name__ == "__main__":
 
     try:
         # Start the server
-        logger.info(f"🌟 STARTING LOCAL MCP WEBSOCKET SERVER AT ws://{HOST}:{PORT}/mcp")
+        logger.info(f"🌟 STARTING LOCAL MCP SERVER AT {HOST}:{PORT}")
+        logger.info(f"   📡 WebSocket endpoint: ws://{HOST}:{PORT}/mcp")
+        logger.info(f"   🌐 HTTP endpoint: http://{HOST}:{PORT}/mcp")
+        logger.info(f"   ❤️  Health check: http://{HOST}:{PORT}/health")
 
         # Connect to cloud server if enabled
         if not args.no_cloud:
