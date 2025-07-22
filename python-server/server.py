@@ -31,15 +31,22 @@ from mcp.types import (
     TextContent,
     CallToolResult,
     NotificationParams,
-    Annotations # Ensure Annotation, ToolErrorAnnotation are NOT imported
-
+    Annotations, # Ensure Annotation, ToolErrorAnnotation are NOT imported
+    ToolAnnotations as McpToolAnnotations
 )
+from pydantic import ConfigDict
+from typing import Any, Dict
 from starlette.applications import Starlette
 from starlette.routing import WebSocketRoute, Route
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from mcp.shared.exceptions import McpError # <--- ADD THIS IMPORT
+
+# Custom ToolAnnotations class that allows extra fields
+class ToolAnnotations(McpToolAnnotations):
+    """Custom ToolAnnotations that allows extra fields to avoid Pydantic warnings."""
+    model_config = ConfigDict(extra='allow')
 
 # Import shared state and utilities
 from state import (
@@ -500,7 +507,8 @@ class DynamicAdditionServer(Server):
                         "code": {"type": "string", "description": "The Python source code containing a single function definition."}
                     },
                     "required": ["code"] # Only code is required now
-                }
+                },
+                annotations=ToolAnnotations(title="_function_set")
             ),
             Tool( # Add definition for get_tool_code
                 name="_function_get",
@@ -511,7 +519,8 @@ class DynamicAdditionServer(Server):
                         "name": {"type": "string", "description": "The name of the function to get code for"}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_function_get")
             ),
             Tool( # Add definition for remove_dynamic_tool
                 name="_function_remove",
@@ -522,7 +531,8 @@ class DynamicAdditionServer(Server):
                         "name": {"type": "string", "description": "The name of the function to remove"}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_function_remove")
             ),
             Tool( # Add definition for add_placeholder_function
                 name="_function_add",
@@ -533,31 +543,31 @@ class DynamicAdditionServer(Server):
                         "name": {"type": "string", "description": "The name to register the new placeholder function under."}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_function_add")
             ),
             Tool(
                 name="_function_history",
-                title="_function_history",
                 description="Gets the tool call history",
                 inputSchema={
                     "type": "object",
                     "properties": {},
                     "required": []
-                }
+                },
+                annotations=ToolAnnotations(title="_function_history")
             ),
             Tool(
                 name="_function_log",
-                title="_function_log",
                 description="Gets the tool owner log",
                 inputSchema={
                     "type": "object",
                     "properties": {},
                     "required": []
-                }
+                },
+                annotations=ToolAnnotations(title="_function_log")
             ),
             Tool(
                 name="_server_get",
-                title="_server_get",
                 description="Gets the configuration JSON for a server",
                 inputSchema={
                     "type": "object",
@@ -565,11 +575,11 @@ class DynamicAdditionServer(Server):
                         "name": {"type": "string"}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_server_get")
             ),
             Tool(
                 name="_server_add",
-                title="_server_add",
                 description="Adds a new MCP server configuration",
                 inputSchema={
                     "type": "object",
@@ -577,11 +587,11 @@ class DynamicAdditionServer(Server):
                         "name": {"type": "string"}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_server_add")
             ),
             Tool(
                 name="_server_remove",
-                title="_server_remove",
                 description="Removes an MCP server configuration",
                 inputSchema={
                     "type": "object",
@@ -589,11 +599,11 @@ class DynamicAdditionServer(Server):
                         "name": {"type": "string"}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_server_remove")
             ),
             Tool(
                 name="_server_set",
-                title="_server_set",
                 description="Sets (adds or updates) an MCP server configuration",
                 inputSchema={
                     "type": "object",
@@ -623,11 +633,11 @@ class DynamicAdditionServer(Server):
                         }
                     },
                     "required": ["config"] # Only config is required top-level
-                }
+                },
+                annotations=ToolAnnotations(title="_server_set")
             ),
             Tool(
                 name="_server_validate",
-                title="_server_validate",
                 description="Validates an MCP server configuration",
                 inputSchema={
                     "type": "object",
@@ -635,11 +645,11 @@ class DynamicAdditionServer(Server):
                         "name": {"type": "string"}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_server_validate")
             ),
             Tool(
                 name="_server_start",
-                title="_server_start",
                 description="Starts a managed MCP server background task using its configuration name.",
                 inputSchema={
                     "type": "object",
@@ -647,11 +657,11 @@ class DynamicAdditionServer(Server):
                         "name": {"type": "string", "description": "The name of the server config to start."}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_server_start")
             ),
             Tool(
                 name="_server_stop",
-                title="_server_stop",
                 description="Stops a managed MCP server background task by its configuration name.",
                 inputSchema={
                     "type": "object",
@@ -659,11 +669,11 @@ class DynamicAdditionServer(Server):
                         "name": {"type": "string", "description": "The name of the server config to stop."}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_server_stop")
             ),
             Tool(
                 name="_server_get_tools",
-                title="_server_get_tools",
                 description="Gets the list of tools from a specific *running* managed server.",
                 inputSchema={
                     "type": "object",
@@ -671,7 +681,8 @@ class DynamicAdditionServer(Server):
                         "name": {"type": "string"}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_server_get_tools")
             ),
 
         ]
@@ -754,11 +765,13 @@ class DynamicAdditionServer(Server):
                             # Create and add the tool object
                             logger.debug(f"🔍 Creating Tool {tool_name} with annotations: {tool_annotations}")
                             logger.debug(f"🔍 Tool {tool_name} lastModified before Tool creation: {tool_annotations.get('lastModified', 'NOT_SET')}")
+                            # Create custom ToolAnnotations object to allow extra fields
+                            custom_annotations = ToolAnnotations(**tool_annotations)
                             tool_obj = Tool(
                                 name=tool_name,
                                 description=tool_description,
                                 inputSchema=tool_input_schema,
-                                annotations=tool_annotations # app_name is now inside annotations
+                                annotations=custom_annotations # app_name is now inside annotations
                             )
                             logger.debug(f"🔍 Tool {tool_name} annotations after creation: {tool_obj.annotations}")
                             logger.debug(f"🔍 Tool {tool_name} lastModified after Tool creation: {getattr(tool_obj.annotations, 'lastModified', 'NOT_FOUND') if hasattr(tool_obj.annotations, 'lastModified') else 'NO_ATTR'}")
@@ -791,11 +804,13 @@ class DynamicAdditionServer(Server):
                              pass # Ignore if file stat fails
 
                          # Create and add the tool object
+                         # Create custom ToolAnnotations object to allow extra fields
+                         custom_annotations = ToolAnnotations(**tool_annotations)
                          tool_obj = Tool(
                              name=tool_name_from_file,
                              description=tool_description,
                              inputSchema=tool_input_schema,
-                             annotations=tool_annotations
+                             annotations=custom_annotations
                          )
                          tools_list.append(tool_obj)
                          logger.debug(f"📝 Added dynamic tool: {tool_name_from_file}, valid: {is_valid}")
@@ -825,11 +840,13 @@ class DynamicAdditionServer(Server):
                              pass # Ignore if file stat fails
 
                          # Create and add the tool object
+                         # Create custom ToolAnnotations object to allow extra fields
+                         custom_annotations = ToolAnnotations(**tool_annotations)
                          tool_obj = Tool(
                              name=tool_name_from_file,
                              description=tool_description,
                              inputSchema=tool_input_schema,
-                             annotations=tool_annotations
+                             annotations=custom_annotations
                          )
                          tools_list.append(tool_obj)
                          logger.debug(f"📝 Added dynamic tool: {tool_name_from_file}, valid: {is_valid}")
@@ -837,11 +854,13 @@ class DynamicAdditionServer(Server):
                 except Exception as e:
                     logger.warning(f"⚠️ Error processing potential tool file {file_name}: {str(e)}")
                     # Add a placeholder indicating the error
+                    # Create custom ToolAnnotations object to allow extra fields
+                    error_annotations = ToolAnnotations(validationStatus="ERROR_LOADING")
                     tools_list.append(Tool(
                         name=tool_name_from_file,
                         description=f"Error loading dynamic function: {str(e)}",
                         inputSchema={"type": "object"},
-                        annotations={"validationStatus": "ERROR_LOADING"}
+                        annotations=error_annotations
                     ))
                     continue
 
@@ -1048,25 +1067,29 @@ class DynamicAdditionServer(Server):
                     description = f"MCP server: {server_name}"
                     # do not append error to the description
 
+                    # Create custom ToolAnnotations object to allow extra fields
+                    custom_annotations = ToolAnnotations(**annotations)
                     server_tool = Tool(
                         name=server_name,
                         description=description,
                         inputSchema={"type": "object"}, # Use inputSchema (camelCase), not input_schema
-                        annotations=annotations # Use annotations object that contains started_at if applicable
+                        annotations=custom_annotations # Use annotations object that contains started_at if applicable
                     )
 
                     tools_list.append(server_tool)
                     logger.debug(f"📝 Added dynamic server config entry: {server_name} (Status: {status})")
                 except Exception as se:
                     logger.warning(f"⚠️ Error processing MCP server config '{server_name}': {se}")
+                    # Create custom ToolAnnotations object to allow extra fields
+                    error_annotations = ToolAnnotations(
+                        validationStatus="ERROR_LOADING_SERVER",
+                        runningStatus=status # Still show status even if config load failed
+                    )
                     tools_list.append(Tool(
                         name=server_name,
                         description=f"Error loading MCP server config: {se}",
                         inputSchema={"type": "object"},
-                        annotations={
-                            "validationStatus": "ERROR_LOADING_SERVER",
-                            "runningStatus": status # Still show status even if config load failed
-                            }
+                        annotations=error_annotations
                     ))
         except Exception as ee:
             logger.error(f"❌ Error scanning for dynamic servers: {ee}")
@@ -1132,11 +1155,13 @@ class DynamicAdditionServer(Server):
                         }
 
                         # Create the new tool entry using extracted data
+                        # Create custom ToolAnnotations object to allow extra fields
+                        custom_annotations = ToolAnnotations(**new_annotations)
                         new_tool = Tool(
                             name=new_tool_name,
                             description=new_description,
                             inputSchema=original_schema,
-                            annotations=new_annotations
+                            annotations=custom_annotations
                         )
                         tools_list.append(new_tool)
                         logger.debug(f"  -> Added tool from server: {new_tool_name}")
@@ -1178,103 +1203,146 @@ class DynamicAdditionServer(Server):
                 tool.annotations = {}
                 logger.debug(f"  -> Created empty annotations")
 
-            # Ensure annotations is a dict (but preserve existing data)
+            # Handle annotations - preserve our custom ToolAnnotations objects
             if not isinstance(tool.annotations, dict):
-                # If it's not a dict, convert it properly while preserving all data
-                old_annotations = tool.annotations
-                logger.debug(f"  -> Converting non-dict annotations of type {type(old_annotations)}")
-                logger.debug(f"  -> Old annotations lastModified before conversion: {getattr(old_annotations, 'lastModified', 'NOT_FOUND') if hasattr(old_annotations, 'lastModified') else 'NO_ATTR'}")
-                logger.debug(f"  -> Old annotations has __dict__: {hasattr(old_annotations, '__dict__')}")
-                logger.debug(f"  -> Old annotations has model_dump: {hasattr(old_annotations, 'model_dump')}")
-                logger.debug(f"  -> Old annotations has dict: {hasattr(old_annotations, 'dict')}")
-                logger.debug(f"  -> Old annotations dir(): {[attr for attr in dir(old_annotations) if not attr.startswith('_')]}")
-
-                if hasattr(old_annotations, 'model_dump'):
-                    # Handle Pydantic models - this preserves all fields including extra ones
-                    tool.annotations = old_annotations.model_dump()
-                    logger.debug(f"  -> Converted Pydantic annotations to dict: {tool.annotations}")
-                    logger.debug(f"  -> lastModified after model_dump conversion: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
-                elif hasattr(old_annotations, 'dict'):
-                    # Handle older Pydantic models
-                    tool.annotations = old_annotations.dict()
-                    logger.debug(f"  -> Converted Pydantic annotations to dict: {tool.annotations}")
-                    logger.debug(f"  -> lastModified after dict() conversion: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
-                elif hasattr(old_annotations, '__dict__'):
-                    # Convert object attributes to dictionary (fallback for non-Pydantic objects)
-                    tool.annotations = old_annotations.__dict__.copy()
-                    logger.debug(f"  -> Converted annotations object to dict: {tool.annotations}")
-                    logger.debug(f"  -> lastModified after __dict__ conversion: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
+                # If it's our custom ToolAnnotations object, keep it as is
+                if isinstance(tool.annotations, ToolAnnotations):
+                    logger.debug(f"  -> Keeping custom ToolAnnotations object for {tool.name}")
+                    # Add missing fields directly to the object
+                    if not hasattr(tool.annotations, 'title') or tool.annotations.title is None:
+                        tool.annotations.title = tool.name
+                    if not hasattr(tool.annotations, 'readOnlyHint') or tool.annotations.readOnlyHint is None:
+                        tool.annotations.readOnlyHint = False
+                    if not hasattr(tool.annotations, 'destructiveHint') or tool.annotations.destructiveHint is None:
+                        tool.annotations.destructiveHint = False
+                    if not hasattr(tool.annotations, 'idempotentHint') or tool.annotations.idempotentHint is None:
+                        tool.annotations.idempotentHint = True
+                    if not hasattr(tool.annotations, 'openWorldHint') or tool.annotations.openWorldHint is None:
+                        tool.annotations.openWorldHint = False
                 else:
-                    # Try to convert to dict using vars() or get all attributes
-                    try:
-                        tool.annotations = vars(old_annotations)
-                        logger.debug(f"  -> Converted annotations using vars(): {tool.annotations}")
-                        logger.debug(f"  -> lastModified after vars() conversion: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
-                    except TypeError:
-                        # Last resort: try to get all attributes manually
-                        tool.annotations = {}
-                        logger.debug(f"  -> Attempting manual conversion of annotations object")
-                        for attr in dir(old_annotations):
-                            if not attr.startswith('_'):
-                                try:
-                                    value = getattr(old_annotations, attr)
-                                    if not callable(value):
-                                        tool.annotations[attr] = value
-                                        logger.debug(f"  -> Added attribute {attr}: {value}")
-                                except Exception as e:
-                                    logger.debug(f"  -> Failed to get attribute {attr}: {e}")
-                        logger.debug(f"  -> Converted annotations manually: {tool.annotations}")
-                        logger.debug(f"  -> lastModified after manual conversion: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
+                    # For other non-dict annotations, convert to dict as before
+                    old_annotations = tool.annotations
+                    logger.debug(f"  -> Converting non-dict annotations of type {type(old_annotations)}")
+
+                    if hasattr(old_annotations, 'model_dump'):
+                        # Handle Pydantic models - this preserves all fields including extra ones
+                        tool.annotations = old_annotations.model_dump()
+                        logger.debug(f"  -> Converted Pydantic annotations to dict: {tool.annotations}")
+                    elif hasattr(old_annotations, 'dict'):
+                        # Handle older Pydantic models
+                        tool.annotations = old_annotations.dict()
+                        logger.debug(f"  -> Converted Pydantic annotations to dict: {tool.annotations}")
+                    elif hasattr(old_annotations, '__dict__'):
+                        # Convert object attributes to dictionary (fallback for non-Pydantic objects)
+                        tool.annotations = old_annotations.__dict__.copy()
+                        logger.debug(f"  -> Converted annotations object to dict: {tool.annotations}")
+                    else:
+                        # Try to convert to dict using vars() or get all attributes
+                        try:
+                            tool.annotations = vars(old_annotations)
+                            logger.debug(f"  -> Converted annotations using vars(): {tool.annotations}")
+                        except TypeError:
+                            # Last resort: try to get all attributes manually
+                            tool.annotations = {}
+                            logger.debug(f"  -> Attempting manual conversion of annotations object")
+                            for attr in dir(old_annotations):
+                                if not attr.startswith('_'):
+                                    try:
+                                        value = getattr(old_annotations, attr)
+                                        if not callable(value):
+                                            tool.annotations[attr] = value
+                                            logger.debug(f"  -> Added attribute {attr}: {value}")
+                                    except Exception as e:
+                                        logger.debug(f"  -> Failed to get attribute {attr}: {e}")
+                            logger.debug(f"  -> Converted annotations manually: {tool.annotations}")
             else:
                 logger.debug(f"  -> Annotations already a dict, lastModified: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
 
-            # Add required annotation fields (preserve existing ones)
-            if 'title' not in tool.annotations or tool.annotations['title'] is None:
-                tool.annotations['title'] = tool.name
-                logger.debug(f"  -> Added annotations.title: {tool.name}")
-            if 'readOnlyHint' not in tool.annotations or tool.annotations['readOnlyHint'] is None:
-                tool.annotations['readOnlyHint'] = False
-                logger.debug(f"  -> Added annotations.readOnlyHint: False")
-            if 'destructiveHint' not in tool.annotations or tool.annotations['destructiveHint'] is None:
-                tool.annotations['destructiveHint'] = False
-                logger.debug(f"  -> Added annotations.destructiveHint: False")
-            if 'idempotentHint' not in tool.annotations or tool.annotations['idempotentHint'] is None:
-                tool.annotations['idempotentHint'] = True
-                logger.debug(f"  -> Added annotations.idempotentHint: True")
-            if 'openWorldHint' not in tool.annotations or tool.annotations['openWorldHint'] is None:
-                tool.annotations['openWorldHint'] = False
-                logger.debug(f"  -> Added annotations.openWorldHint: False")
+            # Add required annotation fields (preserve existing ones) - only for dict annotations
+            if isinstance(tool.annotations, dict):
+                if 'title' not in tool.annotations or tool.annotations['title'] is None:
+                    tool.annotations['title'] = tool.name
+                if 'readOnlyHint' not in tool.annotations or tool.annotations['readOnlyHint'] is None:
+                    tool.annotations['readOnlyHint'] = False
+                if 'destructiveHint' not in tool.annotations or tool.annotations['destructiveHint'] is None:
+                    tool.annotations['destructiveHint'] = False
+                if 'idempotentHint' not in tool.annotations or tool.annotations['idempotentHint'] is None:
+                    tool.annotations['idempotentHint'] = True
+                if 'openWorldHint' not in tool.annotations or tool.annotations['openWorldHint'] is None:
+                    tool.annotations['openWorldHint'] = False
 
             # Ensure dynamic function annotations are preserved
-            if original_annotations and isinstance(original_annotations, dict):
-                # Preserve all original annotations that aren't being overwritten by required fields
-                for key, value in original_annotations.items():
-                    if key not in ['title', 'readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint']:
-                        if key not in tool.annotations:
-                            tool.annotations[key] = value
-                            logger.debug(f"  -> Preserved original annotation {key}: {value}")
-                        else:
-                            logger.debug(f"  -> Annotation {key} already present, keeping existing value")
+            if original_annotations:
+                if isinstance(original_annotations, dict):
+                    # Preserve all original annotations that aren't being overwritten by required fields
+                    for key, value in original_annotations.items():
+                        if key not in ['title', 'readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint']:
+                            if isinstance(tool.annotations, dict):
+                                if key not in tool.annotations:
+                                    tool.annotations[key] = value
+                                    logger.debug(f"  -> Preserved original annotation {key}: {value}")
+                                else:
+                                    logger.debug(f"  -> Annotation {key} already present, keeping existing value")
+                            elif isinstance(tool.annotations, ToolAnnotations):
+                                # For our custom ToolAnnotations object, set attributes directly
+                                if not hasattr(tool.annotations, key):
+                                    setattr(tool.annotations, key, value)
+                                    logger.debug(f"  -> Preserved original annotation {key}: {value}")
+                                else:
+                                    logger.debug(f"  -> Annotation {key} already present, keeping existing value")
+                elif hasattr(original_annotations, '__dict__'):
+                    # Handle object annotations
+                    for key, value in original_annotations.__dict__.items():
+                        if key not in ['title', 'readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint']:
+                            if isinstance(tool.annotations, dict):
+                                if key not in tool.annotations:
+                                    tool.annotations[key] = value
+                                    logger.debug(f"  -> Preserved original annotation {key}: {value}")
+                            elif isinstance(tool.annotations, ToolAnnotations):
+                                if not hasattr(tool.annotations, key):
+                                    setattr(tool.annotations, key, value)
+                                    logger.debug(f"  -> Preserved original annotation {key}: {value}")
 
             # Log final annotations after patching
-            logger.debug(f"  -> Final annotations: {tool.annotations}")
-            logger.debug(f"  -> Final lastModified: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
-            logger.debug(f"  -> Final type: {tool.annotations.get('type', 'NOT_FOUND')}")
-            if original_annotations and isinstance(original_annotations, dict) and 'lastModified' in original_annotations:
-                if 'lastModified' not in tool.annotations:
-                    logger.error(f"❌ LOST lastModified for tool {tool.name}!")
-                    logger.error(f"❌ Original had: {original_annotations['lastModified']}")
-                    logger.error(f"❌ Final annotations: {tool.annotations}")
+            if isinstance(tool.annotations, dict):
+                logger.debug(f"  -> Final annotations: {tool.annotations}")
+                logger.debug(f"  -> Final lastModified: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
+                logger.debug(f"  -> Final type: {tool.annotations.get('type', 'NOT_FOUND')}")
+            elif isinstance(tool.annotations, ToolAnnotations):
+                logger.debug(f"  -> Final annotations object: {type(tool.annotations)}")
+                logger.debug(f"  -> Final lastModified: {getattr(tool.annotations, 'lastModified', 'NOT_FOUND')}")
+                logger.debug(f"  -> Final type: {getattr(tool.annotations, 'type', 'NOT_FOUND')}")
+
+            # Check if lastModified was preserved
+            if original_annotations:
+                if isinstance(original_annotations, dict) and 'lastModified' in original_annotations:
+                    if isinstance(tool.annotations, dict):
+                        if 'lastModified' not in tool.annotations:
+                            logger.error(f"❌ LOST lastModified for tool {tool.name}!")
+                            logger.error(f"❌ Original had: {original_annotations['lastModified']}")
+                        else:
+                            logger.debug(f"  -> Preserved lastModified: {tool.annotations['lastModified']}")
+                    elif isinstance(tool.annotations, ToolAnnotations):
+                        if not hasattr(tool.annotations, 'lastModified'):
+                            logger.error(f"❌ LOST lastModified for tool {tool.name}!")
+                            logger.error(f"❌ Original had: {original_annotations['lastModified']}")
+                        else:
+                            logger.debug(f"  -> Preserved lastModified: {getattr(tool.annotations, 'lastModified')}")
+                elif hasattr(original_annotations, 'lastModified'):
+                    if isinstance(tool.annotations, dict):
+                        if 'lastModified' not in tool.annotations:
+                            logger.error(f"❌ LOST lastModified for tool {tool.name} (from object attr)!")
+                            logger.error(f"❌ Original had: {getattr(original_annotations, 'lastModified')}")
+                        else:
+                            logger.debug(f"  -> Preserved lastModified: {tool.annotations['lastModified']}")
+                    elif isinstance(tool.annotations, ToolAnnotations):
+                        if not hasattr(tool.annotations, 'lastModified'):
+                            logger.error(f"❌ LOST lastModified for tool {tool.name} (from object attr)!")
+                            logger.error(f"❌ Original had: {getattr(original_annotations, 'lastModified')}")
+                        else:
+                            logger.debug(f"  -> Preserved lastModified: {getattr(tool.annotations, 'lastModified')}")
                 else:
-                    logger.debug(f"  -> Preserved lastModified: {tool.annotations['lastModified']}")
-            elif original_annotations and hasattr(original_annotations, 'lastModified'):
-                if 'lastModified' not in tool.annotations:
-                    logger.error(f"❌ LOST lastModified for tool {tool.name} (from object attr)!")
-                    logger.error(f"❌ Original had: {getattr(original_annotations, 'lastModified')}")
-                else:
-                    logger.debug(f"  -> Preserved lastModified: {tool.annotations['lastModified']}")
-            else:
-                logger.debug(f"  -> No lastModified in original annotations for {tool.name}")
+                    logger.debug(f"  -> No lastModified in original annotations for {tool.name}")
 
         # --- Update Cache --- #
         self._cached_tools = list(tools_list) # Store a copy
@@ -2908,7 +2976,7 @@ if __name__ == "__main__":
     # Start the file watcher
     event_handler = DynamicConfigEventHandler(mcp_server, loop)
     observer = Observer()
-    observer.schedule(event_handler, FUNCTIONS_DIR, recursive=False) # Don't watch subdirs
+    observer.schedule(event_handler, FUNCTIONS_DIR, recursive=True) # Watch subdirs for dynamic functions
     observer.schedule(event_handler, SERVERS_DIR, recursive=False)
     observer.start()
     logger.info(f"👁️ Watching for changes in {FUNCTIONS_DIR} and {SERVERS_DIR}...")

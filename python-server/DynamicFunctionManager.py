@@ -671,7 +671,7 @@ async def {name}():
         logger.debug("🧹 Function-to-file mapping cache invalidated")
 
     async def _build_function_file_mapping(self):
-        """Build the function-to-file mapping by scanning all files."""
+        """Build the function-to-file mapping by scanning all files recursively."""
         try:
             # Check if we need to rebuild the mapping
             current_mtime = os.path.getmtime(self.functions_dir)
@@ -683,28 +683,44 @@ async def {name}():
             logger.info("🔍 Building function-to-file mapping...")
             self._function_file_mapping.clear()
 
-            # Scan all Python files in the functions directory
-            for filename in os.listdir(self.functions_dir):
-                if not filename.endswith('.py'):
-                    continue
+            # Scan all Python files in the functions directory and subdirectories
+            for root, dirs, files in os.walk(self.functions_dir):
+                # Check if we're in a subdirectory and log it prominently
+                if root != self.functions_dir:
+                    subdir_name = os.path.basename(root)
+                    logger.info(f"🎯 EXPLORING SUBFOLDER: {CYAN}{subdir_name}{RESET}")
 
-                file_path = os.path.join(self.functions_dir, filename)
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        code = f.read()
+                for filename in files:
+                    if not filename.endswith('.py'):
+                        continue
 
-                    # Validate and extract function info
-                    is_valid, error_message, functions_info = self._code_validate_syntax(code)
+                    file_path = os.path.join(root, filename)
+                    # Calculate relative path from functions_dir
+                    rel_path = os.path.relpath(file_path, self.functions_dir)
 
-                    if is_valid and functions_info:
-                        for func_info in functions_info:
-                            func_name = func_info['name']
-                            self._function_file_mapping[func_name] = filename
-                            logger.debug(f"  📍 {func_name} -> {filename}")
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            code = f.read()
 
-                except Exception as e:
-                    logger.warning(f"⚠️ Error processing {filename} for function mapping: {e}")
-                    continue
+                        # Validate and extract function info
+                        is_valid, error_message, functions_info = self._code_validate_syntax(code)
+
+                        if is_valid and functions_info:
+                            for func_info in functions_info:
+                                func_name = func_info['name']
+                                self._function_file_mapping[func_name] = rel_path
+                                logger.info(f"🎯 FOUND FUNCTION: {CYAN}{func_name}{RESET} -> {rel_path}")
+                                if root != self.functions_dir:
+                                    logger.info(f"   📁 IN SUBFOLDER: {CYAN}{os.path.basename(root)}{RESET}")
+                        else:
+                            if root != self.functions_dir:
+                                logger.warning(f"⚠️ NO FUNCTIONS FOUND in {rel_path} (subfolder: {os.path.basename(root)})")
+                            else:
+                                logger.debug(f"  📍 No functions found in {rel_path}")
+
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error processing {rel_path} for function mapping: {e}")
+                        continue
 
             self._function_file_mapping_mtime = current_mtime
             logger.info(f"✅ Built function-to-file mapping with {len(self._function_file_mapping)} functions")
@@ -866,8 +882,9 @@ async def {name}():
             raise FileNotFoundError(f"Dynamic function '{name}' not found at {file_path}")
 
         context_tokens = None
-        # Use the actual filename (without .py) for module name
-        module_name = f"{PARENT_PACKAGE_NAME}.{os.path.splitext(target_file)[0]}"
+        # Use the relative path (without .py) for module name, replacing slashes with dots
+        module_path = os.path.splitext(target_file)[0].replace(os.sep, '.')
+        module_name = f"{PARENT_PACKAGE_NAME}.{module_path}"
         module = None # Define module outside the lock
 
         # --- Clear ALL dynamic function child modules from cache FIRST ---
