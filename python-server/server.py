@@ -695,37 +695,46 @@ class DynamicAdditionServer(Server):
             # Ensure the functions directory exists
             os.makedirs(FUNCTIONS_DIR, exist_ok=True)
 
-            # Get all Python files in the directory
-            function_files = [f for f in os.listdir(FUNCTIONS_DIR) if f.endswith('.py')]
-            logger.info(f"📝 FOUND {len(function_files)} POTENTIAL DYNAMIC FUNCTIONS")
+                        # Use the function mapping to get all discovered functions
+            await self.function_manager._build_function_file_mapping()
+            function_mapping = self.function_manager._function_file_mapping
 
-            # For each Python file, create Tool entries
-            for file_name in function_files:
-                tool_name_from_file = os.path.splitext(file_name)[0]
+            logger.info(f"📝 FOUND {len(function_mapping)} FUNCTIONS FROM MAPPING")
+
+            # For each function in the mapping, create Tool entries
+            for func_name, file_path in function_mapping.items():
                 try:
                     # Skip if this seems to be a utility file
-                    if tool_name_from_file.startswith('_') or tool_name_from_file == '__init__' or tool_name_from_file == '__pycache__':
+                    if func_name.startswith('_') or func_name == '__init__' or func_name == '__pycache__':
                         continue
 
-                    # Validate function syntax without actually loading it
-                    validation_result = await self.function_manager.function_validate(tool_name_from_file)
-                    is_valid = validation_result.get('valid', False)
-                    error_message = validation_result.get('error')
-                    functions_info = validation_result.get('function_info') # Should be a list if valid
+                                        # Load and validate the function code directly from the file
+                    full_file_path = os.path.join(FUNCTIONS_DIR, file_path)
+                    try:
+                        with open(full_file_path, 'r', encoding='utf-8') as f:
+                            code = f.read()
+
+                        # Validate function syntax without actually loading it
+                        is_valid, error_message, functions_info = self.function_manager._code_validate_syntax(code)
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error loading file {file_path}: {str(e)}")
+                        is_valid = False
+                        error_message = str(e)
+                        functions_info = None
 
                     # NEW: Handle multiple functions per file
                     if is_valid and functions_info:
                         # Create one tool per function in the file
                         for func_info in functions_info:
                             # --- Create Tool --- #
-                            tool_name = func_info.get('name', tool_name_from_file) # Use AST name, fallback to filename
+                            tool_name = func_info.get('name', func_name) # Use AST name, fallback to function name
                             tool_description = func_info.get('description', f"Dynamic function '{tool_name}'")
                             tool_input_schema = func_info.get('inputSchema', {"type": "object", "properties": {}})
                             tool_annotations = {}
 
                             tool_annotations["type"] = "function"
                             tool_annotations["validationStatus"] = "VALID"
-                            tool_annotations["sourceFile"] = file_name  # NEW: Track which file contains this function
+                            tool_annotations["sourceFile"] = file_path  # NEW: Track which file contains this function
 
                             # Add decorator info if present (opt-in)
                             decorators_from_info = func_info.get("decorators")
@@ -739,6 +748,12 @@ class DynamicAdditionServer(Server):
                             app_name_from_info = func_info.get("app_name")
                             if app_name_from_info is not None:
                                 tool_annotations["app_name"] = app_name_from_info
+                            else:
+                                # If no app_name from decorator, check if function is in a subfolder
+                                if '/' in file_path:
+                                    subfolder_name = file_path.split('/')[0]
+                                    tool_annotations["app_name"] = subfolder_name
+                                    logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {subfolder_name} (from subfolder)")
                             # Add location_name to annotations if present in function_info
                             location_name_from_info = func_info.get("location_name")
                             if location_name_from_info is not None:
@@ -755,7 +770,7 @@ class DynamicAdditionServer(Server):
                             # Add common annotations
                             try:
                                 tool_annotations["lastModified"] = datetime.datetime.fromtimestamp(
-                                    os.path.getmtime(os.path.join(FUNCTIONS_DIR, file_name))
+                                    os.path.getmtime(full_file_path)
                                 ).isoformat()
                                 logger.debug(f"🔍 SET lastModified for {tool_name}: {tool_annotations['lastModified']}")
                             except Exception as e:
@@ -779,26 +794,26 @@ class DynamicAdditionServer(Server):
                             if hasattr(tool_obj.annotations, '__dict__'):
                                 logger.debug(f"🔍 Tool {tool_name} annotations __dict__: {tool_obj.annotations.__dict__}")
                             tools_list.append(tool_obj)
-                            logger.debug(f"📝 Added dynamic tool: {tool_name} from {file_name}, valid: {is_valid}")
+                            logger.debug(f"📝 Added dynamic tool: {tool_name} from {file_path}, valid: {is_valid}")
 
                     elif is_valid and not functions_info:
                          # Valid syntax but failed to extract info (should ideally not happen)
-                         tool_description = f"Dynamic function: {tool_name_from_file} (Details unavailable)"
+                         tool_description = f"Dynamic function: {func_name} (Details unavailable)"
                          tool_input_schema = {"type": "object", "description": "Could not parse arguments."}
                          tool_annotations = {"validationStatus": "VALID_SYNTAX_UNKNOWN_STRUCTURE"}
 
-                         # Add runtime error message if present in cache (check by filename for backward compatibility)
-                         if tool_name_from_file in _runtime_errors:
-                             tool_annotations["runtimeError"] = _runtime_errors[tool_name_from_file]
+                         # Add runtime error message if present in cache (check by function name for backward compatibility)
+                         if func_name in _runtime_errors:
+                             tool_annotations["runtimeError"] = _runtime_errors[func_name]
 
                          # Add server config load error if present in cache
-                         if tool_name_from_file in self.server_manager._server_load_errors:
-                             tool_annotations["loadError"] = self.server_manager._server_load_errors[tool_name_from_file]
+                         if func_name in self.server_manager._server_load_errors:
+                             tool_annotations["loadError"] = self.server_manager._server_load_errors[func_name]
 
                          # Add common annotations
                          try:
                              tool_annotations["lastModified"] = datetime.datetime.fromtimestamp(
-                                 os.path.getmtime(os.path.join(FUNCTIONS_DIR, file_name))
+                                 os.path.getmtime(full_file_path)
                              ).isoformat()
                          except Exception:
                              pass # Ignore if file stat fails
@@ -807,34 +822,34 @@ class DynamicAdditionServer(Server):
                          # Create custom ToolAnnotations object to allow extra fields
                          custom_annotations = ToolAnnotations(**tool_annotations)
                          tool_obj = Tool(
-                             name=tool_name_from_file,
+                             name=func_name,
                              description=tool_description,
                              inputSchema=tool_input_schema,
                              annotations=custom_annotations
                          )
                          tools_list.append(tool_obj)
-                         logger.debug(f"📝 Added dynamic tool: {tool_name_from_file}, valid: {is_valid}")
+                         logger.debug(f"📝 Added dynamic tool: {func_name}, valid: {is_valid}")
 
                     else:
                          # Invalid syntax
-                         tool_description = f"Dynamic function: {tool_name_from_file} (INVALID)"
+                         tool_description = f"Dynamic function: {func_name} (INVALID)"
                          tool_input_schema = {"type": "object", "description": "Function has syntax errors."}
                          tool_annotations = {"validationStatus": "INVALID"}
                          if error_message:
                              tool_annotations["errorMessage"] = error_message
 
-                         # Add runtime error message if present in cache (check by filename for backward compatibility)
-                         if tool_name_from_file in _runtime_errors:
-                             tool_annotations["runtimeError"] = _runtime_errors[tool_name_from_file]
+                         # Add runtime error message if present in cache (check by function name for backward compatibility)
+                         if func_name in _runtime_errors:
+                             tool_annotations["runtimeError"] = _runtime_errors[func_name]
 
                          # Add server config load error if present in cache
-                         if tool_name_from_file in self.server_manager._server_load_errors:
-                             tool_annotations["loadError"] = self.server_manager._server_load_errors[tool_name_from_file]
+                         if func_name in self.server_manager._server_load_errors:
+                             tool_annotations["loadError"] = self.server_manager._server_load_errors[func_name]
 
                          # Add common annotations
                          try:
                              tool_annotations["lastModified"] = datetime.datetime.fromtimestamp(
-                                 os.path.getmtime(os.path.join(FUNCTIONS_DIR, file_name))
+                                 os.path.getmtime(full_file_path)
                              ).isoformat()
                          except Exception:
                              pass # Ignore if file stat fails
@@ -843,21 +858,21 @@ class DynamicAdditionServer(Server):
                          # Create custom ToolAnnotations object to allow extra fields
                          custom_annotations = ToolAnnotations(**tool_annotations)
                          tool_obj = Tool(
-                             name=tool_name_from_file,
+                             name=func_name,
                              description=tool_description,
                              inputSchema=tool_input_schema,
                              annotations=custom_annotations
                          )
                          tools_list.append(tool_obj)
-                         logger.debug(f"📝 Added dynamic tool: {tool_name_from_file}, valid: {is_valid}")
+                         logger.debug(f"📝 Added dynamic tool: {func_name}, valid: {is_valid}")
 
                 except Exception as e:
-                    logger.warning(f"⚠️ Error processing potential tool file {file_name}: {str(e)}")
+                    logger.warning(f"⚠️ Error processing function {func_name} from {file_path}: {str(e)}")
                     # Add a placeholder indicating the error
                     # Create custom ToolAnnotations object to allow extra fields
                     error_annotations = ToolAnnotations(validationStatus="ERROR_LOADING")
                     tools_list.append(Tool(
-                        name=tool_name_from_file,
+                        name=func_name,
                         description=f"Error loading dynamic function: {str(e)}",
                         inputSchema={"type": "object"},
                         annotations=error_annotations
@@ -1173,41 +1188,44 @@ class DynamicAdditionServer(Server):
                         # Patch all tools with missing required fields for MCP client compatibility
         logger.info(f"🔧 Patching {len(tools_list)} tools with required MCP fields")
         for i, tool in enumerate(tools_list):
-            logger.debug(f"🔧 Patching tool {i+1}/{len(tools_list)}: {tool.name}")
+            #logger.debug(f"🔧 Patching tool {i+1}/{len(tools_list)}: {tool.name}")
 
             # Log original annotations before patching
             original_annotations = getattr(tool, 'annotations', None)
-            logger.debug(f"  -> Original annotations: {original_annotations}")
-            logger.debug(f"  -> Original annotations type: {type(original_annotations)}")
-            logger.debug(f"  -> Is annotations a dict? {isinstance(original_annotations, dict)}")
+            #logger.debug(f"  -> Original annotations: {original_annotations}")
+            #logger.debug(f"  -> Original annotations type: {type(original_annotations)}")
+            #logger.debug(f"  -> Is annotations a dict? {isinstance(original_annotations, dict)}")
             if original_annotations and isinstance(original_annotations, dict):
-                logger.debug(f"  -> Original lastModified: {original_annotations.get('lastModified', 'NOT_FOUND')}")
-                logger.debug(f"  -> Original type: {original_annotations.get('type', 'NOT_FOUND')}")
+                pass
+                #logger.debug(f"  -> Original lastModified: {original_annotations.get('lastModified', 'NOT_FOUND')}")
+                #logger.debug(f"  -> Original type: {original_annotations.get('type', 'NOT_FOUND')}")
             elif hasattr(original_annotations, 'lastModified'):
-                logger.debug(f"  -> Original lastModified (attr): {getattr(original_annotations, 'lastModified', 'NOT_FOUND')}")
+                pass
+                #logger.debug(f"  -> Original lastModified (attr): {getattr(original_annotations, 'lastModified', 'NOT_FOUND')}")
             else:
-                logger.debug(f"  -> No lastModified found in original annotations")
+                pass
+                #logger.debug(f"  -> No lastModified found in original annotations")
 
             # Add title if missing
             if not hasattr(tool, 'title') or tool.title is None:
                 tool.title = tool.name
-                logger.debug(f"  -> Added title: {tool.title}")
+                #logger.debug(f"  -> Added title: {tool.title}")
 
             # Add outputSchema if missing
             if not hasattr(tool, 'outputSchema') or tool.outputSchema is None:
                 tool.outputSchema = {"type": "object"}
-                logger.debug(f"  -> Added outputSchema")
+                #logger.debug(f"  -> Added outputSchema")
 
             # Add annotations if missing
             if not hasattr(tool, 'annotations') or tool.annotations is None:
                 tool.annotations = {}
-                logger.debug(f"  -> Created empty annotations")
+                #logger.debug(f"  -> Created empty annotations")
 
             # Handle annotations - preserve our custom ToolAnnotations objects
             if not isinstance(tool.annotations, dict):
                 # If it's our custom ToolAnnotations object, keep it as is
                 if isinstance(tool.annotations, ToolAnnotations):
-                    logger.debug(f"  -> Keeping custom ToolAnnotations object for {tool.name}")
+                    #logger.debug(f"  -> Keeping custom ToolAnnotations object for {tool.name}")
                     # Add missing fields directly to the object
                     if not hasattr(tool.annotations, 'title') or tool.annotations.title is None:
                         tool.annotations.title = tool.name
@@ -1305,13 +1323,15 @@ class DynamicAdditionServer(Server):
 
             # Log final annotations after patching
             if isinstance(tool.annotations, dict):
-                logger.debug(f"  -> Final annotations: {tool.annotations}")
-                logger.debug(f"  -> Final lastModified: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
-                logger.debug(f"  -> Final type: {tool.annotations.get('type', 'NOT_FOUND')}")
+                pass
+                #logger.debug(f"  -> Final annotations: {tool.annotations}")
+                #logger.debug(f"  -> Final lastModified: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
+                #logger.debug(f"  -> Final type: {tool.annotations.get('type', 'NOT_FOUND')}")
             elif isinstance(tool.annotations, ToolAnnotations):
-                logger.debug(f"  -> Final annotations object: {type(tool.annotations)}")
-                logger.debug(f"  -> Final lastModified: {getattr(tool.annotations, 'lastModified', 'NOT_FOUND')}")
-                logger.debug(f"  -> Final type: {getattr(tool.annotations, 'type', 'NOT_FOUND')}")
+                pass
+                #logger.debug(f"  -> Final annotations object: {type(tool.annotations)}")
+                #logger.debug(f"  -> Final lastModified: {getattr(tool.annotations, 'lastModified', 'NOT_FOUND')}")
+                #logger.debug(f"  -> Final type: {getattr(tool.annotations, 'type', 'NOT_FOUND')}")
 
             # Check if lastModified was preserved
             if original_annotations:
