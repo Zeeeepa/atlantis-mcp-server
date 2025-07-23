@@ -6,7 +6,7 @@ Create Python functions that become MCP tools automatically. Put `.py` files in 
 
 **Features:**
 - Multiple functions per file supported
-- Auto-discovery and registration  
+- Auto-discovery and registration
 - Live reloading on file changes
 - Each function becomes its own MCP tool
 
@@ -15,7 +15,7 @@ Create Python functions that become MCP tools automatically. Put `.py` files in 
 ```
 dynamic_functions/
 ├── chat.py              # Single function
-├── math_operations.py   # Multiple functions  
+├── math_operations.py   # Multiple functions
 ├── user_management.py   # Related functions grouped
 └── OLD/                 # Automatic backups
 ```
@@ -43,7 +43,7 @@ async def helper():
 ## Requirements
 
 1. Import `atlantis` module
-2. Use `async def` (recommended)  
+2. Use `async def` (recommended)
 3. Add type hints for parameters
 4. **CRITICAL**: Docstring becomes AI tool description
 5. Use appropriate decorators
@@ -57,7 +57,7 @@ Write for AI consumption. Be explicit about purpose and when to use.
 """Calculate distance between coordinates using Haversine formula. Use for measuring distances between lat/lng points."""
 ```
 
-**Bad:**  
+**Bad:**
 ```python
 """This function does math."""  # Too vague
 ```
@@ -74,7 +74,7 @@ Write for AI consumption. Be explicit about purpose and when to use.
 **Combine decorators:**
 ```python
 @app(name="calculator")
-@location(name="office") 
+@location(name="office")
 @public
 async def calculate(x: float, y: float):
     """Calculate with app and location context."""
@@ -100,6 +100,10 @@ async def calculate(x: float, y: float):
 - `owner_log(message)` - Log to owner file
 - `shared` - Persistent memory container (connections, not data)
 
+**Built-in Functions:**
+- `_function_show(name)` - Make any function temporarily visible until server restart
+- `_function_hide(name)` - Hide any function temporarily until server restart
+
 ## Shared Container
 
 Use `atlantis.shared` for persistent memory objects (connections, not data).
@@ -112,7 +116,7 @@ if not atlantis.shared.get("db"):
 db = atlantis.shared.get("db")
 ```
 
-**Store:** DB connections, API clients, caches  
+**Store:** DB connections, API clients, caches
 **Don't store:** User data, application data (use databases)
 
 **Methods:** `shared.get(key)`, `shared.set(key, value)`, `shared.remove(key)`, `shared.keys()`
@@ -136,7 +140,7 @@ async def get_user(username: str):
     """Get user by username. Use to retrieve user details."""
     return {"username": username, "email": "user@example.com"}
 
-@public  
+@public
 async def delete_user(username: str):
     """Delete user account. Use to remove users."""
     return {"success": True}
@@ -147,7 +151,7 @@ def _validate_email(email: str):
     return "@" in email
 ```
 
-**Result:** 3 separate MCP tools (`create_user`, `get_user`, `delete_user`) + 1 hidden helper  
+**Result:** 3 separate MCP tools (`create_user`, `get_user`, `delete_user`) + 1 hidden helper
 **Benefits:** Group related functions, share helpers, common imports
 
 ### Streaming
@@ -169,6 +173,46 @@ async def get_input():
     return f"Hello {name}"
 ```
 
+### State-Dependent Visibility
+Use `@hidden` with `_function_show` for state-dependent function visibility, or use `_function_show`/`_function_hide` directly for any function:
+
+```python
+@public
+async def init_app():
+    """Initialize app and show hidden functions."""
+    # Initialize your app
+    await atlantis.client_log("Initializing app...")
+
+    # Make hidden functions visible
+    await atlantis.client_command("_function_show", {"name": "start_service"})
+    await atlantis.client_command("_function_show", {"name": "stop_service"})
+
+    return "App initialized"
+
+@hidden
+async def start_service():
+    """Start service - only visible after initialization."""
+    return "Service started"
+
+@hidden
+async def stop_service():
+    """Stop service - only visible after initialization."""
+    return "Service stopped"
+
+# You can also hide any function temporarily
+@public
+async def hide_debug_functions():
+    """Hide debug functions from the tool list."""
+    await atlantis.client_command("_function_hide", {"name": "debug_log"})
+    await atlantis.client_command("_function_hide", {"name": "test_function"})
+    return "Debug functions hidden"
+```
+
+**Patterns:**
+- Show `init()` first, then reveal other methods after initialization
+- Hide debug/test functions when not needed
+- Temporarily hide functions during maintenance
+
 ### Chat Function
 ```python
 @chat
@@ -177,13 +221,13 @@ async def chat():
     """Chat function that processes conversation and calls LLM."""
     # Get conversation history
     transcript = await atlantis.client_command("\\transcript get")
-    
+
     # Get available tools
     tools = await atlantis.client_command("\\transcript tools")
-    
+
     # Call your LLM with transcript and tools
     response = await call_llm(transcript, tools)
-    
+
     # Stream response back
     stream_id = await atlantis.stream_start("chat", "ai_assistant")
     await atlantis.stream(response, stream_id)
@@ -202,7 +246,7 @@ def func(text: str, items: List[str], optional: Optional[int] = None):
 ## Best Practices
 
 - Use `async def` for functions
-- Add type hints for parameters  
+- Add type hints for parameters
 - Write clear docstrings for AI
 - Use `atlantis.shared` for connections only
 - Group related functions in same file
@@ -210,8 +254,8 @@ def func(text: str, items: List[str], optional: Optional[int] = None):
 
 ## Troubleshooting
 
-**Function not showing:** Check syntax, decorators, file location  
-**Execution errors:** Check `.log` files in `dynamic_functions/`  
+**Function not showing:** Check syntax, decorators, file location
+**Execution errors:** Check `.log` files in `dynamic_functions/`
 **Context issues:** Use `await` with atlantis methods
 
 Functions automatically become MCP tools when saved to `dynamic_functions/`.

@@ -284,6 +284,10 @@ class DynamicAdditionServer(Server):
         self._last_active_server_keys: Optional[set] = None # Store active server keys for cache invalidation
         self._server_configs: Dict[str, dict] = {} # Store server configurations
 
+        # Track function visibility overrides (can show/hide any function)
+        self._temporarily_visible_functions: set = set()
+        self._temporarily_hidden_functions: set = set()
+
         # Initialize the dynamic function and server managers
         self.function_manager = DynamicFunctionManager(FUNCTIONS_DIR)
         self.server_manager = DynamicServerManager(SERVERS_DIR)
@@ -684,6 +688,30 @@ class DynamicAdditionServer(Server):
                 },
                 annotations=ToolAnnotations(title="_server_get_tools")
             ),
+            Tool(
+                name="_function_show",
+                description="Makes a hidden function temporarily visible until server restart.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "The name of the hidden function to make visible"}
+                    },
+                    "required": ["name"]
+                },
+                annotations=ToolAnnotations(title="_function_show")
+            ),
+            Tool(
+                name="_function_hide",
+                description="Hides a temporarily visible function again.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "The name of the function to hide again"}
+                    },
+                    "required": ["name"]
+                },
+                annotations=ToolAnnotations(title="_function_hide")
+            ),
 
         ]
         # Log the static tools being included
@@ -740,21 +768,33 @@ class DynamicAdditionServer(Server):
                             decorators_from_info = func_info.get("decorators")
                             if decorators_from_info: # Only add if list is not None and not empty
                                 tool_annotations["decorators"] = decorators_from_info
-                                # Skip this function if it has the @hidden decorator
-                                if "hidden" in decorators_from_info:
-                                    logger.info(f"🙈 Skipping hidden function: {tool_name}")
-                                    continue
-                            # Add app_name to annotations if present in function_info
+
+                            # Determine app_name first (needed for logging)
                             app_name_from_info = func_info.get("app_name")
                             if app_name_from_info is not None:
-                                tool_annotations["app_name"] = app_name_from_info
-                                logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {app_name_from_info} (from @app decorator)")
+                                app_name = app_name_from_info
+                                tool_annotations["app_name"] = app_name
+                                logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {app_name} (from @app decorator)")
                             else:
                                 # If no app_name from decorator, check if function is in a subfolder
                                 if '/' in file_path:
-                                    subfolder_name = file_path.split('/')[0]
-                                    tool_annotations["app_name"] = subfolder_name
-                                    logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {subfolder_name} (from subfolder)")
+                                    app_name = file_path.split('/')[0]
+                                    tool_annotations["app_name"] = app_name
+                                    logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {app_name} (from subfolder)")
+                                else:
+                                    app_name = "unknown"
+
+                            # Check visibility overrides first (these take precedence over decorators)
+                            if tool_name in self._temporarily_hidden_functions:
+                                logger.info(f"{PINK}🙈 Skipping temporarily hidden function: {tool_name} (app: {app_name}){RESET}")
+                                continue
+                            elif tool_name in self._temporarily_visible_functions:
+                                logger.info(f"{PINK}👁️ Showing temporarily visible function: {tool_name} (app: {app_name}){RESET}")
+                                tool_annotations["temporarilyVisible"] = True
+                            elif decorators_from_info and "hidden" in decorators_from_info:
+                                # Skip this function if it has the @hidden decorator (and no override)
+                                logger.info(f"{PINK}🙈 Skipping hidden function: {tool_name} (app: {app_name}){RESET}")
+                                continue
                             # Add location_name to annotations if present in function_info
                             location_name_from_info = func_info.get("location_name")
                             if location_name_from_info is not None:
@@ -794,8 +834,15 @@ class DynamicAdditionServer(Server):
                             #logger.debug(f"🔍 Tool {tool_name} annotations type: {type(tool_obj.annotations)}")
                             if hasattr(tool_obj.annotations, '__dict__'):
                                 logger.debug(f"🔍 Tool {tool_name} annotations __dict__: {tool_obj.annotations.__dict__}")
-                            tools_list.append(tool_obj)
-                            logger.debug(f"📝 Added dynamic tool: {tool_name} from {file_path}, valid: {is_valid}")
+                            # Check for duplicates before adding (app-aware and case-insensitive)
+                            app_name = tool_annotations.get("app_name", "unknown")
+                            tool_key = f"{app_name}.{tool_name}".lower()
+                            existing_tool_keys = {f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}".lower() for tool in tools_list}
+                            if tool_key not in existing_tool_keys:
+                                tools_list.append(tool_obj)
+                                logger.debug(f"📝 Added dynamic tool: {tool_name} from {file_path} (app: {app_name}), valid: {is_valid}")
+                            else:
+                                logger.warning(f"⚠️ Skipping duplicate tool: {tool_name} from {file_path} (app: {app_name}) - already exists")
 
                     elif is_valid and not functions_info:
                          # Valid syntax but failed to extract info (should ideally not happen)
@@ -828,8 +875,18 @@ class DynamicAdditionServer(Server):
                              inputSchema=tool_input_schema,
                              annotations=custom_annotations
                          )
-                         tools_list.append(tool_obj)
-                         logger.debug(f"📝 Added dynamic tool: {func_name}, valid: {is_valid}")
+                         # Check for duplicates before adding (app-aware and case-insensitive)
+                         # For this case, we don't have app_name from decorators, so use subfolder if available
+                         app_name = "unknown"
+                         if '/' in file_path:
+                             app_name = file_path.split('/')[0]
+                         tool_key = f"{app_name}.{func_name}".lower()
+                         existing_tool_keys = {f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}".lower() for tool in tools_list}
+                         if tool_key not in existing_tool_keys:
+                             tools_list.append(tool_obj)
+                             logger.debug(f"📝 Added dynamic tool: {func_name} (app: {app_name}), valid: {is_valid}")
+                         else:
+                             logger.warning(f"⚠️ Skipping duplicate tool: {func_name} (app: {app_name}) - already exists")
 
                     else:
                          # Invalid syntax
@@ -864,31 +921,47 @@ class DynamicAdditionServer(Server):
                              inputSchema=tool_input_schema,
                              annotations=custom_annotations
                          )
-                         tools_list.append(tool_obj)
-                         logger.debug(f"📝 Added dynamic tool: {func_name}, valid: {is_valid}")
+                         # Check for duplicates before adding (app-aware and case-insensitive)
+                         # For this case, we don't have app_name from decorators, so use subfolder if available
+                         app_name = "unknown"
+                         if '/' in file_path:
+                             app_name = file_path.split('/')[0]
+                         tool_key = f"{app_name}.{func_name}".lower()
+                         existing_tool_keys = {f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}".lower() for tool in tools_list}
+                         if tool_key not in existing_tool_keys:
+                             tools_list.append(tool_obj)
+                             logger.debug(f"📝 Added dynamic tool: {func_name} (app: {app_name}), valid: {is_valid}")
+                         else:
+                             logger.warning(f"⚠️ Skipping duplicate tool: {func_name} (app: {app_name}) - already exists")
 
                 except Exception as e:
                     logger.warning(f"⚠️ Error processing function {func_name} from {file_path}: {str(e)}")
                     # Add a placeholder indicating the error
                     # Create custom ToolAnnotations object to allow extra fields
                     error_annotations = ToolAnnotations(validationStatus="ERROR_LOADING")
-                    tools_list.append(Tool(
-                        name=func_name,
-                        description=f"Error loading dynamic function: {str(e)}",
-                        inputSchema={"type": "object"},
-                        annotations=error_annotations
-                    ))
+                    # Check for duplicates before adding (app-aware and case-insensitive)
+                    # For error cases, use subfolder as app name if available
+                    app_name = "unknown"
+                    if '/' in file_path:
+                        app_name = file_path.split('/')[0]
+                    tool_key = f"{app_name}.{func_name}".lower()
+                    existing_tool_keys = {f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}".lower() for tool in tools_list}
+                    if tool_key not in existing_tool_keys:
+                        tools_list.append(Tool(
+                            name=func_name,
+                            description=f"Error loading dynamic function: {str(e)}",
+                            inputSchema={"type": "object"},
+                            annotations=error_annotations
+                        ))
+                    else:
+                        logger.warning(f"⚠️ Skipping duplicate error tool: {func_name} (app: {app_name}) - already exists")
                     continue
 
         except Exception as e:
             logger.error(f"❌ Error scanning for dynamic functions: {str(e)}")
             # Continue with just the built-in tools
 
-        # NEW: Build function-to-file mapping after processing all files
-        try:
-            await self.function_manager._build_function_file_mapping()
-        except Exception as e:
-            logger.warning(f"⚠️ Error building function-to-file mapping: {str(e)}")
+        # Function-to-file mapping was already built at the beginning of this method
 
         # --- DEBUG: Log current server_tasks state before processing servers ---
         # Access server_tasks via module namespace
@@ -1092,8 +1165,13 @@ class DynamicAdditionServer(Server):
                         annotations=custom_annotations # Use annotations object that contains started_at if applicable
                     )
 
-                    tools_list.append(server_tool)
-                    logger.debug(f"📝 Added dynamic server config entry: {server_name} (Status: {status})")
+                    # Check for duplicates before adding (server names are unique)
+                    existing_tool_names = {tool.name.lower() for tool in tools_list}
+                    if server_name.lower() not in existing_tool_names:
+                        tools_list.append(server_tool)
+                        logger.debug(f"📝 Added dynamic server config entry: {server_name} (Status: {status})")
+                    else:
+                        logger.warning(f"⚠️ Skipping duplicate server config: {server_name} - already exists")
                 except Exception as se:
                     logger.warning(f"⚠️ Error processing MCP server config '{server_name}': {se}")
                     # Create custom ToolAnnotations object to allow extra fields
@@ -1101,12 +1179,17 @@ class DynamicAdditionServer(Server):
                         validationStatus="ERROR_LOADING_SERVER",
                         runningStatus=status # Still show status even if config load failed
                     )
-                    tools_list.append(Tool(
-                        name=server_name,
-                        description=f"Error loading MCP server config: {se}",
-                        inputSchema={"type": "object"},
-                        annotations=error_annotations
-                    ))
+                    # Check for duplicates before adding (server names are unique)
+                    existing_tool_names = {tool.name.lower() for tool in tools_list}
+                    if server_name.lower() not in existing_tool_names:
+                        tools_list.append(Tool(
+                            name=server_name,
+                            description=f"Error loading MCP server config: {se}",
+                            inputSchema={"type": "object"},
+                            annotations=error_annotations
+                        ))
+                    else:
+                        logger.warning(f"⚠️ Skipping duplicate error server config: {server_name} - already exists")
         except Exception as ee:
             logger.error(f"❌ Error scanning for dynamic servers: {ee}")
 
@@ -1179,8 +1262,13 @@ class DynamicAdditionServer(Server):
                             inputSchema=original_schema,
                             annotations=custom_annotations
                         )
-                        tools_list.append(new_tool)
-                        logger.debug(f"  -> Added tool from server: {new_tool_name}")
+                        # Check for duplicates before adding (server tools are prefixed with server name)
+                        existing_tool_names = {tool.name.lower() for tool in tools_list}
+                        if new_tool_name.lower() not in existing_tool_names:
+                            tools_list.append(new_tool)
+                            logger.debug(f"  -> Added tool from server: {new_tool_name}")
+                        else:
+                            logger.warning(f"⚠️ Skipping duplicate server tool: {new_tool_name} - already exists")
                 else:
                      logger.warning(f"❓ Unexpected result type from get_server_tools for '{server_name}': {type(result)}")
 
@@ -1370,6 +1458,33 @@ class DynamicAdditionServer(Server):
                     logger.debug(f"  -> No lastModified in original annotations for {tool.name}")
 
         # --- Update Cache --- #
+        # Final verification: report any duplicates as validation errors (app-aware)
+        tool_keys = []
+        for tool in tools_list:
+            app_name = getattr(tool.annotations, 'app_name', 'unknown') if hasattr(tool, 'annotations') and tool.annotations else 'unknown'
+            tool_keys.append(f"{app_name}.{tool.name}")
+
+        unique_tool_keys = set(tool_keys)
+        if len(tool_keys) != len(unique_tool_keys):
+            # Find duplicates by app.name combination
+            seen_keys = set()
+            for i, tool in enumerate(tools_list):
+                app_name = getattr(tool.annotations, 'app_name', 'unknown') if hasattr(tool, 'annotations') and tool.annotations else 'unknown'
+                tool_key = f"{app_name}.{tool.name}"
+                if tool_key in seen_keys:
+                    # This is a duplicate - mark it as invalid
+                    if hasattr(tool, 'annotations') and tool.annotations:
+                        if isinstance(tool.annotations, dict):
+                            tool.annotations["validationStatus"] = "INVALID"
+                            tool.annotations["errorMessage"] = f"Duplicate tool: {app_name}.{tool.name}"
+                        else:
+                            # For ToolAnnotations objects, try to set the fields
+                            setattr(tool.annotations, 'validationStatus', 'INVALID')
+                            setattr(tool.annotations, 'errorMessage', f'Duplicate tool: {app_name}.{tool.name}')
+                    logger.warning(f"⚠️ Marked duplicate tool as invalid: {app_name}.{tool.name}")
+                else:
+                    seen_keys.add(tool_key)
+
         self._cached_tools = list(tools_list) # Store a copy
         self._last_functions_dir_mtime = current_mtime
         self._last_servers_dir_mtime = server_mtime
@@ -1725,6 +1840,80 @@ class DynamicAdditionServer(Server):
                         logger.error(f"Error reading or parsing owner log: {e}")
                         # Return an error message inside the tool response
                         raise ValueError(f"Error accessing function history: {e}")
+
+            elif name == "_function_show":
+                # Make any function temporarily visible
+                func_name = args.get("name")
+                if not func_name:
+                    raise ValueError("Missing required parameter: name")
+
+                logger.debug(f"---> Calling built-in: _function_show for '{func_name}'")
+
+                # Check if function exists
+                function_path = os.path.join(FUNCTIONS_DIR, f"{func_name}.py")
+                if not os.path.exists(function_path):
+                    error_message = f"Function '{func_name}' does not exist."
+                    error_annotations = {
+                        "tool_error": {"tool_name": name, "message": error_message}
+                    }
+                    result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
+                else:
+                                        # Remove from temporarily hidden set if it was there
+                    if func_name in self._temporarily_hidden_functions:
+                        self._temporarily_hidden_functions.remove(func_name)
+                        logger.info(f"{PINK}👁️ Removed '{func_name}' from temporarily hidden list{RESET}")
+
+                    # Add to temporarily visible functions set
+                    self._temporarily_visible_functions.add(func_name)
+                    logger.info(f"{PINK}👁️ Made function '{func_name}' temporarily visible{RESET}")
+
+                    # Invalidate tool cache to refresh the list
+                    self._cached_tools = None
+
+                    # Notify clients about the tool list change
+                    try:
+                        await self._notify_tool_list_changed(change_type="updated", tool_name=func_name)
+                    except Exception as e:
+                        logger.error(f"Error sending tool notification after showing {func_name}: {str(e)}")
+
+                    result_raw = [TextContent(type="text", text=f"Function '{func_name}' is now temporarily visible until server restart.")]
+
+            elif name == "_function_hide":
+                # Hide any function temporarily
+                func_name = args.get("name")
+                if not func_name:
+                    raise ValueError("Missing required parameter: name")
+
+                logger.debug(f"---> Calling built-in: _function_hide for '{func_name}'")
+
+                # Check if function exists
+                function_path = os.path.join(FUNCTIONS_DIR, f"{func_name}.py")
+                if not os.path.exists(function_path):
+                    error_message = f"Function '{func_name}' does not exist."
+                    error_annotations = {
+                        "tool_error": {"tool_name": name, "message": error_message}
+                    }
+                    result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
+                else:
+                                        # Remove from temporarily visible set if it was there
+                    if func_name in self._temporarily_visible_functions:
+                        self._temporarily_visible_functions.remove(func_name)
+                        logger.info(f"{PINK}🙈 Removed '{func_name}' from temporarily visible list{RESET}")
+
+                    # Add to temporarily hidden functions set
+                    self._temporarily_hidden_functions.add(func_name)
+                    logger.info(f"{PINK}🙈 Made function '{func_name}' temporarily hidden{RESET}")
+
+                    # Invalidate tool cache to refresh the list
+                    self._cached_tools = None
+
+                    # Notify clients about the tool list change
+                    try:
+                        await self._notify_tool_list_changed(change_type="updated", tool_name=func_name)
+                    except Exception as e:
+                        logger.error(f"Error sending tool notification after hiding {func_name}: {str(e)}")
+
+                    result_raw = [TextContent(type="text", text=f"Function '{func_name}' is now temporarily hidden until server restart.")]
 
             # Handle MCP tool calls
             elif '.' in name or ' ' in name: # <<< UPDATED Condition

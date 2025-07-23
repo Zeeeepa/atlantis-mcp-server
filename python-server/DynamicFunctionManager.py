@@ -685,6 +685,11 @@ async def {name}():
 
             # Scan all Python files in the functions directory and subdirectories
             for root, dirs, files in os.walk(self.functions_dir):
+                # Skip OLD directories
+                if 'OLD' in dirs:
+                    dirs.remove('OLD')  # Don't traverse into OLD directories
+                    logger.debug(f"🚫 Skipping OLD directory: {os.path.join(root, 'OLD')}")
+
                 # Check if we're in a subdirectory and log it prominently
                 if root != self.functions_dir:
                     subdir_name = os.path.basename(root)
