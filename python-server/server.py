@@ -748,6 +748,7 @@ class DynamicAdditionServer(Server):
                             app_name_from_info = func_info.get("app_name")
                             if app_name_from_info is not None:
                                 tool_annotations["app_name"] = app_name_from_info
+                                logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {app_name_from_info} (from @app decorator)")
                             else:
                                 # If no app_name from decorator, check if function is in a subfolder
                                 if '/' in file_path:
@@ -779,7 +780,7 @@ class DynamicAdditionServer(Server):
 
                             # Create and add the tool object
                             logger.debug(f"🔍 Creating Tool {tool_name} with annotations: {tool_annotations}")
-                            logger.debug(f"🔍 Tool {tool_name} lastModified before Tool creation: {tool_annotations.get('lastModified', 'NOT_SET')}")
+                            #logger.debug(f"🔍 Tool {tool_name} lastModified before Tool creation: {tool_annotations.get('lastModified', 'NOT_SET')}")
                             # Create custom ToolAnnotations object to allow extra fields
                             custom_annotations = ToolAnnotations(**tool_annotations)
                             tool_obj = Tool(
@@ -789,8 +790,8 @@ class DynamicAdditionServer(Server):
                                 annotations=custom_annotations # app_name is now inside annotations
                             )
                             logger.debug(f"🔍 Tool {tool_name} annotations after creation: {tool_obj.annotations}")
-                            logger.debug(f"🔍 Tool {tool_name} lastModified after Tool creation: {getattr(tool_obj.annotations, 'lastModified', 'NOT_FOUND') if hasattr(tool_obj.annotations, 'lastModified') else 'NO_ATTR'}")
-                            logger.debug(f"🔍 Tool {tool_name} annotations type: {type(tool_obj.annotations)}")
+                            #logger.debug(f"🔍 Tool {tool_name} lastModified after Tool creation: {getattr(tool_obj.annotations, 'lastModified', 'NOT_FOUND') if hasattr(tool_obj.annotations, 'lastModified') else 'NO_ATTR'}")
+                            #logger.debug(f"🔍 Tool {tool_name} annotations type: {type(tool_obj.annotations)}")
                             if hasattr(tool_obj.annotations, '__dict__'):
                                 logger.debug(f"🔍 Tool {tool_name} annotations __dict__: {tool_obj.annotations.__dict__}")
                             tools_list.append(tool_obj)
@@ -1341,26 +1342,30 @@ class DynamicAdditionServer(Server):
                             logger.error(f"❌ LOST lastModified for tool {tool.name}!")
                             logger.error(f"❌ Original had: {original_annotations['lastModified']}")
                         else:
-                            logger.debug(f"  -> Preserved lastModified: {tool.annotations['lastModified']}")
+                            pass
+                            #logger.debug(f"  -> Preserved lastModified: {tool.annotations['lastModified']}")
                     elif isinstance(tool.annotations, ToolAnnotations):
                         if not hasattr(tool.annotations, 'lastModified'):
                             logger.error(f"❌ LOST lastModified for tool {tool.name}!")
                             logger.error(f"❌ Original had: {original_annotations['lastModified']}")
                         else:
-                            logger.debug(f"  -> Preserved lastModified: {getattr(tool.annotations, 'lastModified')}")
+                            #logger.debug(f"  -> Preserved lastModified: {getattr(tool.annotations, 'lastModified')}")
+                            pass
                 elif hasattr(original_annotations, 'lastModified'):
                     if isinstance(tool.annotations, dict):
                         if 'lastModified' not in tool.annotations:
                             logger.error(f"❌ LOST lastModified for tool {tool.name} (from object attr)!")
                             logger.error(f"❌ Original had: {getattr(original_annotations, 'lastModified')}")
                         else:
-                            logger.debug(f"  -> Preserved lastModified: {tool.annotations['lastModified']}")
+                            #logger.debug(f"  -> Preserved lastModified: {tool.annotations['lastModified']}")
+                            pass
                     elif isinstance(tool.annotations, ToolAnnotations):
                         if not hasattr(tool.annotations, 'lastModified'):
                             logger.error(f"❌ LOST lastModified for tool {tool.name} (from object attr)!")
                             logger.error(f"❌ Original had: {getattr(original_annotations, 'lastModified')}")
                         else:
-                            logger.debug(f"  -> Preserved lastModified: {getattr(tool.annotations, 'lastModified')}")
+                            #logger.debug(f"  -> Preserved lastModified: {getattr(tool.annotations, 'lastModified')}")
+                            pass
                 else:
                     logger.debug(f"  -> No lastModified in original annotations for {tool.name}")
 
@@ -2005,18 +2010,20 @@ async def get_all_tools_for_response(server: 'DynamicAdditionServer', caller_con
             # Debug log to see all tools and their annotations BEFORE serialization
             logger.debug(f"🔍 SERIALIZING TOOL '{tool.name}' with annotations: {getattr(tool, 'annotations', None)}")
             if hasattr(tool, 'annotations') and isinstance(tool.annotations, dict):
-                logger.debug(f"🔍 Tool '{tool.name}' lastModified before serialization: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
-                logger.debug(f"🔍 Tool '{tool.name}' type before serialization: {tool.annotations.get('type', 'NOT_FOUND')}")
+                pass
+                #logger.debug(f"🔍 Tool '{tool.name}' lastModified before serialization: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
+                #logger.debug(f"🔍 Tool '{tool.name}' type before serialization: {tool.annotations.get('type', 'NOT_FOUND')}")
             elif hasattr(tool, 'annotations') and hasattr(tool.annotations, 'lastModified'):
-                logger.debug(f"🔍 Tool '{tool.name}' lastModified (attr) before serialization: {getattr(tool.annotations, 'lastModified', 'NOT_FOUND')}")
+                pass
+                #logger.debug(f"🔍 Tool '{tool.name}' lastModified (attr) before serialization: {getattr(tool.annotations, 'lastModified', 'NOT_FOUND')}")
 
             # Ensure model_dump is called correctly for each tool
             tool_dict = tool.model_dump(mode='json') # Use mode='json' for better serialization
 
             # Debug log for all tools AFTER serialization
             annotations = tool_dict.get('annotations') if tool_dict else None
-            logger.debug(f"🔍 Tool '{tool.name}' lastModified after serialization: {annotations.get('lastModified', 'NOT_FOUND') if annotations else 'NO_ANNOTATIONS'}")
-            logger.debug(f"🔍 Tool '{tool.name}' type after serialization: {annotations.get('type', 'NOT_FOUND') if annotations else 'NO_ANNOTATIONS'}")
+            #logger.debug(f"🔍 Tool '{tool.name}' lastModified after serialization: {annotations.get('lastModified', 'NOT_FOUND') if annotations else 'NO_ANNOTATIONS'}")
+            #logger.debug(f"🔍 Tool '{tool.name}' type after serialization: {annotations.get('type', 'NOT_FOUND') if annotations else 'NO_ANNOTATIONS'}")
 
             if tool_dict and annotations and isinstance(annotations, dict) and annotations.get('type') == 'server':
                 logger.debug(f"🔍 SERIALIZED SERVER TOOL '{tool_dict.get('name')}' to dict: {tool_dict}")
