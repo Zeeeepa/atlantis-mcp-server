@@ -174,8 +174,10 @@ class DynamicConfigEventHandler(FileSystemEventHandler):
 
     def _trigger_reload(self, event_path):
         # Check if the change is relevant (Python file in functions dir or JSON file in servers dir)
-        is_function_change = event_path.endswith(".py") and os.path.dirname(event_path) == FUNCTIONS_DIR
-        is_server_change = event_path.endswith(".json") and os.path.dirname(event_path) == SERVERS_DIR
+        is_function_change = event_path.endswith(".py") and (os.path.dirname(event_path) == FUNCTIONS_DIR or
+                                                             event_path.startswith(FUNCTIONS_DIR + os.sep))
+        is_server_change = event_path.endswith(".json") and (os.path.dirname(event_path) == SERVERS_DIR or
+                                                             event_path.startswith(SERVERS_DIR + os.sep))
 
         if not is_function_change and not is_server_change:
             # logger.debug(f"Ignoring irrelevant change: {event_path}")
@@ -209,8 +211,10 @@ class DynamicConfigEventHandler(FileSystemEventHandler):
         async def _process_file_change(file_path: str):
             # --- Invalidate ALL Dynamic Function Runtime Caches ---
             # Check if the change was in the functions or servers directory
-            is_function_change = file_path.endswith(".py") and os.path.dirname(file_path) == FUNCTIONS_DIR
-            is_server_change = file_path.endswith(".json") and os.path.dirname(file_path) == SERVERS_DIR
+            is_function_change = file_path.endswith(".py") and (os.path.dirname(file_path) == FUNCTIONS_DIR or
+                                                                file_path.startswith(FUNCTIONS_DIR + os.sep))
+            is_server_change = file_path.endswith(".json") and (os.path.dirname(file_path) == SERVERS_DIR or
+                                                                file_path.startswith(SERVERS_DIR + os.sep))
 
             if is_function_change:
                 logger.info(f"⚡ File watcher triggering flush of all dynamic function runtime caches due to change in {os.path.basename(file_path)}.")
@@ -504,10 +508,11 @@ class DynamicAdditionServer(Server):
         tools_list = [
             Tool(
                 name="_function_set",
-                description="Sets the content of a dynamic Python function", # Updated description
+                description="Sets the content of a dynamic Python function. Use 'app' parameter to target specific functions when multiple exist with the same name.", # Updated description
                 inputSchema={
                     "type": "object",
                     "properties": {
+                        "app": {"type": "string", "description": "Optional: The app name to target a specific function when multiple exist with the same name"},
                         "code": {"type": "string", "description": "The Python source code containing a single function definition."}
                     },
                     "required": ["code"] # Only code is required now
@@ -516,10 +521,11 @@ class DynamicAdditionServer(Server):
             ),
             Tool( # Add definition for get_tool_code
                 name="_function_get",
-                description="Gets the Python source code for a dynamic function",
+                description="Gets the Python source code for a dynamic function. Use 'app' parameter to target specific functions when multiple exist with the same name.",
                 inputSchema={
                     "type": "object",
                     "properties": {
+                        "app": {"type": "string", "description": "Optional: The app name to target a specific function when multiple exist with the same name"},
                         "name": {"type": "string", "description": "The name of the function to get code for"}
                     },
                     "required": ["name"]
@@ -528,10 +534,11 @@ class DynamicAdditionServer(Server):
             ),
             Tool( # Add definition for remove_dynamic_tool
                 name="_function_remove",
-                description="Removes a dynamic Python function",
+                description="Removes a dynamic Python function. Use 'app' parameter to target specific functions when multiple exist with the same name.",
                 inputSchema={
                     "type": "object",
                     "properties": {
+                        "app": {"type": "string", "description": "Optional: The app name to target a specific function when multiple exist with the same name"},
                         "name": {"type": "string", "description": "The name of the function to remove"}
                     },
                     "required": ["name"]
@@ -540,10 +547,11 @@ class DynamicAdditionServer(Server):
             ),
             Tool( # Add definition for add_placeholder_function
                 name="_function_add",
-                description="Adds a new, empty placeholder Python function with the given name.",
+                description="Adds a new, empty placeholder Python function with the given name. Use 'app' parameter to create function in specific app directory.",
                 inputSchema={
                     "type": "object",
                     "properties": {
+                        "app": {"type": "string", "description": "Optional: The app name to create the function in a specific app directory"},
                         "name": {"type": "string", "description": "The name to register the new placeholder function under."}
                     },
                     "required": ["name"]
@@ -552,20 +560,24 @@ class DynamicAdditionServer(Server):
             ),
             Tool(
                 name="_function_history",
-                description="Gets the tool call history",
+                description="Gets the tool call history. Use 'app' parameter to filter history for specific app functions.",
                 inputSchema={
                     "type": "object",
-                    "properties": {},
+                    "properties": {
+                        "app": {"type": "string", "description": "Optional: The app name to filter history for functions from a specific app"}
+                    },
                     "required": []
                 },
                 annotations=ToolAnnotations(title="_function_history")
             ),
             Tool(
                 name="_function_log",
-                description="Gets the tool owner log",
+                description="Gets the tool owner log. Use 'app' parameter to filter log for specific app functions.",
                 inputSchema={
                     "type": "object",
-                    "properties": {},
+                    "properties": {
+                        "app": {"type": "string", "description": "Optional: The app name to filter log for functions from a specific app"}
+                    },
                     "required": []
                 },
                 annotations=ToolAnnotations(title="_function_log")
@@ -690,10 +702,11 @@ class DynamicAdditionServer(Server):
             ),
             Tool(
                 name="_function_show",
-                description="Makes a hidden function temporarily visible until server restart.",
+                description="Makes a hidden function temporarily visible until server restart. Use 'app' parameter to target specific functions when multiple exist with the same name.",
                 inputSchema={
                     "type": "object",
                     "properties": {
+                        "app": {"type": "string", "description": "Optional: The app name to target a specific function when multiple exist with the same name"},
                         "name": {"type": "string", "description": "The name of the hidden function to make visible"}
                     },
                     "required": ["name"]
@@ -702,10 +715,11 @@ class DynamicAdditionServer(Server):
             ),
             Tool(
                 name="_function_hide",
-                description="Hides a temporarily visible function again.",
+                description="Hides a temporarily visible function again. Use 'app' parameter to target specific functions when multiple exist with the same name.",
                 inputSchema={
                     "type": "object",
                     "properties": {
+                        "app": {"type": "string", "description": "Optional: The app name to target a specific function when multiple exist with the same name"},
                         "name": {"type": "string", "description": "The name of the function to hide again"}
                     },
                     "required": ["name"]
@@ -1663,30 +1677,31 @@ class DynamicAdditionServer(Server):
                     await self._notify_tool_list_changed(change_type="updated", tool_name=extracted_name)
             elif name == "_function_get":
                 logger.debug(f"---> Calling built-in: get_function_code") # <-- ADD THIS LINE
-                function_name = args.get('name')
-                # _fs_load_code will now throw FileNotFoundError if the function doesn't exist
-                code = await self.function_manager._fs_load_code(function_name)
-                result_raw = [TextContent(type="text", text=code)]
+                result_raw = await self.function_manager.get_function_code(args, self)
             elif name == "_function_remove":
                 # Remove function
                 func_name = args.get("name")
+                app_name = args.get("app")  # Optional app name for disambiguation
                 if not func_name:
                     raise ValueError("Missing required parameter: name")
 
-                logger.debug(f"---> Calling built-in: function_remove for '{func_name}'") # <-- ADD THIS LINE
+                logger.debug(f"---> Calling built-in: function_remove for '{func_name}'" + (f" (app: {app_name})" if app_name else ""))
 
-                # Check if function exists before attempting to remove
-                function_path = os.path.join(FUNCTIONS_DIR, f"{func_name}.py")
-                if not os.path.exists(function_path):
-                    # Create annotation dict for 'function does not exist' error
-                    error_message = f"Function '{func_name}' does not exist or was already removed."
+                # Check if function exists using the function mapping (supports subfolders and app-specific lookup)
+                function_file = await self.function_manager._find_file_containing_function(func_name, app_name)
+
+                if not function_file:
+                    if app_name:
+                        error_message = f"Function '{func_name}' does not exist in app '{app_name}'."
+                    else:
+                        error_message = f"Function '{func_name}' does not exist."
                     error_annotations = {
                         "tool_error": {"tool_name": name, "message": error_message}
                     }
                     result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
-                else: # <-- ADD else block
-                    # Remove the function using dynamic_function_manager.function_remove (raise error on failure)
-                    removed = await self.function_manager.function_remove(func_name)
+                else:
+                    # Function exists, continue with removing it
+                    removed = await self.function_manager.function_remove(func_name, app_name)
                     if removed:
                         try:
                             await self._notify_tool_list_changed(change_type="removed", tool_name=func_name) # Pass params
@@ -1700,24 +1715,28 @@ class DynamicAdditionServer(Server):
             elif name == "_function_add":
                 # Add empty function
                 func_name = args.get("name")
+                app_name = args.get("app")  # Optional app name for disambiguation
                 if not func_name:
                     raise ValueError("Missing required parameter: name")
 
-                logger.debug(f"---> Calling built-in: function_add for '{func_name}'") # <-- ADD THIS LINE
+                logger.debug(f"---> Calling built-in: function_add for '{func_name}'" + (f" (app: {app_name})" if app_name else ""))
 
-                # Check if function already exists
-                function_path = os.path.join(FUNCTIONS_DIR, f"{func_name}.py")
-                if os.path.exists(function_path):
+                # Check if function already exists using the function mapping (supports subfolders and app-specific lookup)
+                function_file = await self.function_manager._find_file_containing_function(func_name, app_name)
+
+                if function_file:
                     # Function already exists - inform the client rather than raise error
-                    # Create annotation dict for 'function already exists' error
-                    error_message = f"Function '{func_name}' already exists"
+                    if app_name:
+                        error_message = f"Function '{func_name}' already exists in app '{app_name}'."
+                    else:
+                        error_message = f"Function '{func_name}' already exists."
                     error_annotations = {
                         "tool_error": {"tool_name": name, "message": error_message}
                     }
                     result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
-                else: # <-- ADD else block
-                    # Create empty function (stub) using dynamic_function_manager.function_add (raise error on failure)
-                    added = await self.function_manager.function_add(func_name)
+                else:
+                    # Function doesn't exist, create it
+                    added = await self.function_manager.function_add(func_name, None, app_name)
                     if added:
                         try:
                             await self._notify_tool_list_changed(change_type="added", tool_name=func_name) # Pass params
@@ -1802,7 +1821,8 @@ class DynamicAdditionServer(Server):
                         for tool in result_raw
                     ]
             elif name == "_function_history":
-                logger.debug("---> Calling built-in: _function_history")
+                app_name = args.get("app")  # Optional app name for filtering
+                logger.debug("---> Calling built-in: _function_history" + (f" (app: {app_name})" if app_name else ""))
                 if not os.path.exists(TOOL_CALL_LOG_PATH):
                     # Return an empty history array
                     result_raw = []
@@ -1812,7 +1832,9 @@ class DynamicAdditionServer(Server):
                             # Read each line and parse as JSON, skipping empty lines
                             log_entries = [json.loads(line) for line in f if line.strip()]
 
-                        # Return a dictionary that will be automatically serialized to JSON
+                        # If app filter is provided, we could potentially filter here
+                        # For now, return all entries as the current history format may not track app info
+                        # TODO: Implement app-based filtering when history format includes app information
                         result_raw = log_entries
                     except (json.JSONDecodeError, IOError) as e:
                         logger.error(f"Error reading or parsing tool_call_log.json: {e}")
@@ -1820,7 +1842,8 @@ class DynamicAdditionServer(Server):
                         raise ValueError(f"Error accessing function history: {e}")
 
             elif name == "_function_log":
-                logger.debug("---> Calling built-in: _function_log")
+                app_name = args.get("app")  # Optional app name for filtering
+                logger.debug("---> Calling built-in: _function_log" + (f" (app: {app_name})" if app_name else ""))
                 if not os.path.exists(OWNER_LOG_PATH):
                     # Return an empty history array
                     result_raw = []
@@ -1834,6 +1857,9 @@ class DynamicAdditionServer(Server):
                             else:
                                 log_entries = json.loads(file_content) # Parse the string content
 
+                        # If app filter is provided, we could potentially filter here
+                        # For now, return all entries as the current log format may not track app info
+                        # TODO: Implement app-based filtering when log format includes app information
                         # Return the list of log entries directly
                         result_raw = log_entries
                     except (json.JSONDecodeError, IOError) as e:
@@ -1843,21 +1869,28 @@ class DynamicAdditionServer(Server):
 
             elif name == "_function_show":
                 # Make any function temporarily visible
+                app_name = args.get("app")  # Optional app name for disambiguation
                 func_name = args.get("name")
                 if not func_name:
                     raise ValueError("Missing required parameter: name")
 
-                logger.debug(f"---> Calling built-in: _function_show for '{func_name}'")
+                logger.debug(f"---> Calling built-in: _function_show for '{func_name}'" + (f" (app: {app_name})" if app_name else ""))
 
-                # Check if function exists
-                function_path = os.path.join(FUNCTIONS_DIR, f"{func_name}.py")
-                if not os.path.exists(function_path):
-                    error_message = f"Function '{func_name}' does not exist."
+                                # Check if function exists using the function mapping (supports subfolders and app-specific lookup)
+                function_file = await self.function_manager._find_file_containing_function(func_name, app_name)
+
+                if not function_file:
+                    if app_name:
+                        error_message = f"Function '{func_name}' does not exist in app '{app_name}'."
+                    else:
+                        error_message = f"Function '{func_name}' does not exist."
                     error_annotations = {
                         "tool_error": {"tool_name": name, "message": error_message}
                     }
                     result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
                 else:
+                    # Function exists, continue with showing it
+                    pass
                                         # Remove from temporarily hidden set if it was there
                     if func_name in self._temporarily_hidden_functions:
                         self._temporarily_hidden_functions.remove(func_name)
@@ -1880,21 +1913,28 @@ class DynamicAdditionServer(Server):
 
             elif name == "_function_hide":
                 # Hide any function temporarily
+                app_name = args.get("app")  # Optional app name for disambiguation
                 func_name = args.get("name")
                 if not func_name:
                     raise ValueError("Missing required parameter: name")
 
-                logger.debug(f"---> Calling built-in: _function_hide for '{func_name}'")
+                logger.debug(f"---> Calling built-in: _function_hide for '{func_name}'" + (f" (app: {app_name})" if app_name else ""))
 
-                # Check if function exists
-                function_path = os.path.join(FUNCTIONS_DIR, f"{func_name}.py")
-                if not os.path.exists(function_path):
-                    error_message = f"Function '{func_name}' does not exist."
+                # Check if function exists using the function mapping (supports subfolders and app-specific lookup)
+                function_file = await self.function_manager._find_file_containing_function(func_name, app_name)
+
+                if not function_file:
+                    if app_name:
+                        error_message = f"Function '{func_name}' does not exist in app '{app_name}'."
+                    else:
+                        error_message = f"Function '{func_name}' does not exist."
                     error_annotations = {
                         "tool_error": {"tool_name": name, "message": error_message}
                     }
                     result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
                 else:
+                    # Function exists, continue with hiding it
+                    pass
                                         # Remove from temporarily visible set if it was there
                     if func_name in self._temporarily_visible_functions:
                         self._temporarily_visible_functions.remove(func_name)
@@ -2682,7 +2722,7 @@ class ServiceClient:
                 pass # emit_event is already 'mcp_notification'
 
             if data.get('method') == 'notifications/message':
-                logger.debug(f"☁️ SENDING CLIENT LOG/COMMAND via {event}: {data.get('params', {}).get('command', data.get('method'))}")
+                logger.info(f"☁️ SENDING CLIENT LOG/COMMAND via {event}: {data.get('params', {}).get('command', data.get('method'))}")
             else:
                 logger.debug(f"☁️ SENDING MCP MESSAGE via {event}: {data.get('method')}")
 
