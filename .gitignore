@@ -57,3 +57,5 @@ python-server2/
 log/
 
 *.db
+
+server.log

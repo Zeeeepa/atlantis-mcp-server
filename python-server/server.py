@@ -2239,11 +2239,13 @@ async def get_all_tools_for_response(server: 'DynamicAdditionServer', caller_con
             # Debug log to see all tools and their annotations BEFORE serialization
             logger.debug(f"🔍 SERIALIZING TOOL '{tool.name}' with annotations: {getattr(tool, 'annotations', None)}")
             if hasattr(tool, 'annotations') and isinstance(tool.annotations, dict):
-                pass
+                source_file = tool.annotations.get('sourceFile', 'NOT_FOUND')
+                logger.debug(f"🔍 Tool '{tool.name}' sourceFile before serialization: {source_file}")
                 #logger.debug(f"🔍 Tool '{tool.name}' lastModified before serialization: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
                 #logger.debug(f"🔍 Tool '{tool.name}' type before serialization: {tool.annotations.get('type', 'NOT_FOUND')}")
-            elif hasattr(tool, 'annotations') and hasattr(tool.annotations, 'lastModified'):
-                pass
+            elif hasattr(tool, 'annotations') and hasattr(tool.annotations, 'sourceFile'):
+                source_file = getattr(tool.annotations, 'sourceFile', 'NOT_FOUND')
+                logger.debug(f"🔍 Tool '{tool.name}' sourceFile (attr) before serialization: {source_file}")
                 #logger.debug(f"🔍 Tool '{tool.name}' lastModified (attr) before serialization: {getattr(tool.annotations, 'lastModified', 'NOT_FOUND')}")
 
             # Ensure model_dump is called correctly for each tool
@@ -2251,6 +2253,9 @@ async def get_all_tools_for_response(server: 'DynamicAdditionServer', caller_con
 
             # Debug log for all tools AFTER serialization
             annotations = tool_dict.get('annotations') if tool_dict else None
+            if annotations and isinstance(annotations, dict):
+                source_file = annotations.get('sourceFile', 'NOT_FOUND')
+                logger.debug(f"🔍 Tool '{tool.name}' sourceFile after serialization: {source_file}")
             #logger.debug(f"🔍 Tool '{tool.name}' lastModified after serialization: {annotations.get('lastModified', 'NOT_FOUND') if annotations else 'NO_ANNOTATIONS'}")
             #logger.debug(f"🔍 Tool '{tool.name}' type after serialization: {annotations.get('type', 'NOT_FOUND') if annotations else 'NO_ANNOTATIONS'}")
 
