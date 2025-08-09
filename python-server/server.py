@@ -62,12 +62,8 @@ TOOL_CALL_LOG_PATH = os.path.join(LOG_DIR, "tool_call_log.json")
 OWNER_LOG_PATH = os.path.join(LOG_DIR, "owner_log.json")
 
 # --- Add dynamic_functions parent to sys.path for imports ---
-import sys
-import os
 
 try:
-
-    import sys
     # Comment out debug print to avoid interfering with JSON-RPC communication
     # print(f"DEBUG: Python version running server.py: {sys.version}")
 
@@ -132,7 +128,7 @@ import atlantis
 
 # Define signal handler for graceful shutdown
 def handle_sigint(signum, frame):
-    global is_shutting_down
+    global is_shutting_down, pid_manager
     if not is_shutting_down:
         is_shutting_down = True
         print("\n🐱 Meow! Graceful shutdown in progress... Press Ctrl+C again to force exit! 🐱")
@@ -797,6 +793,7 @@ class DynamicAdditionServer(Server):
                                     logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {app_name} (from subfolder)")
                                 else:
                                     app_name = "unknown"
+                                    # do not add to tool annotations
 
                             # Check visibility overrides first (these take precedence over decorators)
                             if tool_name in self._temporarily_hidden_functions:
@@ -1164,7 +1161,7 @@ class DynamicAdditionServer(Server):
                     if task_info:
                         logger.debug(f"🔧 _get_tools_list: Preparing Tool for '{server_name}': task_info exists={task_info is not None}, status='{status}'")
                     else:
-                        logger.warning(f"🔧 _get_tools_list: Tool '{server_name}' not running")
+                        logger.warning(f"🔧 _get_tools_list: MCP server '{server_name}' installed but not yet started")
 
                     # Create tool with correct parameters
                     description = f"MCP server: {server_name}"

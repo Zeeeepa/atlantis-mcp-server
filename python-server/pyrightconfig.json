@@ -10,9 +10,10 @@
   ],
   "reportMissingImports": "warning",
   "reportUndefinedVariable": "warning",
-  "pythonVersion": "3.8",
+  "pythonVersion": "3.12",
   "pythonPlatform": "Darwin",
-  "reportOptionalMemberAccess": "information",
+  "reportOptionalMemberAccess": "none",
+  "reportOptionalCall": "none",
   "venvPath": ".",
   "venv": "venv"
 }
