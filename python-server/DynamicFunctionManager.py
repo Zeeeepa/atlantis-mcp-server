@@ -115,6 +115,7 @@ class DynamicFunctionManager:
 
         # NEW: Function-to-file mapping cache
         self._function_file_mapping = {}  # function_name -> filename mapping
+        self._function_file_mapping_by_app = {}  # app_name -> {function_name -> filename mapping}
         self._function_file_mapping_mtime = 0.0  # track when mapping was last built
 
         # Create directories if they don't exist
@@ -122,48 +123,29 @@ class DynamicFunctionManager:
         self.old_dir = os.path.join(self.functions_dir, "OLD")
         os.makedirs(self.old_dir, exist_ok=True)
 
-    def _validate_app_name(self, app_name: str) -> None:
-        """Validate app name format - throw exception for invalid names."""
-        if not app_name or not isinstance(app_name, str):
-            raise ValueError(f"Invalid app name: {app_name}")
-        if re.search(r'[^\w\-]', app_name):
-            raise ValueError(f"App name '{app_name}' contains invalid characters. Only letters, numbers, underscores, and dashes are allowed.")
-
-    def _get_app_name_from_path(self, file_path: str) -> str:
-        """Extract app name from file path (first subdirectory only).
-
-        Args:
-            file_path: Relative path from functions_dir (e.g., 'chat_app/test_chat.py')
-
-        Returns:
-            App name from first subdirectory (e.g., 'chat_app')
-
-        Raises:
-            ValueError: If file is in root directory or path is invalid
+    # File operations
+    async def _fs_save_code(self, name: str, code: str, app: Optional[str] = None) -> Optional[str]:
         """
-        if not file_path or not isinstance(file_path, str):
-            raise ValueError(f"Invalid file path: {file_path}")
+        Saves the provided code string to a file named {name}.py in the functions directory.
+        If app is provided, saves to a subdirectory named after the app.
+        Uses clean_filename for basic safety. Returns the full path if successful, None otherwise.
+        """
+        if not name or not isinstance(name, str):
+            logger.error("❌ _fs_save_code: Invalid name provided.")
+            return None
 
-        # Split path into components
-        path_parts = file_path.split(os.sep)
+        safe_name = utils.clean_filename(f"{name}.py")
+        if not safe_name.endswith(".py"): # Ensure it's still a python file after securing
+             safe_name = f"{name}.py" # Fallback if clean_filename removes extension (less likely)
 
-        # Must have at least 2 parts: subdirectory/filename
-        if len(path_parts) < 2:
-            raise ValueError(f"File '{file_path}' must be in a subdirectory. Files in root directory are not allowed.")
+        # Determine target directory based on app parameter
+        if app:
+            target_dir = os.path.join(self.functions_dir, app)
+            os.makedirs(target_dir, exist_ok=True)  # Ensure app directory exists
+            file_path = os.path.join(target_dir, safe_name)
+        else:
+            file_path = os.path.join(self.functions_dir, safe_name)
 
-        # First part is the app name (subdirectory)
-        app_name = path_parts[0]
-
-        # Validate the app name
-        self._validate_app_name(app_name)
-
-        return app_name
-
-    async def _fs_save_code(self, name: str, code: str, app_name: str = "Home") -> Optional[str]:
-        self._validate_app_name(app_name)
-        app_dir = os.path.join(self.functions_dir, app_name)
-        os.makedirs(app_dir, exist_ok=True)
-        file_path = os.path.join(app_dir, f"{name}.py")
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(code)
@@ -176,21 +158,30 @@ class DynamicFunctionManager:
             logger.error(f"❌ _fs_save_code: Unexpected error saving {file_path}: {e}")
             return None
 
-    async def _fs_load_code(self, name: str) -> Optional[str]:
-        # Use the mapping to get the relative path
-        await self._build_function_file_mapping()
-        rel_path = self._function_file_mapping.get(name)
-        if not rel_path:
-            logger.error(f"❌ _fs_load_code: No mapping found for function '{name}'")
-            raise FileNotFoundError(f"Function '{name}' not found in mapping")
-        file_path = os.path.join(self.functions_dir, rel_path)
+    async def _fs_load_code(self, name):
+        """
+        Loads code from {name}.py in self.functions_dir. Returns code string or None if not found/error.
+        """
+        if not name or not isinstance(name, str):
+            logger.error("❌ _fs_load_code: Invalid name provided.")
+            return None
+
+        safe_name = utils.clean_filename(f"{name}.py")
+        if not safe_name.endswith(".py"): # Ensure it's still a python file after securing
+            safe_name = f"{name}.py" # Fallback if clean_filename removes extension
+
+        file_path = os.path.join(self.functions_dir, safe_name) # Use self.functions_dir
+
         if not os.path.exists(file_path):
             logger.warning(f"⚠️ _fs_load_code: File not found for '{name}' at {file_path}")
             raise FileNotFoundError(f"Function '{name}' not found at {file_path}")
+
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 code = f.read()
+
             logger.info(f"{CYAN}📋 === LOADING {name} ==={RESET}")
+
             logger.debug(f"💾 Loaded code for '{name}' from {file_path}")
             return code
         except IOError as e:
@@ -518,13 +509,9 @@ class DynamicFunctionManager:
 
 
 
-    def _code_validate_syntax(self, code_buffer, file_path: Optional[str] = None):
+    def _code_validate_syntax(self, code_buffer):
         """
         Validates syntax using ast.parse and extracts info about ALL function definitions found.
-
-        Args:
-            code_buffer: The code to validate
-            file_path: Optional relative path from functions_dir for app name extraction
 
         Returns:
             tuple[bool, Optional[str], Optional[List[Dict[str, Any]]]]:
@@ -536,16 +523,6 @@ class DynamicFunctionManager:
         """
         if not code_buffer or not isinstance(code_buffer, str):
             return False, "Empty or invalid code buffer", None
-
-        # Extract app name from file path if provided
-        app_name_from_path = None
-        if file_path:
-            try:
-                app_name_from_path = self._get_app_name_from_path(file_path)
-                logger.debug(f"📁 Extracted app name from path '{file_path}': {app_name_from_path}")
-            except ValueError as e:
-                logger.warning(f"⚠️ Could not extract app name from path '{file_path}': {e}")
-                # Don't fail validation, just log the warning
 
         try:
             tree = ast.parse(code_buffer)
@@ -635,20 +612,12 @@ class DynamicFunctionManager:
                          logger.warning(f"⚠️ Could not generate input schema for {func_name}: {schema_e}")
                          input_schema["description"] = f"Schema generation error: {schema_e}"
 
-                    # Resolve app name: decorator takes precedence over folder name
-                    final_app_name = app_name_from_decorator
-                    if final_app_name is None and app_name_from_path is not None:
-                        final_app_name = app_name_from_path
-                        logger.debug(f"📁 Using folder-derived app name '{final_app_name}' for function '{func_name}'")
-                    elif final_app_name is not None and app_name_from_path is not None and final_app_name != app_name_from_path:
-                        logger.warning(f"⚠️ App name conflict for function '{func_name}': decorator='{final_app_name}' vs folder='{app_name_from_path}'. Using decorator value.")
-
                     function_info = {
                         "name": func_name,
                         "description": docstring or "(No description provided)", # Provide default
                         "inputSchema": input_schema,
                         "decorators": decorator_names, # Add extracted decorators here
-                        "app_name": final_app_name, # Add resolved app_name
+                        "app_name": app_name_from_decorator, # Add extracted app_name
                         "location_name": location_name_from_decorator # Add extracted location_name
                     }
                     functions_info.append(function_info)
@@ -670,27 +639,7 @@ class DynamicFunctionManager:
                     # Add a pointer to the exact error position
                     error_msg += f"\n{' ' * (e.offset-1)}^"
             logger.warning(f"⚠️ Code validation failed (AST parse): {error_msg}")
-
-            # Try to extract function info using existing regex method as fallback when AST fails
-            functions_info = []
-            try:
-                # Use the existing _code_extract_basic_metadata method
-                metadata = self._code_extract_basic_metadata(code_buffer)
-                if metadata.get('name'):
-                    function_info = {
-                        "name": metadata['name'],
-                        "description": metadata.get('description') or "(No description provided)",
-                        "inputSchema": {"type": "object", "description": "Schema extraction failed due to syntax errors"},
-                        "decorators": [],
-                        "app_name": app_name_from_path,
-                        "location_name": None
-                    }
-                    functions_info.append(function_info)
-                    logger.debug(f"⚙️ Extracted function info for '{metadata['name']}' using existing regex method")
-            except Exception as regex_e:
-                logger.debug(f"⚠️ Regex fallback also failed: {regex_e}")
-
-            return False, error_msg, functions_info
+            return False, error_msg, None
         except Exception as e:
             error_msg = f"Unexpected error during validation or AST processing: {str(e)}"
             logger.error(f"❌ {error_msg}\n{traceback.format_exc()}") # Log full traceback
@@ -726,11 +675,12 @@ async def {name}():
     async def invalidate_function_mapping_cache(self):
         """Invalidate the function-to-file mapping cache."""
         self._function_file_mapping.clear()
+        self._function_file_mapping_by_app.clear()
         self._function_file_mapping_mtime = 0.0
         logger.debug("🧹 Function-to-file mapping cache invalidated")
 
     async def _build_function_file_mapping(self):
-        """Build the function-to-file mapping by scanning all files."""
+        """Build the function-to-file mapping by scanning all files recursively."""
         try:
             # Check if we need to rebuild the mapping
             current_mtime = os.path.getmtime(self.functions_dir)
@@ -741,18 +691,26 @@ async def {name}():
 
             logger.info("🔍 Building function-to-file mapping...")
             self._function_file_mapping.clear()
+            self._function_file_mapping_by_app.clear()
 
-            # Scan all Python files in subdirectories (skip root directory)
+            # Scan all Python files in the functions directory and subdirectories
             for root, dirs, files in os.walk(self.functions_dir):
-                # Skip the root directory itself - only scan subdirectories
-                if root == self.functions_dir:
-                    continue
+                # Skip OLD directories
+                if 'OLD' in dirs:
+                    dirs.remove('OLD')  # Don't traverse into OLD directories
+                    logger.debug(f"🚫 Skipping OLD directory: {os.path.join(root, 'OLD')}")
+
+                # Check if we're in a subdirectory and log it prominently
+                if root != self.functions_dir:
+                    subdir_name = os.path.basename(root)
+                    logger.info(f"🎯 EXPLORING SUBFOLDER: {CYAN}{subdir_name}{RESET}")
 
                 for filename in files:
                     if not filename.endswith('.py'):
                         continue
 
                     file_path = os.path.join(root, filename)
+                    # Calculate relative path from functions_dir
                     rel_path = os.path.relpath(file_path, self.functions_dir)
 
                     try:
@@ -760,21 +718,31 @@ async def {name}():
                             code = f.read()
 
                         # Validate and extract function info
-                        is_valid, error_message, functions_info = self._code_validate_syntax(code, rel_path)
+                        is_valid, error_message, functions_info = self._code_validate_syntax(code)
 
-                        if functions_info:
-                            # Add all functions to mapping regardless of validity
+                        if is_valid and functions_info:
                             for func_info in functions_info:
                                 func_name = func_info['name']
+
+                                # Determine app name from file path
+                                app_name = rel_path.split('/')[0] if '/' in rel_path else "unknown"
+
+                                # Store in main mapping (last one wins for backward compatibility)
                                 self._function_file_mapping[func_name] = rel_path
-                                logger.debug(f"  📍 {func_name} -> {rel_path} (valid: {is_valid})")
-                        elif not is_valid:
-                            # If syntax is invalid but we can't extract function info,
-                            # try to extract function name from filename as fallback
-                            filename_without_ext = os.path.splitext(os.path.basename(rel_path))[0]
-                            if filename_without_ext and not filename_without_ext.startswith('_'):
-                                self._function_file_mapping[filename_without_ext] = rel_path
-                                logger.debug(f"  📍 {filename_without_ext} -> {rel_path} (invalid syntax, using filename)")
+
+                                # Store in app-specific mapping
+                                if app_name not in self._function_file_mapping_by_app:
+                                    self._function_file_mapping_by_app[app_name] = {}
+                                self._function_file_mapping_by_app[app_name][func_name] = rel_path
+
+                                logger.info(f"🎯 FOUND FUNCTION: {CYAN}{func_name}{RESET} -> {rel_path} (app: {app_name})")
+                                if root != self.functions_dir:
+                                    logger.info(f"   📁 IN SUBFOLDER: {CYAN}{os.path.basename(root)}{RESET}")
+                        else:
+                            if root != self.functions_dir:
+                                logger.warning(f"⚠️ NO FUNCTIONS FOUND in {rel_path} (subfolder: {os.path.basename(root)})")
+                            else:
+                                logger.debug(f"  📍 No functions found in {rel_path}")
 
                     except Exception as e:
                         logger.warning(f"⚠️ Error processing {rel_path} for function mapping: {e}")
@@ -783,22 +751,23 @@ async def {name}():
             self._function_file_mapping_mtime = current_mtime
             logger.info(f"✅ Built function-to-file mapping with {len(self._function_file_mapping)} functions")
 
-            # Periodically clean up orphaned log files (every 10 builds)
-            if hasattr(self, '_build_count'):
-                self._build_count += 1
-            else:
-                self._build_count = 1
-
-            if self._build_count % 10 == 0:
-                await self._cleanup_orphaned_logs()
-
         except Exception as e:
             logger.error(f"❌ Error building function-to-file mapping: {e}")
 
-    async def _find_file_containing_function(self, function_name: str) -> Optional[str]:
+    async def _find_file_containing_function(self, function_name: str, app_name: Optional[str] = None) -> Optional[str]:
         """Find which file contains the specified function."""
         await self._build_function_file_mapping()
-        return self._function_file_mapping.get(function_name)
+
+        if app_name:
+            # Look in specific app first
+            app_mapping = self._function_file_mapping_by_app.get(app_name, {})
+            if function_name in app_mapping:
+                return app_mapping[function_name]
+            # If not found in specified app, return None (don't fall back to main mapping)
+            return None
+        else:
+            # Fall back to main mapping (backward compatibility)
+            return self._function_file_mapping.get(function_name)
 
     async def invalidate_all_dynamic_module_cache(self):
         """Safely removes ALL dynamic function modules AND the parent package from sys.modules cache."""
@@ -833,105 +802,112 @@ async def {name}():
         # NEW: Also invalidate function mapping cache
         await self.invalidate_function_mapping_cache()
 
-    async def function_add(self, name: str, code: Optional[str] = None, app_name: str = "Home") -> bool:
-        self._validate_app_name(app_name)
-        file_path = os.path.join(self.functions_dir, app_name, f"{name}.py")
-        if os.path.exists(file_path):
-            logger.warning(f"Create failed: Function '{name}' already exists in app '{app_name}'.")
+    async def function_add(self, name: str, code: Optional[str] = None, app: Optional[str] = None) -> bool:
+        '''
+        Creates a new function file.
+        If code is provided, it saves it. Otherwise, generates and saves a stub.
+        If app is provided, creates the function in the app-specific subdirectory.
+        Returns True on success, False if the function already exists or on error.
+        '''
+        secure_name = utils.clean_filename(name)
+        if not secure_name:
+            logger.error(f"Create failed: Invalid function name '{name}'")
             return False
+        
+        # Determine the correct file path based on app parameter
+        if app:
+            target_dir = os.path.join(self.functions_dir, app)
+            os.makedirs(target_dir, exist_ok=True)  # Ensure app directory exists
+            file_path = os.path.join(target_dir, f"{secure_name}.py")
+        else:
+            file_path = os.path.join(self.functions_dir, f"{secure_name}.py")
+
+        if os.path.exists(file_path):
+            logger.warning(f"Create failed: Function '{secure_name}' already exists.")
+            return False
+
         try:
-            code_to_save = code if code is not None else self._code_generate_stub(name)
-            if await self._fs_save_code(name, code_to_save, app_name):
-                logger.info(f"Function '{name}' created successfully in app '{app_name}'.")
+            code_to_save = code if code is not None else self._code_generate_stub(secure_name)
+            if await self._fs_save_code(secure_name, code_to_save, app):
+                logger.info(f"Function '{secure_name}' created successfully.")
                 return True
             else:
-                logger.error(f"Create failed: Could not save code for '{name}' in app '{app_name}'.")
+                logger.error(f"Create failed: Could not save code for '{secure_name}'.")
                 return False
         except Exception as e:
-            logger.error(f"Error during function creation for '{name}' in app '{app_name}': {e}")
+            logger.error(f"Error during function creation for '{secure_name}': {e}")
             logger.debug(traceback.format_exc())
             return False
 
-    def _get_log_file_path(self, rel_path: str) -> str:
-        """
-        Given a function's relative path (e.g., 'Home/foo.py'), return the corresponding log file path (e.g., 'Home/foo.log').
-        """
-        if rel_path.endswith('.py'):
-            log_rel_path = rel_path[:-3] + '.log'
-        else:
-            log_rel_path = rel_path + '.log'
-        return os.path.join(self.functions_dir, log_rel_path)
 
-    async def _write_error_log(self, name: str, error_message: str, rel_path: str = None) -> None:
+    async def function_remove(self, name: str, app: Optional[str] = None) -> bool:
         '''
-        Write an error message to a function-specific log file in the dynamic_functions folder/subfolder.
+        Removes a function file by moving it to the OLD subdirectory (relative to self.functions_dir).
+        If app is provided, looks for the function in the app-specific subdirectory.
+        Returns True on success, False if the function doesn't exist or on error.
+        '''
+        secure_name = utils.clean_filename(name)
+        if not secure_name:
+            logger.error(f"Remove failed: Invalid function name '{name}'")
+            return False
+
+        # Determine the correct file path based on app parameter
+        if app:
+            target_dir = os.path.join(self.functions_dir, app)
+            file_path = os.path.join(target_dir, f"{secure_name}.py")
+        else:
+            file_path = os.path.join(self.functions_dir, f"{secure_name}.py")
+        # self.old_dir is already correctly initialized in __init__ based on self.functions_dir
+        old_file_path = os.path.join(self.old_dir, f"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}_{secure_name}.py")
+
+
+        if not os.path.exists(file_path):
+            logger.warning(f"⚠️ function_remove: File not found for '{secure_name}' at {file_path}")
+            return False
+        try:
+            # Ensure the OLD directory exists (it should be created by __init__)
+            os.makedirs(self.old_dir, exist_ok=True)
+
+            shutil.move(file_path, old_file_path)
+            logger.info(f"🗑️ Function '{secure_name}' removed. Moved from {file_path} to {old_file_path}")
+            await self.invalidate_all_dynamic_module_cache() # Invalidate cache
+
+            log_file_path = os.path.join(self.functions_dir, f"{secure_name}.log") # Use self.functions_dir for log
+            if os.path.exists(log_file_path):
+                try:
+                    os.remove(log_file_path)
+                    logger.debug(f"🗑️ Removed log file {log_file_path}")
+                except OSError as e:
+                    logger.warning(f"⚠️ Could not remove log file {log_file_path}: {e}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ function_remove: Failed to remove function '{secure_name}': {e}")
+            logger.debug(traceback.format_exc())
+            await self._write_error_log(secure_name, f"Failed to remove: {e}") # Use self._write_error_log
+            return False
+
+    async def _write_error_log(self, name: str, error_message: str) -> None: # Made it async to match caller, added self
+        '''
+        Write an error message to a function-specific log file in the dynamic_functions folder.
         Overwrites any existing log to only keep the latest error.
-        Creates a log file named {rel_path}.log with timestamp.
+        Creates a log file named {name}.log with timestamp.
         '''
-        if rel_path is None:
-            await self._build_function_file_mapping()
-            rel_path = self._function_file_mapping.get(name)
-            if not rel_path:
-                logger.error(f"Cannot write error log: no mapping for function '{name}'")
-                return
-        log_file_path = self._get_log_file_path(rel_path)
-        os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
+        secure_name = utils.clean_filename(name)
+        if not secure_name:
+            logger.error("Cannot write error log: invalid function name provided.")
+            return
+
+        log_file_path = os.path.join(self.functions_dir, f"{secure_name}.log") # Use self.functions_dir
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_content = f"[{timestamp}] ERROR: {error_message}\n"
+
         try:
             with open(log_file_path, 'w', encoding='utf-8') as f:
                 f.write(log_content)
             logger.debug(f"Wrote error log to {log_file_path}")
         except Exception as e:
-            logger.error(f"Failed to write error log for '{name}': {e}")
-
-    async def _cleanup_error_log(self, name: str, rel_path: str = None) -> None:
-        '''
-        Remove the error log file for a function if it exists.
-        '''
-        if rel_path is None:
-            await self._build_function_file_mapping()
-            rel_path = self._function_file_mapping.get(name)
-            if not rel_path:
-                logger.debug(f"Cannot cleanup error log: no mapping for function '{name}'")
-                return
-        log_file_path = self._get_log_file_path(rel_path)
-        if os.path.exists(log_file_path):
-            try:
-                os.remove(log_file_path)
-                logger.debug(f"🧹 Cleaned up error log for '{name}': {log_file_path}")
-            except Exception as e:
-                logger.warning(f"⚠️ Could not remove error log for '{name}': {e}")
-
-    async def _cleanup_orphaned_logs(self) -> None:
-        '''
-        Clean up log files for functions that no longer exist.
-        '''
-        try:
-            # Get all .log files in the functions directory and subdirectories
-            log_files = []
-            for root, dirs, files in os.walk(self.functions_dir):
-                for file in files:
-                    if file.endswith('.log'):
-                        log_files.append(os.path.join(root, file))
-            cleaned_count = 0
-            for log_file_path in log_files:
-                # Get the relative path from functions_dir
-                rel_log_path = os.path.relpath(log_file_path, self.functions_dir)
-                # Convert .log to .py
-                rel_func_path = rel_log_path[:-4] + '.py' if rel_log_path.endswith('.log') else rel_log_path
-                func_file_path = os.path.join(self.functions_dir, rel_func_path)
-                if not os.path.exists(func_file_path):
-                    try:
-                        os.remove(log_file_path)
-                        cleaned_count += 1
-                        logger.debug(f"🧹 Cleaned up orphaned log file: {log_file_path}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Could not remove orphaned log file {log_file_path}: {e}")
-            if cleaned_count > 0:
-                logger.info(f"🧹 Cleaned up {cleaned_count} orphaned log files")
-        except Exception as e:
-            logger.warning(f"⚠️ Error during orphaned log cleanup: {e}")
+            # Don't let logging errors disrupt the main flow
+            logger.error(f"Failed to write error log for '{secure_name}': {e}")
 
     async def function_call(self, name: str, client_id: str, request_id: str, user: str = None, **kwargs) -> Any:
         '''
@@ -956,8 +932,9 @@ async def {name}():
             raise FileNotFoundError(f"Dynamic function '{name}' not found at {file_path}")
 
         context_tokens = None
-        # Use the actual filename (without .py) for module name
-        module_name = f"{PARENT_PACKAGE_NAME}.{os.path.splitext(target_file)[0]}"
+        # Use the relative path (without .py) for module name, replacing slashes with dots
+        module_path = os.path.splitext(target_file)[0].replace(os.sep, '.')
+        module_name = f"{PARENT_PACKAGE_NAME}.{module_path}"
         module = None # Define module outside the lock
 
         # --- Clear ALL dynamic function child modules from cache FIRST ---
@@ -1091,70 +1068,67 @@ async def {name}():
     # --- Function Management Functions --- #
 
     async def function_validate(self, name: str) -> Dict[str, Any]:
-        await self._build_function_file_mapping()
-        rel_path = self._function_file_mapping.get(name)
-        if not rel_path:
-            error_msg = f"No mapping found for function '{name}'"
-            await self._write_error_log(name, error_msg, rel_path=None)
+        '''
+        Validates the syntax of a function file without executing it.
+        Returns a dictionary {'valid': bool, 'error': Optional[str], 'function_info': Optional[List[Dict]]}
+        with detailed error messages and extracted function details on success.
+        '''
+        secure_name = utils.clean_filename(name)
+        if not secure_name:
+            error_msg = f"Invalid function name '{name}'"
+            await self._write_error_log(name, error_msg)
             return {'valid': False, 'error': error_msg, 'function_info': None}
-        file_path = os.path.join(self.functions_dir, rel_path)
-        if not os.path.exists(file_path):
-            error_msg = f"Function '{name}' not found at {file_path}"
-            await self._write_error_log(name, error_msg, rel_path)
-            return {'valid': False, 'error': error_msg, 'function_info': None}
+
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                code = f.read()
+            code = await self._fs_load_code(secure_name)
         except FileNotFoundError as e:
             error_msg = str(e)
-            await self._write_error_log(name, error_msg, rel_path)
+            await self._write_error_log(name, error_msg)
             return {'valid': False, 'error': error_msg, 'function_info': None}
-        is_valid, error_message, functions_info = self._code_validate_syntax(code, rel_path)
+
+        # _code_validate_syntax now returns: (is_valid, error_message, functions_info)
+        is_valid, error_message, functions_info = self._code_validate_syntax(code)
+
         if is_valid:
-            logger.info(f"Syntax validation successful for function file '{name}'")
-            await self._cleanup_error_log(name, rel_path)
+            # Successful validation
+            logger.info(f"Syntax validation successful for function file '{secure_name}'")
+
+            # If there was a previous error log, remove it since the function is now valid
+            try:
+                log_path = os.path.join(self.functions_dir, f"{secure_name}.log")
+                if os.path.exists(log_path):
+                    os.remove(log_path)
+                    logger.debug(f"Removed error log for '{secure_name}' as validation now passes")
+            except Exception as e:
+                logger.debug(f"Failed to remove old error log for '{secure_name}': {e}")
+
+            # Return success and the extracted function info (now a list)
             return {'valid': True, 'error': None, 'function_info': functions_info}
         else:
+            # Failed validation - write to the error log
             error_msg_full = f"Syntax validation failed: {error_message}"
-            logger.warning(f"{error_msg_full} Function file: '{name}'")
-            await self._write_error_log(name, error_msg_full, rel_path)
-            return {'valid': False, 'error': error_message, 'function_info': functions_info}
+            logger.warning(f"{error_msg_full} Function file: '{secure_name}'")
+            await self._write_error_log(secure_name, error_msg_full)
 
-    async def function_remove(self, name: str) -> bool:
-        await self._build_function_file_mapping()
-        rel_path = self._function_file_mapping.get(name)
-        if not rel_path:
-            logger.error(f"Remove failed: No mapping found for function '{name}'")
-            return False
-        file_path = os.path.join(self.functions_dir, rel_path)
-        old_file_path = os.path.join(self.old_dir, f"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}_{os.path.basename(rel_path)}")
-        if not os.path.exists(file_path):
-            logger.warning(f"⚠️ function_remove: File not found for '{name}' at {file_path}")
-            return False
-        try:
-            os.makedirs(self.old_dir, exist_ok=True)
-            shutil.move(file_path, old_file_path)
-            logger.info(f"🗑️ Function '{name}' removed. Moved from {file_path} to {old_file_path}")
-            await self.invalidate_all_dynamic_module_cache()
-            await self._cleanup_error_log(name, rel_path)
-            return True
-        except Exception as e:
-            logger.error(f"❌ function_remove: Failed to remove function '{name}': {e}")
-            logger.debug(traceback.format_exc())
-            await self._write_error_log(name, f"Failed to remove: {e}", rel_path)
-            return False
+            # Return the detailed error message
+            return {'valid': False, 'error': error_message, 'function_info': None}
+
+    import inspect # Add import
+    import atlantis
 
     async def function_set(self, args: Dict[str, Any], server: Any) -> Tuple[Optional[str], List[TextContent]]:
         """
         Handles the _function_set tool call.
         Extracts all function names using AST parsing, saves the provided code.
         Supports optional filename parameter for multi-function files.
+        Supports optional app parameter for app-specific function targeting.
         Returns the filename used (if successful) and a status message.
         Does *not* perform full syntax validation before saving.
         """
         logger.info("⚙️ Handling _function_set call (using AST parsing for all functions)")
         code_buffer = args.get("code")
-        target_filename = args.get("filename")  # NEW: Optional filename parameter
+        target_filename = args.get("filename")  # Optional filename parameter
+        app_name = args.get("app")  # Optional app name for disambiguation
 
         if not code_buffer or not isinstance(code_buffer, str):
             logger.warning("⚠️ function_set: Missing or invalid 'code' parameter.")
@@ -1162,7 +1136,6 @@ async def {name}():
             return None, [TextContent(type="text", text="Error: Missing or invalid 'code' parameter.")]
 
         # 1. Extract ALL function names using AST parsing
-        # Note: For function_set, we don't have a file path yet, so we can't extract folder-based app names
         is_valid, error_message, functions_info = self._code_validate_syntax(code_buffer)
 
         if not is_valid:
@@ -1192,7 +1165,14 @@ async def {name}():
         # --- Backup existing file before saving new one ---
         secure_name = utils.clean_filename(filename_to_use)
         if secure_name: # Should always be true if filename_to_use is valid
-            file_path = os.path.join(self.functions_dir, f"{secure_name}.py")
+            # Determine target directory based on app parameter
+            if app_name:
+                target_dir = os.path.join(self.functions_dir, app_name)
+                os.makedirs(target_dir, exist_ok=True)  # Ensure app directory exists
+                file_path = os.path.join(target_dir, f"{secure_name}.py")
+                logger.info(f"⚙️ Using app-specific directory: {target_dir}")
+            else:
+                file_path = os.path.join(self.functions_dir, f"{secure_name}.py")
             if os.path.exists(file_path):
                 logger.info(f"💾 Found existing file for '{secure_name}', attempting backup...")
                 try:
@@ -1215,7 +1195,7 @@ async def {name}():
         # --- End Backup ---
 
         # 3. Save the code (validation will happen later when tools are listed/called)
-        saved_path = await self._fs_save_code(filename_to_use, code_buffer)
+        saved_path = await self._fs_save_code(filename_to_use, code_buffer, app_name)
 
         if not saved_path:
             error_response = f"Error saving functions to file '{filename_to_use}'."
@@ -1228,10 +1208,6 @@ async def {name}():
         # Clear any cached runtime errors for all functions, as they've been updated
         for func_name in function_names:
             self._runtime_errors.pop(func_name, None)
-            # Clean up error logs for functions that were successfully set
-            rel_path = self._function_file_mapping.get(func_name)
-            if rel_path:
-                await self._cleanup_error_log(func_name, rel_path)
 
         # 4. Attempt AST parsing for immediate feedback (but save regardless)
         syntax_error = None
@@ -1272,19 +1248,25 @@ async def {name}():
     async def get_function_code(self, args, mcp_server) -> list[TextContent]:
         """
         Get the source code for a dynamic function by name using function-to-file mapping.
+        Supports optional app parameter for app-specific function targeting.
         Returns the code as a TextContent object.
         """
-        # Get function name
+        # Get function name and optional app name
         name = args.get("name")
+        app_name = args.get("app")
 
         # Validate parameters
         if not name:
             raise ValueError("Missing required parameter: name")
 
-        # NEW: Find which file contains this function
-        target_file = await self._find_file_containing_function(name)
+        # Find which file contains this function (supports app-specific lookup)
+        target_file = await self._find_file_containing_function(name, app_name)
         if not target_file:
-            raise ValueError(f"Function '{name}' not found in any file")
+            if app_name:
+                error_message = f"Function '{name}' does not exist in app '{app_name}'."
+            else:
+                error_message = f"Function '{name}' does not exist."
+            raise ValueError(error_message)
 
         # Load the code using the existing _fs_load_code utility with the filename
         filename_without_ext = os.path.splitext(target_file)[0]

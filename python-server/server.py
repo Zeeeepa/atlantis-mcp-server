@@ -31,15 +31,22 @@ from mcp.types import (
     TextContent,
     CallToolResult,
     NotificationParams,
-    Annotations # Ensure Annotation, ToolErrorAnnotation are NOT imported
-
+    Annotations, # Ensure Annotation, ToolErrorAnnotation are NOT imported
+    ToolAnnotations as McpToolAnnotations
 )
+from pydantic import ConfigDict
+from typing import Any, Dict
 from starlette.applications import Starlette
 from starlette.routing import WebSocketRoute, Route
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from mcp.shared.exceptions import McpError # <--- ADD THIS IMPORT
+
+# Custom ToolAnnotations class that allows extra fields
+class ToolAnnotations(McpToolAnnotations):
+    """Custom ToolAnnotations that allows extra fields to avoid Pydantic warnings."""
+    model_config = ConfigDict(extra='allow')
 
 # Import shared state and utilities
 from state import (
@@ -61,7 +68,8 @@ import os
 try:
 
     import sys
-    print(f"DEBUG: Python version running server.py: {sys.version}")
+    # Comment out debug print to avoid interfering with JSON-RPC communication
+    # print(f"DEBUG: Python version running server.py: {sys.version}")
 
 
     # Get the current timestamp of the dynamic_functions directory
@@ -166,9 +174,10 @@ class DynamicConfigEventHandler(FileSystemEventHandler):
 
     def _trigger_reload(self, event_path):
         # Check if the change is relevant (Python file in functions dir or JSON file in servers dir)
-        # Now supports subdirectories within these directories
-        is_function_change = event_path.endswith(".py") and event_path.startswith(FUNCTIONS_DIR)
-        is_server_change = event_path.endswith(".json") and event_path.startswith(SERVERS_DIR)
+        is_function_change = event_path.endswith(".py") and (os.path.dirname(event_path) == FUNCTIONS_DIR or
+                                                             event_path.startswith(FUNCTIONS_DIR + os.sep))
+        is_server_change = event_path.endswith(".json") and (os.path.dirname(event_path) == SERVERS_DIR or
+                                                             event_path.startswith(SERVERS_DIR + os.sep))
 
         if not is_function_change and not is_server_change:
             # logger.debug(f"Ignoring irrelevant change: {event_path}")
@@ -201,9 +210,11 @@ class DynamicConfigEventHandler(FileSystemEventHandler):
         # Clear the cache - Must run in the main event loop
         async def _process_file_change(file_path: str):
             # --- Invalidate ALL Dynamic Function Runtime Caches ---
-            # Check if the change was in the functions or servers directory (including subdirectories)
-            is_function_change = file_path.endswith(".py") and file_path.startswith(FUNCTIONS_DIR)
-            is_server_change = file_path.endswith(".json") and file_path.startswith(SERVERS_DIR)
+            # Check if the change was in the functions or servers directory
+            is_function_change = file_path.endswith(".py") and (os.path.dirname(file_path) == FUNCTIONS_DIR or
+                                                                file_path.startswith(FUNCTIONS_DIR + os.sep))
+            is_server_change = file_path.endswith(".json") and (os.path.dirname(file_path) == SERVERS_DIR or
+                                                                file_path.startswith(SERVERS_DIR + os.sep))
 
             if is_function_change:
                 logger.info(f"⚡ File watcher triggering flush of all dynamic function runtime caches due to change in {os.path.basename(file_path)}.")
@@ -277,6 +288,10 @@ class DynamicAdditionServer(Server):
         self._last_active_server_keys: Optional[set] = None # Store active server keys for cache invalidation
         self._server_configs: Dict[str, dict] = {} # Store server configurations
 
+        # Track function visibility overrides (can show/hide any function)
+        self._temporarily_visible_functions: set = set()
+        self._temporarily_hidden_functions: set = set()
+
         # Initialize the dynamic function and server managers
         self.function_manager = DynamicFunctionManager(FUNCTIONS_DIR)
         self.server_manager = DynamicServerManager(SERVERS_DIR)
@@ -320,10 +335,15 @@ class DynamicAdditionServer(Server):
 
         tools_list = await self._get_tools_list(caller_context="initialize_method")
         logger.info(f"{CYAN}🔧 Server initialize method completed.{RESET}")
-        # Return required InitializeResult fields
+        # Return required InitializeResult fields with proper server capabilities
         return {
             "protocolVersion": params.get("protocolVersion"),
-            "capabilities": params.get("capabilities"),
+            "capabilities": {
+                "tools": {},
+                "prompts": {},
+                "resources": {},
+                "logging": {}
+            },
             "serverInfo": {"name": self.name, "version": SERVER_VERSION}
         }
 
@@ -484,69 +504,83 @@ class DynamicAdditionServer(Server):
              logger.error(f"❌ Error checking FUNCTIONS_DIR mtime: {e}. Proceeding without cache.")
              current_mtime = time.time() # Use current time to force regeneration
 
-        # Start with our built-in tools
+                # Start with our built-in tools
         tools_list = [
             Tool(
                 name="_function_set",
-                description="Sets the content of a dynamic Python function", # Updated description
+                description="Sets the content of a dynamic Python function. Use 'app' parameter to target specific functions when multiple exist with the same name.", # Updated description
                 inputSchema={
                     "type": "object",
                     "properties": {
+                        "app": {"type": "string", "description": "Optional: The app name to target a specific function when multiple exist with the same name"},
                         "code": {"type": "string", "description": "The Python source code containing a single function definition."}
                     },
                     "required": ["code"] # Only code is required now
-                }
+                },
+                annotations=ToolAnnotations(title="_function_set")
             ),
             Tool( # Add definition for get_tool_code
                 name="_function_get",
-                description="Gets the Python source code for a dynamic function",
+                description="Gets the Python source code for a dynamic function. Use 'app' parameter to target specific functions when multiple exist with the same name.",
                 inputSchema={
                     "type": "object",
                     "properties": {
+                        "app": {"type": "string", "description": "Optional: The app name to target a specific function when multiple exist with the same name"},
                         "name": {"type": "string", "description": "The name of the function to get code for"}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_function_get")
             ),
             Tool( # Add definition for remove_dynamic_tool
                 name="_function_remove",
-                description="Removes a dynamic Python function",
+                description="Removes a dynamic Python function. Use 'app' parameter to target specific functions when multiple exist with the same name.",
                 inputSchema={
                     "type": "object",
                     "properties": {
+                        "app": {"type": "string", "description": "Optional: The app name to target a specific function when multiple exist with the same name"},
                         "name": {"type": "string", "description": "The name of the function to remove"}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_function_remove")
             ),
             Tool( # Add definition for add_placeholder_function
                 name="_function_add",
-                description="Adds a new, empty placeholder Python function with the given name.",
+                description="Adds a new, empty placeholder Python function with the given name. Use 'app' parameter to create function in specific app directory.",
                 inputSchema={
                     "type": "object",
                     "properties": {
+                        "app": {"type": "string", "description": "Optional: The app name to create the function in a specific app directory"},
                         "name": {"type": "string", "description": "The name to register the new placeholder function under."}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_function_add")
             ),
             Tool(
                 name="_function_history",
-                description="Gets the tool call history",
+                description="Gets the tool call history. Use 'app' parameter to filter history for specific app functions.",
                 inputSchema={
                     "type": "object",
-                    "properties": {},
+                    "properties": {
+                        "app": {"type": "string", "description": "Optional: The app name to filter history for functions from a specific app"}
+                    },
                     "required": []
-                }
+                },
+                annotations=ToolAnnotations(title="_function_history")
             ),
             Tool(
                 name="_function_log",
-                description="Gets the tool owner log",
+                description="Gets the tool owner log. Use 'app' parameter to filter log for specific app functions.",
                 inputSchema={
                     "type": "object",
-                    "properties": {},
+                    "properties": {
+                        "app": {"type": "string", "description": "Optional: The app name to filter log for functions from a specific app"}
+                    },
                     "required": []
-                }
+                },
+                annotations=ToolAnnotations(title="_function_log")
             ),
             Tool(
                 name="_server_get",
@@ -557,7 +591,8 @@ class DynamicAdditionServer(Server):
                         "name": {"type": "string"}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_server_get")
             ),
             Tool(
                 name="_server_add",
@@ -568,7 +603,8 @@ class DynamicAdditionServer(Server):
                         "name": {"type": "string"}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_server_add")
             ),
             Tool(
                 name="_server_remove",
@@ -579,7 +615,8 @@ class DynamicAdditionServer(Server):
                         "name": {"type": "string"}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_server_remove")
             ),
             Tool(
                 name="_server_set",
@@ -612,7 +649,8 @@ class DynamicAdditionServer(Server):
                         }
                     },
                     "required": ["config"] # Only config is required top-level
-                }
+                },
+                annotations=ToolAnnotations(title="_server_set")
             ),
             Tool(
                 name="_server_validate",
@@ -623,7 +661,8 @@ class DynamicAdditionServer(Server):
                         "name": {"type": "string"}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_server_validate")
             ),
             Tool(
                 name="_server_start",
@@ -634,7 +673,8 @@ class DynamicAdditionServer(Server):
                         "name": {"type": "string", "description": "The name of the server config to start."}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_server_start")
             ),
             Tool(
                 name="_server_stop",
@@ -645,7 +685,8 @@ class DynamicAdditionServer(Server):
                         "name": {"type": "string", "description": "The name of the server config to stop."}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_server_stop")
             ),
             Tool(
                 name="_server_get_tools",
@@ -656,7 +697,34 @@ class DynamicAdditionServer(Server):
                         "name": {"type": "string"}
                     },
                     "required": ["name"]
-                }
+                },
+                annotations=ToolAnnotations(title="_server_get_tools")
+            ),
+            Tool(
+                name="_function_show",
+                description="Makes a hidden function temporarily visible until server restart. Use 'app' parameter to target specific functions when multiple exist with the same name.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "app": {"type": "string", "description": "Optional: The app name to target a specific function when multiple exist with the same name"},
+                        "name": {"type": "string", "description": "The name of the hidden function to make visible"}
+                    },
+                    "required": ["name"]
+                },
+                annotations=ToolAnnotations(title="_function_show")
+            ),
+            Tool(
+                name="_function_hide",
+                description="Hides a temporarily visible function again. Use 'app' parameter to target specific functions when multiple exist with the same name.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "app": {"type": "string", "description": "Optional: The app name to target a specific function when multiple exist with the same name"},
+                        "name": {"type": "string", "description": "The name of the function to hide again"}
+                    },
+                    "required": ["name"]
+                },
+                annotations=ToolAnnotations(title="_function_hide")
             ),
 
         ]
@@ -669,61 +737,78 @@ class DynamicAdditionServer(Server):
             # Ensure the functions directory exists
             os.makedirs(FUNCTIONS_DIR, exist_ok=True)
 
-            # Get all Python files in subdirectories (skip root directory)
-            function_files = []
-            for root, dirs, files in os.walk(FUNCTIONS_DIR):
-                # Skip the root directory itself - only scan subdirectories
-                if root == FUNCTIONS_DIR:
-                    continue
+                        # Use the function mapping to get all discovered functions
+            await self.function_manager._build_function_file_mapping()
+            function_mapping = self.function_manager._function_file_mapping
 
-                for f in files:
-                    if f.endswith('.py'):
-                        rel_path = os.path.relpath(os.path.join(root, f), FUNCTIONS_DIR)
-                        function_files.append(rel_path)
+            logger.info(f"📝 FOUND {len(function_mapping)} FUNCTIONS FROM MAPPING")
 
-            logger.info(f"📝 FOUND {len(function_files)} POTENTIAL DYNAMIC FUNCTIONS")
-
-            # For each Python file, create Tool entries
-            for file_name in function_files:
-                # Extract just the filename without path for tool name fallback
-                tool_name_from_file = os.path.splitext(os.path.basename(file_name))[0]
+            # For each function in the mapping, create Tool entries
+            for func_name, file_path in function_mapping.items():
                 try:
                     # Skip if this seems to be a utility file
-                    if tool_name_from_file.startswith('_') or tool_name_from_file == '__init__' or tool_name_from_file == '__pycache__':
+                    if func_name.startswith('_') or func_name == '__init__' or func_name == '__pycache__':
                         continue
 
-                    # Use the function name (from AST or filename) and rely on mapping for validation
-                    validation_result = await self.function_manager.function_validate(tool_name_from_file)
-                    is_valid = validation_result.get('valid', False)
-                    error_message = validation_result.get('error')
-                    functions_info = validation_result.get('function_info') # Should be a list if valid
+                                        # Load and validate the function code directly from the file
+                    full_file_path = os.path.join(FUNCTIONS_DIR, file_path)
+                    try:
+                        with open(full_file_path, 'r', encoding='utf-8') as f:
+                            code = f.read()
+
+                        # Validate function syntax without actually loading it
+                        is_valid, error_message, functions_info = self.function_manager._code_validate_syntax(code)
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error loading file {file_path}: {str(e)}")
+                        is_valid = False
+                        error_message = str(e)
+                        functions_info = None
 
                     # NEW: Handle multiple functions per file
                     if is_valid and functions_info:
                         # Create one tool per function in the file
                         for func_info in functions_info:
                             # --- Create Tool --- #
-                            tool_name = func_info.get('name', tool_name_from_file) # Use AST name, fallback to filename
+                            tool_name = func_info.get('name', func_name) # Use AST name, fallback to function name
                             tool_description = func_info.get('description', f"Dynamic function '{tool_name}'")
                             tool_input_schema = func_info.get('inputSchema', {"type": "object", "properties": {}})
                             tool_annotations = {}
 
                             tool_annotations["type"] = "function"
                             tool_annotations["validationStatus"] = "VALID"
-                            tool_annotations["sourceFile"] = file_name  # Track which file contains this function
+                            tool_annotations["sourceFile"] = file_path  # NEW: Track which file contains this function
 
                             # Add decorator info if present (opt-in)
                             decorators_from_info = func_info.get("decorators")
                             if decorators_from_info: # Only add if list is not None and not empty
                                 tool_annotations["decorators"] = decorators_from_info
-                                # Skip this function if it has the @hidden decorator
-                                if "hidden" in decorators_from_info:
-                                    logger.info(f"🙈 Skipping hidden function: {tool_name}")
-                                    continue
-                            # Add app_name to annotations if present in function_info
+
+                            # Determine app_name first (needed for logging)
                             app_name_from_info = func_info.get("app_name")
                             if app_name_from_info is not None:
-                                tool_annotations["app_name"] = app_name_from_info
+                                app_name = app_name_from_info
+                                tool_annotations["app_name"] = app_name
+                                logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {app_name} (from @app decorator)")
+                            else:
+                                # If no app_name from decorator, check if function is in a subfolder
+                                if '/' in file_path:
+                                    app_name = file_path.split('/')[0]
+                                    tool_annotations["app_name"] = app_name
+                                    logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {app_name} (from subfolder)")
+                                else:
+                                    app_name = "unknown"
+
+                            # Check visibility overrides first (these take precedence over decorators)
+                            if tool_name in self._temporarily_hidden_functions:
+                                logger.info(f"{PINK}🙈 Skipping temporarily hidden function: {tool_name} (app: {app_name}){RESET}")
+                                continue
+                            elif tool_name in self._temporarily_visible_functions:
+                                logger.info(f"{PINK}👁️ Showing temporarily visible function: {tool_name} (app: {app_name}){RESET}")
+                                tool_annotations["temporarilyVisible"] = True
+                            elif decorators_from_info and "hidden" in decorators_from_info:
+                                # Skip this function if it has the @hidden decorator (and no override)
+                                logger.info(f"{PINK}🙈 Skipping hidden function: {tool_name} (app: {app_name}){RESET}")
+                                continue
                             # Add location_name to annotations if present in function_info
                             location_name_from_info = func_info.get("location_name")
                             if location_name_from_info is not None:
@@ -740,107 +825,157 @@ class DynamicAdditionServer(Server):
                             # Add common annotations
                             try:
                                 tool_annotations["lastModified"] = datetime.datetime.fromtimestamp(
-                                    os.path.getmtime(os.path.join(FUNCTIONS_DIR, file_name))
+                                    os.path.getmtime(full_file_path)
                                 ).isoformat()
-                            except Exception:
+                                logger.debug(f"🔍 SET lastModified for {tool_name}: {tool_annotations['lastModified']}")
+                            except Exception as e:
+                                logger.warning(f"⚠️ Failed to get lastModified for {tool_name}: {e}")
                                 pass # Ignore if file stat fails
 
                             # Create and add the tool object
+                            logger.debug(f"🔍 Creating Tool {tool_name} with annotations: {tool_annotations}")
+                            #logger.debug(f"🔍 Tool {tool_name} lastModified before Tool creation: {tool_annotations.get('lastModified', 'NOT_SET')}")
+                            # Create custom ToolAnnotations object to allow extra fields
+                            custom_annotations = ToolAnnotations(**tool_annotations)
                             tool_obj = Tool(
                                 name=tool_name,
                                 description=tool_description,
                                 inputSchema=tool_input_schema,
-                                annotations=tool_annotations # app_name is now inside annotations
+                                annotations=custom_annotations # app_name is now inside annotations
                             )
-                            tools_list.append(tool_obj)
-                            logger.debug(f"📝 Added dynamic tool: {tool_name} from {file_name}, valid: {is_valid}")
+                            logger.debug(f"🔍 Tool {tool_name} annotations after creation: {tool_obj.annotations}")
+                            #logger.debug(f"🔍 Tool {tool_name} lastModified after Tool creation: {getattr(tool_obj.annotations, 'lastModified', 'NOT_FOUND') if hasattr(tool_obj.annotations, 'lastModified') else 'NO_ATTR'}")
+                            #logger.debug(f"🔍 Tool {tool_name} annotations type: {type(tool_obj.annotations)}")
+                            if hasattr(tool_obj.annotations, '__dict__'):
+                                logger.debug(f"🔍 Tool {tool_name} annotations __dict__: {tool_obj.annotations.__dict__}")
+                            # Check for duplicates before adding (app-aware and case-insensitive)
+                            app_name = tool_annotations.get("app_name", "unknown")
+                            tool_key = f"{app_name}.{tool_name}".lower()
+                            existing_tool_keys = {f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}".lower() for tool in tools_list}
+                            if tool_key not in existing_tool_keys:
+                                tools_list.append(tool_obj)
+                                logger.debug(f"📝 Added dynamic tool: {tool_name} from {file_path} (app: {app_name}), valid: {is_valid}")
+                            else:
+                                logger.warning(f"⚠️ Skipping duplicate tool: {tool_name} from {file_path} (app: {app_name}) - already exists")
 
                     elif is_valid and not functions_info:
                          # Valid syntax but failed to extract info (should ideally not happen)
-                         tool_description = f"Dynamic function: {tool_name_from_file} (Details unavailable)"
+                         tool_description = f"Dynamic function: {func_name} (Details unavailable)"
                          tool_input_schema = {"type": "object", "description": "Could not parse arguments."}
                          tool_annotations = {"validationStatus": "VALID_SYNTAX_UNKNOWN_STRUCTURE"}
 
-                         # Add runtime error message if present in cache (check by filename for backward compatibility)
-                         if tool_name_from_file in _runtime_errors:
-                             tool_annotations["runtimeError"] = _runtime_errors[tool_name_from_file]
+                         # Add runtime error message if present in cache (check by function name for backward compatibility)
+                         if func_name in _runtime_errors:
+                             tool_annotations["runtimeError"] = _runtime_errors[func_name]
 
                          # Add server config load error if present in cache
-                         if tool_name_from_file in self.server_manager._server_load_errors:
-                             tool_annotations["loadError"] = self.server_manager._server_load_errors[tool_name_from_file]
+                         if func_name in self.server_manager._server_load_errors:
+                             tool_annotations["loadError"] = self.server_manager._server_load_errors[func_name]
 
                          # Add common annotations
                          try:
                              tool_annotations["lastModified"] = datetime.datetime.fromtimestamp(
-                                 os.path.getmtime(os.path.join(FUNCTIONS_DIR, file_name))
+                                 os.path.getmtime(full_file_path)
                              ).isoformat()
                          except Exception:
                              pass # Ignore if file stat fails
 
                          # Create and add the tool object
+                         # Create custom ToolAnnotations object to allow extra fields
+                         custom_annotations = ToolAnnotations(**tool_annotations)
                          tool_obj = Tool(
-                             name=tool_name_from_file,
+                             name=func_name,
                              description=tool_description,
                              inputSchema=tool_input_schema,
-                             annotations=tool_annotations
+                             annotations=custom_annotations
                          )
-                         tools_list.append(tool_obj)
-                         logger.debug(f"📝 Added dynamic tool: {tool_name_from_file}, valid: {is_valid}")
+                         # Check for duplicates before adding (app-aware and case-insensitive)
+                         # For this case, we don't have app_name from decorators, so use subfolder if available
+                         app_name = "unknown"
+                         if '/' in file_path:
+                             app_name = file_path.split('/')[0]
+                         tool_key = f"{app_name}.{func_name}".lower()
+                         existing_tool_keys = {f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}".lower() for tool in tools_list}
+                         if tool_key not in existing_tool_keys:
+                             tools_list.append(tool_obj)
+                             logger.debug(f"📝 Added dynamic tool: {func_name} (app: {app_name}), valid: {is_valid}")
+                         else:
+                             logger.warning(f"⚠️ Skipping duplicate tool: {func_name} (app: {app_name}) - already exists")
 
                     else:
                          # Invalid syntax
-                         tool_description = f"Dynamic function: {tool_name_from_file} (INVALID)"
+                         tool_description = f"Dynamic function: {func_name} (INVALID)"
                          tool_input_schema = {"type": "object", "description": "Function has syntax errors."}
                          tool_annotations = {"validationStatus": "INVALID"}
                          if error_message:
                              tool_annotations["errorMessage"] = error_message
 
-                         # Add runtime error message if present in cache (check by filename for backward compatibility)
-                         if tool_name_from_file in _runtime_errors:
-                             tool_annotations["runtimeError"] = _runtime_errors[tool_name_from_file]
+                         # Add runtime error message if present in cache (check by function name for backward compatibility)
+                         if func_name in _runtime_errors:
+                             tool_annotations["runtimeError"] = _runtime_errors[func_name]
 
                          # Add server config load error if present in cache
-                         if tool_name_from_file in self.server_manager._server_load_errors:
-                             tool_annotations["loadError"] = self.server_manager._server_load_errors[tool_name_from_file]
+                         if func_name in self.server_manager._server_load_errors:
+                             tool_annotations["loadError"] = self.server_manager._server_load_errors[func_name]
 
                          # Add common annotations
                          try:
                              tool_annotations["lastModified"] = datetime.datetime.fromtimestamp(
-                                 os.path.getmtime(os.path.join(FUNCTIONS_DIR, file_name))
+                                 os.path.getmtime(full_file_path)
                              ).isoformat()
                          except Exception:
                              pass # Ignore if file stat fails
 
                          # Create and add the tool object
+                         # Create custom ToolAnnotations object to allow extra fields
+                         custom_annotations = ToolAnnotations(**tool_annotations)
                          tool_obj = Tool(
-                             name=tool_name_from_file,
+                             name=func_name,
                              description=tool_description,
                              inputSchema=tool_input_schema,
-                             annotations=tool_annotations
+                             annotations=custom_annotations
                          )
-                         tools_list.append(tool_obj)
-                         logger.debug(f"📝 Added dynamic tool: {tool_name_from_file}, valid: {is_valid}")
+                         # Check for duplicates before adding (app-aware and case-insensitive)
+                         # For this case, we don't have app_name from decorators, so use subfolder if available
+                         app_name = "unknown"
+                         if '/' in file_path:
+                             app_name = file_path.split('/')[0]
+                         tool_key = f"{app_name}.{func_name}".lower()
+                         existing_tool_keys = {f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}".lower() for tool in tools_list}
+                         if tool_key not in existing_tool_keys:
+                             tools_list.append(tool_obj)
+                             logger.debug(f"📝 Added dynamic tool: {func_name} (app: {app_name}), valid: {is_valid}")
+                         else:
+                             logger.warning(f"⚠️ Skipping duplicate tool: {func_name} (app: {app_name}) - already exists")
 
                 except Exception as e:
-                    logger.warning(f"⚠️ Error processing potential tool file {file_name}: {str(e)}")
+                    logger.warning(f"⚠️ Error processing function {func_name} from {file_path}: {str(e)}")
                     # Add a placeholder indicating the error
-                    tools_list.append(Tool(
-                        name=tool_name_from_file,
-                        description=f"Error loading dynamic function: {str(e)}",
-                        inputSchema={"type": "object"},
-                        annotations={"validationStatus": "ERROR_LOADING"}
-                    ))
+                    # Create custom ToolAnnotations object to allow extra fields
+                    error_annotations = ToolAnnotations(validationStatus="ERROR_LOADING")
+                    # Check for duplicates before adding (app-aware and case-insensitive)
+                    # For error cases, use subfolder as app name if available
+                    app_name = "unknown"
+                    if '/' in file_path:
+                        app_name = file_path.split('/')[0]
+                    tool_key = f"{app_name}.{func_name}".lower()
+                    existing_tool_keys = {f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}".lower() for tool in tools_list}
+                    if tool_key not in existing_tool_keys:
+                        tools_list.append(Tool(
+                            name=func_name,
+                            description=f"Error loading dynamic function: {str(e)}",
+                            inputSchema={"type": "object"},
+                            annotations=error_annotations
+                        ))
+                    else:
+                        logger.warning(f"⚠️ Skipping duplicate error tool: {func_name} (app: {app_name}) - already exists")
                     continue
 
         except Exception as e:
             logger.error(f"❌ Error scanning for dynamic functions: {str(e)}")
             # Continue with just the built-in tools
 
-        # NEW: Build function-to-file mapping after processing all files
-        try:
-            await self.function_manager._build_function_file_mapping()
-        except Exception as e:
-            logger.warning(f"⚠️ Error building function-to-file mapping: {str(e)}")
+        # Function-to-file mapping was already built at the beginning of this method
 
         # --- DEBUG: Log current server_tasks state before processing servers ---
         # Access server_tasks via module namespace
@@ -1035,26 +1170,40 @@ class DynamicAdditionServer(Server):
                     description = f"MCP server: {server_name}"
                     # do not append error to the description
 
+                    # Create custom ToolAnnotations object to allow extra fields
+                    custom_annotations = ToolAnnotations(**annotations)
                     server_tool = Tool(
                         name=server_name,
                         description=description,
                         inputSchema={"type": "object"}, # Use inputSchema (camelCase), not input_schema
-                        annotations=annotations # Use annotations object that contains started_at if applicable
+                        annotations=custom_annotations # Use annotations object that contains started_at if applicable
                     )
 
-                    tools_list.append(server_tool)
-                    logger.debug(f"📝 Added dynamic server config entry: {server_name} (Status: {status})")
+                    # Check for duplicates before adding (server names are unique)
+                    existing_tool_names = {tool.name.lower() for tool in tools_list}
+                    if server_name.lower() not in existing_tool_names:
+                        tools_list.append(server_tool)
+                        logger.debug(f"📝 Added dynamic server config entry: {server_name} (Status: {status})")
+                    else:
+                        logger.warning(f"⚠️ Skipping duplicate server config: {server_name} - already exists")
                 except Exception as se:
                     logger.warning(f"⚠️ Error processing MCP server config '{server_name}': {se}")
-                    tools_list.append(Tool(
-                        name=server_name,
-                        description=f"Error loading MCP server config: {se}",
-                        inputSchema={"type": "object"},
-                        annotations={
-                            "validationStatus": "ERROR_LOADING_SERVER",
-                            "runningStatus": status # Still show status even if config load failed
-                            }
-                    ))
+                    # Create custom ToolAnnotations object to allow extra fields
+                    error_annotations = ToolAnnotations(
+                        validationStatus="ERROR_LOADING_SERVER",
+                        runningStatus=status # Still show status even if config load failed
+                    )
+                    # Check for duplicates before adding (server names are unique)
+                    existing_tool_names = {tool.name.lower() for tool in tools_list}
+                    if server_name.lower() not in existing_tool_names:
+                        tools_list.append(Tool(
+                            name=server_name,
+                            description=f"Error loading MCP server config: {se}",
+                            inputSchema={"type": "object"},
+                            annotations=error_annotations
+                        ))
+                    else:
+                        logger.warning(f"⚠️ Skipping duplicate error server config: {server_name} - already exists")
         except Exception as ee:
             logger.error(f"❌ Error scanning for dynamic servers: {ee}")
 
@@ -1119,20 +1268,237 @@ class DynamicAdditionServer(Server):
                         }
 
                         # Create the new tool entry using extracted data
+                        # Create custom ToolAnnotations object to allow extra fields
+                        custom_annotations = ToolAnnotations(**new_annotations)
                         new_tool = Tool(
                             name=new_tool_name,
                             description=new_description,
                             inputSchema=original_schema,
-                            annotations=new_annotations
+                            annotations=custom_annotations
                         )
-                        tools_list.append(new_tool)
-                        logger.debug(f"  -> Added tool from server: {new_tool_name}")
+                        # Check for duplicates before adding (server tools are prefixed with server name)
+                        existing_tool_names = {tool.name.lower() for tool in tools_list}
+                        if new_tool_name.lower() not in existing_tool_names:
+                            tools_list.append(new_tool)
+                            logger.debug(f"  -> Added tool from server: {new_tool_name}")
+                        else:
+                            logger.warning(f"⚠️ Skipping duplicate server tool: {new_tool_name} - already exists")
                 else:
                      logger.warning(f"❓ Unexpected result type from get_server_tools for '{server_name}': {type(result)}")
 
         logger.info(f"📝 FOUND {len(tools_list)} TOTAL TOOLS (including from servers)")
 
+                        # Patch all tools with missing required fields for MCP client compatibility
+        logger.info(f"🔧 Patching {len(tools_list)} tools with required MCP fields")
+        for i, tool in enumerate(tools_list):
+            #logger.debug(f"🔧 Patching tool {i+1}/{len(tools_list)}: {tool.name}")
+
+            # Log original annotations before patching
+            original_annotations = getattr(tool, 'annotations', None)
+            #logger.debug(f"  -> Original annotations: {original_annotations}")
+            #logger.debug(f"  -> Original annotations type: {type(original_annotations)}")
+            #logger.debug(f"  -> Is annotations a dict? {isinstance(original_annotations, dict)}")
+            if original_annotations and isinstance(original_annotations, dict):
+                pass
+                #logger.debug(f"  -> Original lastModified: {original_annotations.get('lastModified', 'NOT_FOUND')}")
+                #logger.debug(f"  -> Original type: {original_annotations.get('type', 'NOT_FOUND')}")
+            elif hasattr(original_annotations, 'lastModified'):
+                pass
+                #logger.debug(f"  -> Original lastModified (attr): {getattr(original_annotations, 'lastModified', 'NOT_FOUND')}")
+            else:
+                pass
+                #logger.debug(f"  -> No lastModified found in original annotations")
+
+            # Add title if missing
+            if not hasattr(tool, 'title') or tool.title is None:
+                tool.title = tool.name
+                #logger.debug(f"  -> Added title: {tool.title}")
+
+            # Add outputSchema if missing
+            if not hasattr(tool, 'outputSchema') or tool.outputSchema is None:
+                tool.outputSchema = {"type": "object"}
+                #logger.debug(f"  -> Added outputSchema")
+
+            # Add annotations if missing
+            if not hasattr(tool, 'annotations') or tool.annotations is None:
+                tool.annotations = {}
+                #logger.debug(f"  -> Created empty annotations")
+
+            # Handle annotations - preserve our custom ToolAnnotations objects
+            if not isinstance(tool.annotations, dict):
+                # If it's our custom ToolAnnotations object, keep it as is
+                if isinstance(tool.annotations, ToolAnnotations):
+                    #logger.debug(f"  -> Keeping custom ToolAnnotations object for {tool.name}")
+                    # Add missing fields directly to the object
+                    if not hasattr(tool.annotations, 'title') or tool.annotations.title is None:
+                        tool.annotations.title = tool.name
+                    if not hasattr(tool.annotations, 'readOnlyHint') or tool.annotations.readOnlyHint is None:
+                        tool.annotations.readOnlyHint = False
+                    if not hasattr(tool.annotations, 'destructiveHint') or tool.annotations.destructiveHint is None:
+                        tool.annotations.destructiveHint = False
+                    if not hasattr(tool.annotations, 'idempotentHint') or tool.annotations.idempotentHint is None:
+                        tool.annotations.idempotentHint = True
+                    if not hasattr(tool.annotations, 'openWorldHint') or tool.annotations.openWorldHint is None:
+                        tool.annotations.openWorldHint = False
+                else:
+                    # For other non-dict annotations, convert to dict as before
+                    old_annotations = tool.annotations
+                    logger.debug(f"  -> Converting non-dict annotations of type {type(old_annotations)}")
+
+                    if hasattr(old_annotations, 'model_dump'):
+                        # Handle Pydantic models - this preserves all fields including extra ones
+                        tool.annotations = old_annotations.model_dump()
+                        logger.debug(f"  -> Converted Pydantic annotations to dict: {tool.annotations}")
+                    elif hasattr(old_annotations, 'dict'):
+                        # Handle older Pydantic models
+                        tool.annotations = old_annotations.dict()
+                        logger.debug(f"  -> Converted Pydantic annotations to dict: {tool.annotations}")
+                    elif hasattr(old_annotations, '__dict__'):
+                        # Convert object attributes to dictionary (fallback for non-Pydantic objects)
+                        tool.annotations = old_annotations.__dict__.copy()
+                        logger.debug(f"  -> Converted annotations object to dict: {tool.annotations}")
+                    else:
+                        # Try to convert to dict using vars() or get all attributes
+                        try:
+                            tool.annotations = vars(old_annotations)
+                            logger.debug(f"  -> Converted annotations using vars(): {tool.annotations}")
+                        except TypeError:
+                            # Last resort: try to get all attributes manually
+                            tool.annotations = {}
+                            logger.debug(f"  -> Attempting manual conversion of annotations object")
+                            for attr in dir(old_annotations):
+                                if not attr.startswith('_'):
+                                    try:
+                                        value = getattr(old_annotations, attr)
+                                        if not callable(value):
+                                            tool.annotations[attr] = value
+                                            logger.debug(f"  -> Added attribute {attr}: {value}")
+                                    except Exception as e:
+                                        logger.debug(f"  -> Failed to get attribute {attr}: {e}")
+                            logger.debug(f"  -> Converted annotations manually: {tool.annotations}")
+            else:
+                logger.debug(f"  -> Annotations already a dict, lastModified: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
+
+            # Add required annotation fields (preserve existing ones) - only for dict annotations
+            if isinstance(tool.annotations, dict):
+                if 'title' not in tool.annotations or tool.annotations['title'] is None:
+                    tool.annotations['title'] = tool.name
+                if 'readOnlyHint' not in tool.annotations or tool.annotations['readOnlyHint'] is None:
+                    tool.annotations['readOnlyHint'] = False
+                if 'destructiveHint' not in tool.annotations or tool.annotations['destructiveHint'] is None:
+                    tool.annotations['destructiveHint'] = False
+                if 'idempotentHint' not in tool.annotations or tool.annotations['idempotentHint'] is None:
+                    tool.annotations['idempotentHint'] = True
+                if 'openWorldHint' not in tool.annotations or tool.annotations['openWorldHint'] is None:
+                    tool.annotations['openWorldHint'] = False
+
+            # Ensure dynamic function annotations are preserved
+            if original_annotations:
+                if isinstance(original_annotations, dict):
+                    # Preserve all original annotations that aren't being overwritten by required fields
+                    for key, value in original_annotations.items():
+                        if key not in ['title', 'readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint']:
+                            if isinstance(tool.annotations, dict):
+                                if key not in tool.annotations:
+                                    tool.annotations[key] = value
+                                    logger.debug(f"  -> Preserved original annotation {key}: {value}")
+                                else:
+                                    logger.debug(f"  -> Annotation {key} already present, keeping existing value")
+                            elif isinstance(tool.annotations, ToolAnnotations):
+                                # For our custom ToolAnnotations object, set attributes directly
+                                if not hasattr(tool.annotations, key):
+                                    setattr(tool.annotations, key, value)
+                                    logger.debug(f"  -> Preserved original annotation {key}: {value}")
+                                else:
+                                    logger.debug(f"  -> Annotation {key} already present, keeping existing value")
+                elif hasattr(original_annotations, '__dict__'):
+                    # Handle object annotations
+                    for key, value in original_annotations.__dict__.items():
+                        if key not in ['title', 'readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint']:
+                            if isinstance(tool.annotations, dict):
+                                if key not in tool.annotations:
+                                    tool.annotations[key] = value
+                                    logger.debug(f"  -> Preserved original annotation {key}: {value}")
+                            elif isinstance(tool.annotations, ToolAnnotations):
+                                if not hasattr(tool.annotations, key):
+                                    setattr(tool.annotations, key, value)
+                                    logger.debug(f"  -> Preserved original annotation {key}: {value}")
+
+            # Log final annotations after patching
+            if isinstance(tool.annotations, dict):
+                pass
+                #logger.debug(f"  -> Final annotations: {tool.annotations}")
+                #logger.debug(f"  -> Final lastModified: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
+                #logger.debug(f"  -> Final type: {tool.annotations.get('type', 'NOT_FOUND')}")
+            elif isinstance(tool.annotations, ToolAnnotations):
+                pass
+                #logger.debug(f"  -> Final annotations object: {type(tool.annotations)}")
+                #logger.debug(f"  -> Final lastModified: {getattr(tool.annotations, 'lastModified', 'NOT_FOUND')}")
+                #logger.debug(f"  -> Final type: {getattr(tool.annotations, 'type', 'NOT_FOUND')}")
+
+            # Check if lastModified was preserved
+            if original_annotations:
+                if isinstance(original_annotations, dict) and 'lastModified' in original_annotations:
+                    if isinstance(tool.annotations, dict):
+                        if 'lastModified' not in tool.annotations:
+                            logger.error(f"❌ LOST lastModified for tool {tool.name}!")
+                            logger.error(f"❌ Original had: {original_annotations['lastModified']}")
+                        else:
+                            pass
+                            #logger.debug(f"  -> Preserved lastModified: {tool.annotations['lastModified']}")
+                    elif isinstance(tool.annotations, ToolAnnotations):
+                        if not hasattr(tool.annotations, 'lastModified'):
+                            logger.error(f"❌ LOST lastModified for tool {tool.name}!")
+                            logger.error(f"❌ Original had: {original_annotations['lastModified']}")
+                        else:
+                            #logger.debug(f"  -> Preserved lastModified: {getattr(tool.annotations, 'lastModified')}")
+                            pass
+                elif hasattr(original_annotations, 'lastModified'):
+                    if isinstance(tool.annotations, dict):
+                        if 'lastModified' not in tool.annotations:
+                            logger.error(f"❌ LOST lastModified for tool {tool.name} (from object attr)!")
+                            logger.error(f"❌ Original had: {getattr(original_annotations, 'lastModified')}")
+                        else:
+                            #logger.debug(f"  -> Preserved lastModified: {tool.annotations['lastModified']}")
+                            pass
+                    elif isinstance(tool.annotations, ToolAnnotations):
+                        if not hasattr(tool.annotations, 'lastModified'):
+                            logger.error(f"❌ LOST lastModified for tool {tool.name} (from object attr)!")
+                            logger.error(f"❌ Original had: {getattr(original_annotations, 'lastModified')}")
+                        else:
+                            #logger.debug(f"  -> Preserved lastModified: {getattr(tool.annotations, 'lastModified')}")
+                            pass
+                else:
+                    logger.debug(f"  -> No lastModified in original annotations for {tool.name}")
+
         # --- Update Cache --- #
+        # Final verification: report any duplicates as validation errors (app-aware)
+        tool_keys = []
+        for tool in tools_list:
+            app_name = getattr(tool.annotations, 'app_name', 'unknown') if hasattr(tool, 'annotations') and tool.annotations else 'unknown'
+            tool_keys.append(f"{app_name}.{tool.name}")
+
+        unique_tool_keys = set(tool_keys)
+        if len(tool_keys) != len(unique_tool_keys):
+            # Find duplicates by app.name combination
+            seen_keys = set()
+            for i, tool in enumerate(tools_list):
+                app_name = getattr(tool.annotations, 'app_name', 'unknown') if hasattr(tool, 'annotations') and tool.annotations else 'unknown'
+                tool_key = f"{app_name}.{tool.name}"
+                if tool_key in seen_keys:
+                    # This is a duplicate - mark it as invalid
+                    if hasattr(tool, 'annotations') and tool.annotations:
+                        if isinstance(tool.annotations, dict):
+                            tool.annotations["validationStatus"] = "INVALID"
+                            tool.annotations["errorMessage"] = f"Duplicate tool: {app_name}.{tool.name}"
+                        else:
+                            # For ToolAnnotations objects, try to set the fields
+                            setattr(tool.annotations, 'validationStatus', 'INVALID')
+                            setattr(tool.annotations, 'errorMessage', f'Duplicate tool: {app_name}.{tool.name}')
+                    logger.warning(f"⚠️ Marked duplicate tool as invalid: {app_name}.{tool.name}")
+                else:
+                    seen_keys.add(tool_key)
+
         self._cached_tools = list(tools_list) # Store a copy
         self._last_functions_dir_mtime = current_mtime
         self._last_servers_dir_mtime = server_mtime
@@ -1311,30 +1677,31 @@ class DynamicAdditionServer(Server):
                     await self._notify_tool_list_changed(change_type="updated", tool_name=extracted_name)
             elif name == "_function_get":
                 logger.debug(f"---> Calling built-in: get_function_code") # <-- ADD THIS LINE
-                function_name = args.get('name')
-                # _fs_load_code will now throw FileNotFoundError if the function doesn't exist
-                code = await self.function_manager._fs_load_code(function_name)
-                result_raw = [TextContent(type="text", text=code)]
+                result_raw = await self.function_manager.get_function_code(args, self)
             elif name == "_function_remove":
                 # Remove function
                 func_name = args.get("name")
+                app_name = args.get("app")  # Optional app name for disambiguation
                 if not func_name:
                     raise ValueError("Missing required parameter: name")
 
-                logger.debug(f"---> Calling built-in: function_remove for '{func_name}'") # <-- ADD THIS LINE
+                logger.debug(f"---> Calling built-in: function_remove for '{func_name}'" + (f" (app: {app_name})" if app_name else ""))
 
-                # Check if function exists before attempting to remove
-                function_path = os.path.join(FUNCTIONS_DIR, f"{func_name}.py")
-                if not os.path.exists(function_path):
-                    # Create annotation dict for 'function does not exist' error
-                    error_message = f"Function '{func_name}' does not exist or was already removed."
+                # Check if function exists using the function mapping (supports subfolders and app-specific lookup)
+                function_file = await self.function_manager._find_file_containing_function(func_name, app_name)
+
+                if not function_file:
+                    if app_name:
+                        error_message = f"Function '{func_name}' does not exist in app '{app_name}'."
+                    else:
+                        error_message = f"Function '{func_name}' does not exist."
                     error_annotations = {
                         "tool_error": {"tool_name": name, "message": error_message}
                     }
                     result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
-                else: # <-- ADD else block
-                    # Remove the function using dynamic_function_manager.function_remove (raise error on failure)
-                    removed = await self.function_manager.function_remove(func_name)
+                else:
+                    # Function exists, continue with removing it
+                    removed = await self.function_manager.function_remove(func_name, app_name)
                     if removed:
                         try:
                             await self._notify_tool_list_changed(change_type="removed", tool_name=func_name) # Pass params
@@ -1348,24 +1715,28 @@ class DynamicAdditionServer(Server):
             elif name == "_function_add":
                 # Add empty function
                 func_name = args.get("name")
+                app_name = args.get("app")  # Optional app name for disambiguation
                 if not func_name:
                     raise ValueError("Missing required parameter: name")
 
-                logger.debug(f"---> Calling built-in: function_add for '{func_name}'") # <-- ADD THIS LINE
+                logger.debug(f"---> Calling built-in: function_add for '{func_name}'" + (f" (app: {app_name})" if app_name else ""))
 
-                # Check if function already exists
-                function_path = os.path.join(FUNCTIONS_DIR, f"{func_name}.py")
-                if os.path.exists(function_path):
+                # Check if function already exists using the function mapping (supports subfolders and app-specific lookup)
+                function_file = await self.function_manager._find_file_containing_function(func_name, app_name)
+
+                if function_file:
                     # Function already exists - inform the client rather than raise error
-                    # Create annotation dict for 'function already exists' error
-                    error_message = f"Function '{func_name}' already exists"
+                    if app_name:
+                        error_message = f"Function '{func_name}' already exists in app '{app_name}'."
+                    else:
+                        error_message = f"Function '{func_name}' already exists."
                     error_annotations = {
                         "tool_error": {"tool_name": name, "message": error_message}
                     }
                     result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
-                else: # <-- ADD else block
-                    # Create empty function (stub) using dynamic_function_manager.function_add (raise error on failure)
-                    added = await self.function_manager.function_add(func_name)
+                else:
+                    # Function doesn't exist, create it
+                    added = await self.function_manager.function_add(func_name, None, app_name)
                     if added:
                         try:
                             await self._notify_tool_list_changed(change_type="added", tool_name=func_name) # Pass params
@@ -1450,7 +1821,8 @@ class DynamicAdditionServer(Server):
                         for tool in result_raw
                     ]
             elif name == "_function_history":
-                logger.debug("---> Calling built-in: _function_history")
+                app_name = args.get("app")  # Optional app name for filtering
+                logger.debug("---> Calling built-in: _function_history" + (f" (app: {app_name})" if app_name else ""))
                 if not os.path.exists(TOOL_CALL_LOG_PATH):
                     # Return an empty history array
                     result_raw = []
@@ -1460,7 +1832,9 @@ class DynamicAdditionServer(Server):
                             # Read each line and parse as JSON, skipping empty lines
                             log_entries = [json.loads(line) for line in f if line.strip()]
 
-                        # Return a dictionary that will be automatically serialized to JSON
+                        # If app filter is provided, we could potentially filter here
+                        # For now, return all entries as the current history format may not track app info
+                        # TODO: Implement app-based filtering when history format includes app information
                         result_raw = log_entries
                     except (json.JSONDecodeError, IOError) as e:
                         logger.error(f"Error reading or parsing tool_call_log.json: {e}")
@@ -1468,7 +1842,8 @@ class DynamicAdditionServer(Server):
                         raise ValueError(f"Error accessing function history: {e}")
 
             elif name == "_function_log":
-                logger.debug("---> Calling built-in: _function_log")
+                app_name = args.get("app")  # Optional app name for filtering
+                logger.debug("---> Calling built-in: _function_log" + (f" (app: {app_name})" if app_name else ""))
                 if not os.path.exists(OWNER_LOG_PATH):
                     # Return an empty history array
                     result_raw = []
@@ -1482,12 +1857,103 @@ class DynamicAdditionServer(Server):
                             else:
                                 log_entries = json.loads(file_content) # Parse the string content
 
+                        # If app filter is provided, we could potentially filter here
+                        # For now, return all entries as the current log format may not track app info
+                        # TODO: Implement app-based filtering when log format includes app information
                         # Return the list of log entries directly
                         result_raw = log_entries
                     except (json.JSONDecodeError, IOError) as e:
                         logger.error(f"Error reading or parsing owner log: {e}")
                         # Return an error message inside the tool response
                         raise ValueError(f"Error accessing function history: {e}")
+
+            elif name == "_function_show":
+                # Make any function temporarily visible
+                app_name = args.get("app")  # Optional app name for disambiguation
+                func_name = args.get("name")
+                if not func_name:
+                    raise ValueError("Missing required parameter: name")
+
+                logger.debug(f"---> Calling built-in: _function_show for '{func_name}'" + (f" (app: {app_name})" if app_name else ""))
+
+                                # Check if function exists using the function mapping (supports subfolders and app-specific lookup)
+                function_file = await self.function_manager._find_file_containing_function(func_name, app_name)
+
+                if not function_file:
+                    if app_name:
+                        error_message = f"Function '{func_name}' does not exist in app '{app_name}'."
+                    else:
+                        error_message = f"Function '{func_name}' does not exist."
+                    error_annotations = {
+                        "tool_error": {"tool_name": name, "message": error_message}
+                    }
+                    result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
+                else:
+                    # Function exists, continue with showing it
+                    pass
+                                        # Remove from temporarily hidden set if it was there
+                    if func_name in self._temporarily_hidden_functions:
+                        self._temporarily_hidden_functions.remove(func_name)
+                        logger.info(f"{PINK}👁️ Removed '{func_name}' from temporarily hidden list{RESET}")
+
+                    # Add to temporarily visible functions set
+                    self._temporarily_visible_functions.add(func_name)
+                    logger.info(f"{PINK}👁️ Made function '{func_name}' temporarily visible{RESET}")
+
+                    # Invalidate tool cache to refresh the list
+                    self._cached_tools = None
+
+                    # Notify clients about the tool list change
+                    try:
+                        await self._notify_tool_list_changed(change_type="updated", tool_name=func_name)
+                    except Exception as e:
+                        logger.error(f"Error sending tool notification after showing {func_name}: {str(e)}")
+
+                    result_raw = [TextContent(type="text", text=f"Function '{func_name}' is now temporarily visible until server restart.")]
+
+            elif name == "_function_hide":
+                # Hide any function temporarily
+                app_name = args.get("app")  # Optional app name for disambiguation
+                func_name = args.get("name")
+                if not func_name:
+                    raise ValueError("Missing required parameter: name")
+
+                logger.debug(f"---> Calling built-in: _function_hide for '{func_name}'" + (f" (app: {app_name})" if app_name else ""))
+
+                # Check if function exists using the function mapping (supports subfolders and app-specific lookup)
+                function_file = await self.function_manager._find_file_containing_function(func_name, app_name)
+
+                if not function_file:
+                    if app_name:
+                        error_message = f"Function '{func_name}' does not exist in app '{app_name}'."
+                    else:
+                        error_message = f"Function '{func_name}' does not exist."
+                    error_annotations = {
+                        "tool_error": {"tool_name": name, "message": error_message}
+                    }
+                    result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
+                else:
+                    # Function exists, continue with hiding it
+                    pass
+                                        # Remove from temporarily visible set if it was there
+                    if func_name in self._temporarily_visible_functions:
+                        self._temporarily_visible_functions.remove(func_name)
+                        logger.info(f"{PINK}🙈 Removed '{func_name}' from temporarily visible list{RESET}")
+
+                    # Add to temporarily hidden functions set
+                    self._temporarily_hidden_functions.add(func_name)
+                    logger.info(f"{PINK}🙈 Made function '{func_name}' temporarily hidden{RESET}")
+
+                    # Invalidate tool cache to refresh the list
+                    self._cached_tools = None
+
+                    # Notify clients about the tool list change
+                    try:
+                        await self._notify_tool_list_changed(change_type="updated", tool_name=func_name)
+                    except Exception as e:
+                        logger.error(f"Error sending tool notification after hiding {func_name}: {str(e)}")
+
+                    result_raw = [TextContent(type="text", text=f"Function '{func_name}' is now temporarily hidden until server restart.")]
 
             # Handle MCP tool calls
             elif '.' in name or ' ' in name: # <<< UPDATED Condition
@@ -1605,15 +2071,20 @@ class DynamicAdditionServer(Server):
                 logger.error(f"❓ Unknown or unhandled tool name: {name}")
                 raise ValueError(f"Unknown or unhandled tool name: {name}")
 
-            # ---> ADDED: Process raw result into final_result format (List[TextContent])
+            # ---> ADDED: Process raw result into final_result format (List[TextContent]) with June 2025 MCP spec support
             if isinstance(result_raw, str):
                 final_result = [TextContent(type="text", text=result_raw)]
             elif isinstance(result_raw, dict):
-                # Serialize dict to JSON string and wrap in TextContent
-                logger.debug(f"<--- Serializing dict result to JSON string for tool '{name}'.")
+                # Support new June 2025 MCP spec: provide both serialized JSON and structuredContent
+                logger.debug(f"<--- Creating structured content result for tool '{name}' (June 2025 MCP spec).")
                 try:
                     json_string = json.dumps(result_raw)
-                    result_content = [TextContent(type="text", text=json_string, annotations={"sourceType": "json"})] # <--- CHANGE HERE
+                    # Create TextContent with both text and structured content for backwards compatibility
+                    annotations = {
+                        "sourceType": "json",
+                        "structuredContent": result_raw  # New June 2025 spec feature
+                    }
+                    result_content = [TextContent(type="text", text=json_string, annotations=annotations)]
                 except TypeError as e:
                     logger.error(f"Error serializing dictionary result to JSON for tool '{name}': {e}")
                     result_content = [TextContent(type="error", text=f"Error serializing result: {e}")]
@@ -1623,10 +2094,15 @@ class DynamicAdditionServer(Server):
             elif result_raw is None:
                 final_result = [] # Assign a default empty list
             else:
-                # Convert any other result to string
+                # Convert any other result to string with structured content support
                 try:
+                    # Try to serialize as JSON first for structured content
                     result_str = json.dumps(result_raw)
-                    final_result = [TextContent(type="text", text=result_str, annotations={"sourceType": "json"})] # <--- CHANGE HERE
+                    annotations = {
+                        "sourceType": "json",
+                        "structuredContent": result_raw  # New June 2025 spec feature
+                    }
+                    final_result = [TextContent(type="text", text=result_str, annotations=annotations)]
                 except TypeError:
                     result_str = str(result_raw) # Fallback to plain string conversion
                     logger.warning(f"⚠️ Tool '{name}' returned non-standard type {type(result_raw)}. Converting to string: {result_str}")
@@ -1760,25 +2236,37 @@ async def get_all_tools_for_response(server: 'DynamicAdditionServer', caller_con
     tools_dict_list: List[Dict[str, Any]] = []
     for tool in raw_tool_list:
         try:
-            # Debug log to see server tools and their annotations BEFORE serialization
-            if hasattr(tool, 'annotations') and isinstance(tool.annotations, dict) and tool.annotations.get('type') == 'server':
-                logger.debug(f"🔍 SERIALIZING SERVER TOOL '{tool.name}' with annotations: {tool.annotations}")
-                # Check if started_at is in annotations
-                if 'started_at' in tool.annotations:
-                    logger.debug(f"✅ Found started_at in annotations for '{tool.name}': {tool.annotations['started_at']}")
+            # Debug log to see all tools and their annotations BEFORE serialization
+            logger.debug(f"🔍 SERIALIZING TOOL '{tool.name}' with annotations: {getattr(tool, 'annotations', None)}")
+            if hasattr(tool, 'annotations') and isinstance(tool.annotations, dict):
+                source_file = tool.annotations.get('sourceFile', 'NOT_FOUND')
+                logger.debug(f"🔍 Tool '{tool.name}' sourceFile before serialization: {source_file}")
+                #logger.debug(f"🔍 Tool '{tool.name}' lastModified before serialization: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
+                #logger.debug(f"🔍 Tool '{tool.name}' type before serialization: {tool.annotations.get('type', 'NOT_FOUND')}")
+            elif hasattr(tool, 'annotations') and hasattr(tool.annotations, 'sourceFile'):
+                source_file = getattr(tool.annotations, 'sourceFile', 'NOT_FOUND')
+                logger.debug(f"🔍 Tool '{tool.name}' sourceFile (attr) before serialization: {source_file}")
+                #logger.debug(f"🔍 Tool '{tool.name}' lastModified (attr) before serialization: {getattr(tool.annotations, 'lastModified', 'NOT_FOUND')}")
 
             # Ensure model_dump is called correctly for each tool
             tool_dict = tool.model_dump(mode='json') # Use mode='json' for better serialization
 
-            # Debug log for server tools AFTER serialization
-            if tool_dict.get('annotations', {}).get('type') == 'server':
+            # Debug log for all tools AFTER serialization
+            annotations = tool_dict.get('annotations') if tool_dict else None
+            if annotations and isinstance(annotations, dict):
+                source_file = annotations.get('sourceFile', 'NOT_FOUND')
+                logger.debug(f"🔍 Tool '{tool.name}' sourceFile after serialization: {source_file}")
+            #logger.debug(f"🔍 Tool '{tool.name}' lastModified after serialization: {annotations.get('lastModified', 'NOT_FOUND') if annotations else 'NO_ANNOTATIONS'}")
+            #logger.debug(f"🔍 Tool '{tool.name}' type after serialization: {annotations.get('type', 'NOT_FOUND') if annotations else 'NO_ANNOTATIONS'}")
+
+            if tool_dict and annotations and isinstance(annotations, dict) and annotations.get('type') == 'server':
                 logger.debug(f"🔍 SERIALIZED SERVER TOOL '{tool_dict.get('name')}' to dict: {tool_dict}")
                 # Check if started_at is in annotations
-                if 'started_at' in tool_dict.get('annotations', {}):
-                    logger.debug(f"✅ Started_at preserved in serialized tool dict for '{tool_dict.get('name')}': {tool_dict['annotations']['started_at']}")
+                if annotations and 'started_at' in annotations:
+                    logger.debug(f"✅ Started_at preserved in serialized tool dict for '{tool_dict.get('name')}': {annotations['started_at']}")
 
                     # If started_at is in annotations but not at the top level, add it to the top level
-                    started_at_val = tool_dict['annotations']['started_at']
+                    started_at_val = annotations['started_at']
                     if 'started_at' not in tool_dict:
                         logger.debug(f"🔎 Adding started_at to TOP LEVEL for '{tool_dict.get('name')}': {started_at_val}")
                         tool_dict['started_at'] = started_at_val
@@ -2239,7 +2727,7 @@ class ServiceClient:
                 pass # emit_event is already 'mcp_notification'
 
             if data.get('method') == 'notifications/message':
-                logger.debug(f"☁️ SENDING CLIENT LOG/COMMAND via {event}: {data.get('params', {}).get('command', data.get('method'))}")
+                logger.info(f"☁️ SENDING CLIENT LOG/COMMAND via {event}: {data.get('params', {}).get('command', data.get('method'))}")
             else:
                 logger.debug(f"☁️ SENDING MCP MESSAGE via {event}: {data.get('method')}")
 
@@ -2600,10 +3088,84 @@ async def handle_registration(request: Request) -> JSONResponse:
         logger.error(f"❌ Registration failed: {str(e)}", exc_info=True)
         return JSONResponse({"error": "internal_server_error", "error_description": "Internal server error during registration"}, status_code=500)
 
+async def handle_mcp_http(request: Request) -> Response:
+    """Handle MCP requests over HTTP (POST /mcp).
+
+    This endpoint accepts MCP JSON-RPC requests and processes them using the same
+    logic as the WebSocket handler, but returns HTTP responses.
+    """
+    try:
+        # Only accept POST requests
+        if request.method != "POST":
+            return JSONResponse(
+                {"error": "method_not_allowed", "message": "Only POST method is supported for MCP HTTP endpoint"},
+                status_code=405
+            )
+
+        # Parse the JSON-RPC request
+        try:
+            request_data = await request.json()
+        except json.JSONDecodeError:
+            return JSONResponse(
+                {"error": "invalid_json", "message": "Invalid JSON in request body"},
+                status_code=400
+            )
+
+        # Validate JSON-RPC format
+        if not isinstance(request_data, dict):
+            return JSONResponse(
+                {"error": "invalid_request", "message": "Request must be a JSON object"},
+                status_code=400
+            )
+
+        if request_data.get("jsonrpc") != "2.0":
+            return JSONResponse(
+                {"error": "invalid_request", "message": "Invalid JSON-RPC version"},
+                status_code=400
+            )
+
+        # Generate a client ID for HTTP requests (using request IP and user agent)
+        client_ip = request.client.host if request.client else "unknown"
+        user_agent = request.headers.get("user-agent", "unknown")
+        client_id = f"http_{client_ip}_{hash(user_agent) % 10000}"
+
+        logger.info(f"🌐 HTTP MCP request from {client_id}: {request_data.get('method', 'unknown')}")
+
+        # Process the MCP request using the same logic as WebSocket
+        response_data = await process_mcp_request(mcp_server, request_data, client_id)
+
+        if response_data:
+            return JSONResponse(response_data)
+        else:
+            # For notifications (no response expected)
+            return Response(status_code=204)
+
+    except Exception as e:
+        logger.error(f"❌ Error handling HTTP MCP request: {str(e)}", exc_info=True)
+        return JSONResponse(
+            {"error": "internal_server_error", "message": "Internal server error"},
+            status_code=500
+        )
+
+async def handle_health_check(request: Request) -> JSONResponse:
+    """Simple health check endpoint."""
+    return JSONResponse({
+        "status": "healthy",
+        "version": SERVER_VERSION,
+        "endpoints": {
+            "websocket": "/mcp",
+            "http": "/mcp",
+            "health": "/health",
+            "register": "/register"
+        }
+    })
+
 app = Starlette(
     routes=[
         WebSocketRoute("/mcp", endpoint=handle_websocket),
-        Route("/register", endpoint=handle_registration, methods=["POST"])
+        Route("/register", endpoint=handle_registration, methods=["POST"]),
+        Route("/mcp", endpoint=handle_mcp_http, methods=["POST"]),
+        Route("/health", endpoint=handle_health_check, methods=["GET"])
     ]
 )
 
@@ -2675,10 +3237,10 @@ if __name__ == "__main__":
     # Start the file watcher
     event_handler = DynamicConfigEventHandler(mcp_server, loop)
     observer = Observer()
-    observer.schedule(event_handler, FUNCTIONS_DIR, recursive=True) # Watch subdirectories
-    observer.schedule(event_handler, SERVERS_DIR, recursive=True)
+    observer.schedule(event_handler, FUNCTIONS_DIR, recursive=True) # Watch subdirs for dynamic functions
+    observer.schedule(event_handler, SERVERS_DIR, recursive=False)
     observer.start()
-    logger.info(f"👁️ Watching for changes in {FUNCTIONS_DIR} and {SERVERS_DIR} (including subdirectories)...")
+    logger.info(f"👁️ Watching for changes in {FUNCTIONS_DIR} and {SERVERS_DIR}...")
 
     # Start the Uvicorn server
     config = uvicorn.Config(app, host=HOST, port=PORT, log_level="warning")
@@ -2690,7 +3252,10 @@ if __name__ == "__main__":
 
     try:
         # Start the server
-        logger.info(f"🌟 STARTING LOCAL MCP WEBSOCKET SERVER AT ws://{HOST}:{PORT}/mcp")
+        logger.info(f"🌟 STARTING LOCAL MCP SERVER AT {HOST}:{PORT}")
+        logger.info(f"   📡 WebSocket endpoint: ws://{HOST}:{PORT}/mcp")
+        logger.info(f"   🌐 HTTP endpoint: http://{HOST}:{PORT}/mcp")
+        logger.info(f"   ❤️  Health check: http://{HOST}:{PORT}/health")
 
         # Connect to cloud server if enabled
         if not args.no_cloud:

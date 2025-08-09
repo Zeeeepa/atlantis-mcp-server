@@ -46,7 +46,7 @@ yarn-error.log
 
 *.OLD
 python-server/dynamic_functions/OLD/
-#python-server/dynamic_functions/*
+python-server/dynamic_functions/*
 python-server/dynamic_servers/*
 python-server/dynamic_functions/.gitignore
 python-server/dynamic_servers/OLD/
@@ -57,3 +57,5 @@ python-server2/
 log/
 
 *.db
+
+server.log
