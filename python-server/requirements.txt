@@ -16,8 +16,10 @@ httpx==0.28.1
 httpx-sse==0.4.0
 idna==3.10
 jiter==0.10.0
+jsonschema==4.25.0
+jsonschema-specifications==2025.4.1
 MarkupSafe==3.0.2
-mcp==1.12.0
+mcp==1.12.4
 mcp-server==0.1.4
 multidict==6.4.2
 mypy==1.15.0
@@ -31,8 +33,11 @@ pydantic-settings==2.8.1
 pydantic_core==2.33.1
 python-dotenv==1.1.0
 python-engineio==4.11.2
+python-multipart==0.0.20
 python-socketio==5.12.1
 PyYAML==6.0.2
+referencing==0.36.2
+rpds-py==0.27.0
 setuptools==3.3
 simple-websocket==1.1.0
 sniffio==1.3.1
