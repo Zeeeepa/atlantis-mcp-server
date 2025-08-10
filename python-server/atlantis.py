@@ -471,8 +471,8 @@ async def client_command(command: str, data: Any = None) -> Any:
         print(f"INFO: Atlantis: Received result for awaitable command '{command}'")
         return result
     except Exception as e:
-        print(f"ERROR: Atlantis: Error in client_command for command '{command}': {type(e).__name__} - {e}")
-        # Re-raise the exception (could be McpError from utils/server or other runtime errors)
+        # Server layer already logged with enhanced error message including command context
+        # Just re-raise to let the dynamic function manager handle final logging
         raise
 
 async def client_html(html_content: str, level: str = "INFO"):

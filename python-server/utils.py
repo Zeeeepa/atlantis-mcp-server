@@ -213,8 +213,8 @@ async def execute_client_command_awaitable(
         return result
     except Exception as e:
         # Errors (including McpError for timeouts/client errors from server's send_awaitable_client_command) will propagate
-        logger.error(f"❌ Utils: Error relaying dedicated awaitable command '{command}' or receiving result: {type(e).__name__} - {e}")
-        raise # Re-raise the exception for atlantis.py to handle or propagate further
+        # Server layer already logged with command context, just re-raise
+        raise
 
 # --- JSON Formatting Utility --- #
 

@@ -1050,9 +1050,7 @@ async def {name}():
             return result
 
         except Exception as exec_err:
-            error_message = f"Error executing dynamic function '{name}': {str(exec_err)}"
-            logger.error(error_message)
-            logger.debug(traceback.format_exc())
+            # Error already enhanced and logged at source, just store and re-raise
             self._runtime_errors[name] = str(exec_err)
             raise
 

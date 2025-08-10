@@ -447,8 +447,14 @@ class DynamicAdditionServer(Server):
             logger.error(f"❌ Error during awaitable command '{command}' processing (correlationId {correlation_id}): {type(e).__name__} - {e}")
             self.awaitable_requests.pop(correlation_id, None) # Ensure cleanup
             if isinstance(e, McpError):
-                raise
-            raise e # Re-raise the original exception that already contains the cloud error
+                # Enhance McpError message to include command text
+                enhanced_message = f"Command '{command}' failed: {e.message}"
+                enhanced_error = McpError(enhanced_message, e.code)
+                raise enhanced_error from e
+            else:
+                # For other exceptions, wrap in a new exception with command context
+                enhanced_message = f"Command '{command}' failed: {str(e)}"
+                raise Exception(enhanced_message) from e
         finally:
             # Final cleanup, though most paths should handle it.
             if correlation_id in self.awaitable_requests:
@@ -2058,9 +2064,8 @@ class DynamicAdditionServer(Server):
                     result_raw = await self.function_manager.function_call(name=name, client_id=client_id, request_id=request_id, user=user, args=args)
                     logger.debug(f"<--- Dynamic function '{name}' RAW result: {result_raw} (type: {type(result_raw)})")
                 except Exception as e:
-                    logger.error(f"❌ Error during dynamic function call '{name}': {str(e)}", exc_info=True)
-                    #raise ValueError(f"Error executing function '{name}': {str(e)}") from e
-                    raise ValueError(f"{str(e)}") from e
+                    # Error already enhanced with command context at source, just re-raise
+                    raise
 
 
             else:
@@ -2110,7 +2115,7 @@ class DynamicAdditionServer(Server):
             return final_result
 
         except Exception as e:
-            logger.error(f"❌ Error in _execute_tool for '{name}': {str(e)}", exc_info=True)
+            # Error already logged with full context at source, just continue with error logging to file
             # --- BEGIN TOOL ERROR LOGGING ---
             if not name.startswith('_'):
                 try:
