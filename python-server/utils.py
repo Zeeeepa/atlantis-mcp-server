@@ -47,8 +47,8 @@ def clean_filename(name: str) -> str:
 
     # Remove or replace other problematic characters
     import re
-    # Remove characters that are problematic in filenames
-    cleaned = re.sub(r'[<>:"/\\|?*]', '', cleaned)
+    # Remove characters that are problematic in filenames, but preserve forward slashes for directory paths
+    cleaned = re.sub(r'[<>:"\\|?*]', '', cleaned)
 
     # Remove leading/trailing dots and spaces
     cleaned = cleaned.strip('. ')
