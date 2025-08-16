@@ -693,11 +693,17 @@ async def {name}():
             self._function_file_mapping_by_app.clear()
 
             # Scan all Python files in the functions directory and subdirectories
+            ignore_dirs = ['OLD', '__pycache__']
             for root, dirs, files in os.walk(self.functions_dir):
-                # Skip OLD directories
-                if 'OLD' in dirs:
-                    dirs.remove('OLD')  # Don't traverse into OLD directories
-                    logger.debug(f"🚫 Skipping OLD directory: {os.path.join(root, 'OLD')}")
+                # Skip ignored directories and any directories starting with dot
+                dirs_to_remove = []
+                for dir_name in dirs:
+                    if dir_name in ignore_dirs or dir_name.startswith('.'):
+                        dirs_to_remove.append(dir_name)
+                        logger.debug(f"🚫 Skipping directory: {os.path.join(root, dir_name)}")
+                
+                for dir_name in dirs_to_remove:
+                    dirs.remove(dir_name)
 
                 # Check if we're in a subdirectory and log it prominently
                 if root != self.functions_dir:
