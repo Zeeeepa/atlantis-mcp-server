@@ -32,6 +32,9 @@ _owner: Optional[str] = ""
 # Simple task collection for logging tasks
 _log_tasks_var: contextvars.ContextVar[Optional[List[asyncio.Task]]] = contextvars.ContextVar("_log_tasks_var", default=None)
 
+# Per-stream sequence numbers - each stream_id gets its own counter
+_stream_seq_counters: dict = {}
+
 # --- Shared Object Container ---
 # This container persists across dynamic function reloads and can store
 # shared resources like database connections, cache objects, etc.
@@ -64,6 +67,22 @@ class SharedContainer:
 shared = SharedContainer()
 
 # --- Helper Functions ---
+
+async def get_and_increment_stream_seq_num(stream_id: str) -> int:
+    """Get and increment the sequence number for a specific stream.
+    
+    Args:
+        stream_id: The unique stream identifier
+        
+    Returns:
+        The current sequence number for this stream before incrementing
+    """
+    if stream_id not in _stream_seq_counters:
+        _stream_seq_counters[stream_id] = 0
+    
+    current_seq = _stream_seq_counters[stream_id]
+    _stream_seq_counters[stream_id] += 1
+    return current_seq
 
 async def get_and_increment_seq_num(context_name: str = "operation") -> int:
     """Get and increment the sequence number in a thread-safe way.
@@ -320,8 +339,8 @@ async def stream_start(sid: str, who: str) -> str:
     except Exception as inspect_err:
         print(f"WARNING: Could not inspect caller frame for stream_start: {inspect_err}")
 
-    # Get and increment sequence number using the helper function
-    current_seq_to_send = await get_and_increment_seq_num(context_name="stream_start")
+    # Get and increment sequence number using the per-stream helper function
+    current_seq_to_send = await get_and_increment_stream_seq_num(stream_id_to_send)
 
     try:
         message_data = {"status": "started", "sid":sid, "who": who}
@@ -363,8 +382,8 @@ async def stream(message: str, stream_id_param: str):
     except Exception as inspect_err:
         print(f"WARNING: Could not inspect caller frame for stream: {inspect_err}")
 
-    # Get and increment sequence number using the helper function
-    current_seq_to_send = await get_and_increment_seq_num(context_name="stream")
+    # Get and increment sequence number using the per-stream helper function
+    current_seq_to_send = await get_and_increment_stream_seq_num(stream_id_param)
 
     try:
         result = await util_client_log(
@@ -404,8 +423,8 @@ async def stream_end(stream_id_param: str):
     except Exception as inspect_err:
         print(f"WARNING: Could not inspect caller frame for stream_end: {inspect_err}")
 
-    # Get and increment sequence number using the helper function
-    current_seq_to_send = await get_and_increment_seq_num(context_name="stream_end")
+    # Get and increment sequence number using the per-stream helper function
+    current_seq_to_send = await get_and_increment_stream_seq_num(stream_id_param)
 
     try:
         result = await util_client_log(
