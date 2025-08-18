@@ -180,6 +180,12 @@ async def client_log(message: Any, level: str = "INFO", message_type: str = "tex
         print(f"WARNING: client_log called but no logger in context. Message: {message}")
         return None # Or raise an error
 
+async def tool_log(message: Any, level: str = "INFO"):
+    """Sends a tool log message back to the requesting client for the current context.
+    This is a simple wrapper around client_log with message_type="tool".
+    """
+    return await client_log(message, level=level, message_type="tool")
+
 # --- Other Accessors ---
 def get_request_id() -> Optional[str]:
     """Returns the request_id"""
