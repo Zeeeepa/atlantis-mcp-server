@@ -122,7 +122,7 @@ class DynamicServerManager:
         file_path = os.path.join(self.servers_dir, safe_name)
 
         if os.path.exists(file_path):
-            raise ValueError(f"⚠️ Server '{name}' already exists, not adding.")
+            raise ValueError(f"⚠️ MCP server '{name}' already exists, not adding")
 
         # Create a template config based on openweather example
         template_obj = {
@@ -162,7 +162,7 @@ class DynamicServerManager:
         # Remove the config file
         file_path = os.path.join(self.servers_dir, f"{name}.json")
         if not os.path.exists(file_path):
-            raise ValueError(f"⚠️ Server config '{name}' not found for removal.")
+            raise ValueError(f"⚠️ MCP server config '{name}' not found for removal.")
 
         #suppress any  backup errors
         try:
@@ -208,7 +208,7 @@ class DynamicServerManager:
 
     async def get_server_tools(self, name: str) -> List[Tool]:
         if not name or not isinstance(name, str):
-            raise ValueError(f"Invalid server name: {name}")
+            raise ValueError(f"Invalid MCP server name: {name}")
 
         # Detailed logging for debugging
         logger.debug(f"get_server_tools: Checking for running server '{name}'")
@@ -271,13 +271,13 @@ class DynamicServerManager:
         full_config: Dict[str, Any] = json.loads(config_txt)
 
         if 'mcpServers' not in full_config or name not in full_config['mcpServers']:
-            raise ValueError(f"Invalid server config structure for '{name}'")
+            raise ValueError(f"Invalid MCP server config structure for '{name}'")
 
         # also possible that mcpServers is missing entirely and go straight to name attr
 
         server_config = full_config['mcpServers'][name]
         if 'command' not in server_config:
-            raise ValueError(f"Missing 'command' in server config for '{name}'")
+            raise ValueError(f"Missing 'command' in MCP server config for '{name}'")
 
         # Auto-start the server if it's not already running
         if name not in self.server_tasks:
@@ -288,7 +288,7 @@ class DynamicServerManager:
                 logger.info(f"Successfully initiated auto-start for server '{name}'")
             except Exception as e:
                 logger.error(f"Failed to auto-start server '{name}': {e}")
-                raise RuntimeError(f"Failed to auto-start server '{name}': {e}")
+                raise RuntimeError(f"Failed to auto-start MCP server '{name}': {e}")
 
             # Give it a moment to initialize fully
             logger.info(f"Waiting for server '{name}' to initialize...")
@@ -305,12 +305,12 @@ class DynamicServerManager:
                     return tools_result.tools
                 except Exception as e:
                     logger.error(f"Failed to get tools from newly started server '{name}': {e}")
-                    raise RuntimeError(f"Error fetching tools from newly started server '{name}': {e}")
+                    raise RuntimeError(f"Error fetching tools from newly started MCP server '{name}': {e}")
             else:
-                raise RuntimeError(f"Server '{name}' was started but session is not available")
+                raise RuntimeError(f"MCP server '{name}' was started but session is not available")
 
         # If we got here, something unexpected happened
-        raise RuntimeError(f"Unexpected error: Unable to get tools from server '{name}'")
+        raise RuntimeError(f"Unexpected error: Unable to get tools from MCP server '{name}'")
 
     async def server_list(self) -> List[str]:
         try:
@@ -373,20 +373,20 @@ class DynamicServerManager:
         if not config_txt:
             # This case should ideally be handled by server_get raising an error or returning a clear signal
             # For now, if server_get returns None (e.g., file not found), server_validate should indicate this.
-            raise ValueError(f"Configuration for server '{name}' not found or is empty.")
+            raise ValueError(f"MCP configuration for server '{name}' not found or is empty")
 
         # convert config txt to json and store in config
         config: Dict[str, Any] = json.loads(config_txt)
 
         # apparently python JSON allows arrays and strings too
         if not isinstance(config, dict):
-            raise ValueError(f"Server config for '{name}' is not a valid dictionary")
+            raise ValueError(f"MCP server config for '{name}' is not a valid dictionary")
 
         # Pass the original config_txt (string) to extract_server_name
         name_from_config = self.extract_server_name(config_txt)
         if not name_from_config:
             # extract_server_name might return None if it can't determine a name
-            raise ValueError("Failed to extract server name from the configuration content.")
+            raise ValueError("Failed to extract MCP server name from the configuration content")
 
         if name_from_config != name:
             # This comparison works correctly even if 'name' is None.
@@ -394,7 +394,7 @@ class DynamicServerManager:
             # - If name_from_config = "s1" and name = "s2", then "s1" != "s2" is True.
             # - If name_from_config = "s1" and name = None, then "s1" != None is True.
             raise ValueError(
-                f"Server name mismatch. Expected name based on input: '{name}', "
+                f"MCP server name mismatch. Expected name based on input: '{name}', "
                 f"but name found in config: '{name_from_config}'."
             )
         # Check if we have the mcpServers key which is the standard format
@@ -410,10 +410,10 @@ class DynamicServerManager:
 
             # Check required fields in the server config
             if not isinstance(server_config, dict):
-                raise ValueError(f"Server config for '{name}' is not a dictionary")
+                raise ValueError(f"MCP server config for '{name}' is not a dictionary")
 
             if 'command' not in server_config:
-                raise ValueError(f"Missing required key 'command' in server config for '{name}'")
+                raise ValueError(f"Missing required key 'command' in MCP server config for '{name}'")
 
         else:
             # Legacy format (direct config)?
@@ -421,7 +421,7 @@ class DynamicServerManager:
 
             # Check for command directly in the old format
             if 'command' not in config:
-                raise ValueError(f"Missing required key 'command' in server config for '{name}'")
+                raise ValueError(f"Missing required key 'command' in MCP server config for '{name}'")
 
         # Config is valid
         return config
@@ -741,7 +741,7 @@ class DynamicServerManager:
             task_info = self.server_tasks[name]
             # Check both task state and status to determine if truly running
             if (task_info.get('started_at') is not None):
-                msg = f"Server '{name}' is already running."
+                msg = f"MCP server '{name}' is already running."
                 logger.warning(f"⚠️ server_start: {msg}")
                 raise ValueError(msg)
 
@@ -750,7 +750,7 @@ class DynamicServerManager:
             validation_result = await self.server_validate(name)
             logger.debug(f"▶️ server_start: Successfully validated config for '{name}': {validation_result}")
         except ValueError as e:
-            msg = f"Server configuration validation failed for '{name}': {e}"
+            msg = f"MCP server configuration validation failed for '{name}': {e}"
             logger.error(f"❌ server_start: {msg}")
             raise ValueError(msg) from e # Re-raise to indicate server_start failure
 
@@ -759,7 +759,7 @@ class DynamicServerManager:
             server_config_details = validation_result['mcpServers'].get(name)
             if not server_config_details:
                 # This case should ideally be caught by server_validate, but defensive check
-                err_msg = f"Server '{name}' not found within 'mcpServers' in validated config."
+                err_msg = f"MCP server '{name}' not found within 'mcpServers' in validated config."
                 logger.error(f"❌ server_start: {err_msg}")
                 raise ValueError(err_msg)
         else:
@@ -824,7 +824,7 @@ class DynamicServerManager:
 
         task_info = self.server_tasks.get(name)
         if not task_info or 'task' not in task_info:
-            msg = f"Error stopping server '{name}': Inconsistent state."
+            msg = f"Error stopping MCP server '{name}': Inconsistent state."
             logger.error(f"❌ server_stop: {msg}")
             # Clean up if entry exists but is broken
             if name in self.server_tasks:
