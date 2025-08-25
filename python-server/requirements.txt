@@ -19,7 +19,7 @@ jiter==0.10.0
 jsonschema==4.25.0
 jsonschema-specifications==2025.4.1
 MarkupSafe==3.0.2
-mcp==1.12.4
+mcp==1.13.1
 mcp-server==0.1.4
 multidict==6.4.2
 mypy==1.15.0
