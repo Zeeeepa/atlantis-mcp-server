@@ -701,7 +701,7 @@ async def {name}():
                     if dir_name in ignore_dirs or dir_name.startswith('.'):
                         dirs_to_remove.append(dir_name)
                         logger.debug(f"🚫 Skipping directory: {os.path.join(root, dir_name)}")
-                
+
                 for dir_name in dirs_to_remove:
                     dirs.remove(dir_name)
 
@@ -818,7 +818,7 @@ async def {name}():
         if not secure_name:
             logger.error(f"Create failed: Invalid function name '{name}'")
             return False
-        
+
         # Determine the correct file path based on app parameter
         if app:
             target_dir = os.path.join(self.functions_dir, app)
@@ -1228,12 +1228,13 @@ async def {name}():
         server._last_servers_dir_mtime = None # Reset mtime to force reload
 
         # 6. Prepare success message, including validation status
-        save_status = f"Functions saved to '{filename_to_use}.py': {', '.join(function_names)}"
+        #save_status = f"Functions saved to '{filename_to_use}.py': {', '.join(function_names)}"
+        #save_status = f"Function saved"
         annotations = None # Default to no annotations
         if syntax_error:
             # If validation failed, add structured error to annotations
-            validation_status = f"WARNING: Validation failed."
-            response_message = f"{save_status} {validation_status}" # Keep text informative
+            #validation_status = f"WARNING: Validation failed."
+            response_message = f"Function saved but validation failed" # Keep text informative
             annotations = {
                 "validationStatus": "ERROR",
                 "validationMessage": syntax_error
@@ -1241,7 +1242,7 @@ async def {name}():
             logger.warning(f"⚠️ {response_message}")
         else:
             # If validation succeeded
-            response_message = f"{save_status} Validation successful."
+            response_message = f"Function saved"
             logger.info(f"✅ {response_message}")
 
         # Return TextContent with text and potentially annotations
