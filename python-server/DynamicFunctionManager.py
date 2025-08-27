@@ -157,38 +157,39 @@ class DynamicFunctionManager:
             logger.error(f"❌ _fs_save_code: Unexpected error saving {file_path}: {e}")
             return None
 
-    async def _fs_load_code(self, name):
+    async def _fs_load_code(self, name, app_name=None):
         """
-        Loads code from {name}.py in self.functions_dir. Returns code string or None if not found/error.
+        Loads code for a function by name using the function-to-file mapping.
+        Supports subdirectories and app-specific targeting.
+        Returns code string or raises FileNotFoundError if not found/error.
         """
         if not name or not isinstance(name, str):
             logger.error("❌ _fs_load_code: Invalid name provided.")
-            return None
+            raise ValueError(f"Invalid function name '{name}'")
 
-        safe_name = utils.clean_filename(f"{name}.py")
-        if not safe_name.endswith(".py"): # Ensure it's still a python file after securing
-            safe_name = f"{name}.py" # Fallback if clean_filename removes extension
+        # Find which file contains this function
+        target_file = await self._find_file_containing_function(name, app_name)
+        if not target_file:
+            if app_name:
+                error_message = f"Function '{name}' does not exist in app '{app_name}'."
+            else:
+                error_message = f"Function '{name}' does not exist."
+            logger.warning(f"⚠️ _fs_load_code: {error_message}")
+            raise FileNotFoundError(error_message)
 
-        file_path = os.path.join(self.functions_dir, safe_name) # Use self.functions_dir
-
-        if not os.path.exists(file_path):
-            logger.warning(f"⚠️ _fs_load_code: File not found for '{name}' at {file_path}")
-            raise FileNotFoundError(f"Function '{name}' not found at {file_path}")
-
+        # Load the code directly from the full file path
+        file_path = os.path.join(self.functions_dir, target_file)
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 code = f.read()
 
-            logger.info(f"{CYAN}📋 === LOADING {name} ==={RESET}")
-
+            logger.info(f"{CYAN}📋 === LOADING {name} from {target_file} ==={RESET}")
             logger.debug(f"💾 Loaded code for '{name}' from {file_path}")
             return code
-        except IOError as e:
-            logger.error(f"❌ _fs_load_code: Failed to read file {file_path}: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"❌ _fs_load_code: Unexpected error loading {file_path}: {e}")
-            return None
+        except (OSError, IOError) as e:
+            error_message = f"Function '{name}' found at '{target_file}' but could not be read: {e}"
+            logger.error(f"❌ _fs_load_code: {error_message}")
+            raise FileNotFoundError(error_message) from e
 
 
     # Metadata extraction and validation
@@ -729,8 +730,14 @@ async def {name}():
                             for func_info in functions_info:
                                 func_name = func_info['name']
 
-                                # Determine app name from file path
-                                app_name = rel_path.split('/')[0] if '/' in rel_path else "unknown"
+                                # Determine app name: prioritize @app() decorator, then file path, then "unknown"
+                                app_name_from_decorator = func_info.get('app_name')
+                                if app_name_from_decorator:
+                                    app_name = app_name_from_decorator
+                                elif '/' in rel_path:
+                                    app_name = rel_path.split('/')[0]
+                                else:
+                                    app_name = "unknown"
 
                                 # Store in main mapping (last one wins for backward compatibility)
                                 self._function_file_mapping[func_name] = rel_path
@@ -1263,22 +1270,14 @@ async def {name}():
         if not name:
             raise ValueError("Missing required parameter: name")
 
-        # Find which file contains this function (supports app-specific lookup)
-        target_file = await self._find_file_containing_function(name, app_name)
-        if not target_file:
-            if app_name:
-                error_message = f"Function '{name}' does not exist in app '{app_name}'."
-            else:
-                error_message = f"Function '{name}' does not exist."
-            raise ValueError(error_message)
-
-        # Load the code using the existing _fs_load_code utility with the filename
-        filename_without_ext = os.path.splitext(target_file)[0]
-        code = await self._fs_load_code(filename_without_ext)
-        if code is None:
-            raise ValueError(f"Function '{name}' not found or could not be read")
-
-        logger.info(f"📋 Retrieved code for function: {name} from {target_file}")
+        # Load the code using the centralized _fs_load_code method
+        try:
+            code = await self._fs_load_code(name, app_name)
+        except FileNotFoundError as e:
+            raise ValueError(str(e)) from e
+        
+        if not code:
+            raise ValueError(f"Function '{name}' file is empty")
 
         # Return the code as text content
         return [TextContent(type="text", text=code)]
