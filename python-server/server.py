@@ -1607,7 +1607,7 @@ class DynamicAdditionServer(Server):
                     except Exception as e:
                         logger.warning(f"Failed to send to client {client_id}: {e}")
 
-                elif client_type == "cloud" and connection and connection.is_connected:
+                elif client_type == "cloud" and connection and hasattr(connection, 'is_connected') and connection.is_connected:
                     try:
                         await connection.send_message('mcp_notification', notification)
                         logger.debug(f"☁️ Sent notification to cloud client: {client_id}")
@@ -2336,7 +2336,7 @@ class DynamicAdditionServer(Server):
                 if client_type == "websocket":
                     await connection.send_text(notification_json)
                     logger.debug(f"📢 Sent notifications/tools/list_changed to WebSocket client: {client_id}")
-                elif client_type == "cloud" and connection.is_connected:
+                elif client_type == "cloud" and connection and hasattr(connection, 'is_connected') and connection.is_connected:
                     await connection.send_message('mcp_notification', notification)
                     logger.debug(f"☁️ Sent notifications/tools/list_changed to Cloud client: {client_id}")
                 else:
