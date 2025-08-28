@@ -2164,6 +2164,121 @@ class DynamicAdditionServer(Server):
             # and construct a proper JSON-RPC error response.
             raise
 
+    async def _handle_tools_call(self, params: dict, client_id: str, request_id: str, for_cloud: bool = False) -> dict:
+        """Consolidated tools/call handler that works for both cloud and standard MCP clients"""
+        
+        # Extract required parameters
+        tool_name = params.get("name")
+        tool_args = params.get("arguments") # MCP spec uses 'arguments'
+        
+        # Extract optional context fields
+        user = params.get("user", None)
+        session_id = params.get("session_id", None)
+        
+        # Validate required parameters
+        if tool_name is None or tool_args is None:
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {"code": -32602, "message": "Invalid params: missing tool name or arguments"}
+            }
+        
+        # Log the call
+        logger.info(f"🔧 Processing 'tools/call' for tool '{tool_name}' with args: {tool_args}")
+        logger.debug(f"Tool name: '{tool_name}', Arguments: {json.dumps(tool_args, default=str)}")
+        if user:
+            logger.debug(f"Call made by user: {user}")
+        if session_id:
+            logger.debug(f"Call made with session_id: {session_id}")
+            
+        # Register client connection if this is from cloud
+        if for_cloud:
+            logger.debug(f"☁️ Calling _execute_tool for: {tool_name}")
+            global client_connections
+            client_connections[client_id] = {"type": "cloud", "connection": self}
+        
+        try:
+            # Execute the tool
+            result_list = await self._execute_tool(
+                name=tool_name, 
+                args=tool_args, 
+                client_id=client_id, 
+                request_id=request_id, 
+                user=user, 
+                session_id=session_id
+            )
+            
+            logger.info(f"🎯 Tool '{tool_name}' execution completed with {len(result_list)} content items")
+            
+            # Format response based on client type
+            if for_cloud:
+                # Cloud client expects "contents" format
+                try:
+                    contents_list = []
+                    for content in result_list:
+                        try:
+                            if hasattr(content, 'model_dump'):
+                                content_data = content.model_dump()
+                                contents_list.append(content_data)
+                            else:
+                                # Handle non-pydantic objects
+                                logger.warning(f"⚠️ Non-pydantic content object: {type(content)}")
+                                if hasattr(content, 'to_dict'):
+                                    contents_list.append(content.to_dict())
+                                else:
+                                    # Fallback for simple objects
+                                    contents_list.append({"type": "text", "text": str(content)})
+                        except Exception as e:
+                            logger.error(f"❌ Error serializing content result: {e}")
+                            # Add simple text content as fallback
+                            contents_list.append({"type": "text", "text": str(content)})
+                    
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": {"contents": contents_list}
+                    }
+                    
+                except Exception as e:
+                    logger.error(f"❌ Error constructing cloud response: {e}")
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {"code": -32000, "message": "Internal server error during response formatting"}
+                    }
+            else:
+                # Standard MCP client expects direct content format
+                try:
+                    contents_list = []
+                    for item in result_list:
+                        if hasattr(item, 'model_dump'):
+                            contents_list.append(item.model_dump())
+                        else:
+                            logger.warning(f"⚠️ Non-pydantic result item: {type(item)}")
+                            contents_list.append({"type": "text", "text": str(item)})
+                    
+                    return {
+                        "jsonrpc": "2.0", 
+                        "id": request_id, 
+                        "result": {"content": contents_list}
+                    }
+                    
+                except Exception as e:
+                    logger.error(f"❌ Error constructing MCP response: {e}")
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {"code": -32000, "message": "Internal server error during response formatting"}
+                    }
+                    
+        except Exception as e:
+            logger.error(f"❌ Error executing tool '{tool_name}': {str(e)}")
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {"code": -32000, "message": f"Tool execution failed: {str(e)}"}
+            }
+
     async def _notify_tool_list_changed(self, change_type: str, tool_name: str):
         """Send a 'notifications/tools/list_changed' notification with details to all connected clients."""
         logger.info(f"🔔 Notifying clients about tool list change ({change_type}: {tool_name})...")
@@ -2651,56 +2766,13 @@ class ServiceClient:
                 return response
 
             elif method == "tools/call":
-                tool_name = params.get("name")
-                tool_args = params.get("arguments") # MCP spec uses 'arguments'
-
-                if tool_name is None or tool_args is None:
-                    response["error"] = {"code": -32602, "message": "Invalid params: missing tool name or arguments"}
-                else:
-                    logger.debug(f"☁️ Calling _execute_tool for: {tool_name}")
-                    # Register this client connection
-                    global client_connections
-                    client_connections[client_id] = {"type": "cloud", "connection": self}
-
-                    # Extract 'user' and 'session_id' fields from params (MCP standard location)
-                    user = params.get("user", None)
-                    session_id = params.get("session_id", None)
-                    if user:
-                        logger.debug(f"☁️ Request includes user field: {user}")
-                    if session_id:
-                        logger.debug(f"☁️ Request includes session_id field: {session_id}")
-
-                    # Call the core logic method directly with client ID, request ID, user, and session_id
-                    call_result_list = await self.mcp_server._execute_tool(name=tool_name, args=tool_args, client_id=client_id, request_id=request_id, user=user, session_id=session_id)
-                    # The _execute_tool method ensures result is List[TextContent]
-                    # Convert TextContent objects to dictionaries for JSON serialization using model_dump()
-                    # IMPORTANT: We use "contents" (plural) key to match format between Python and Node servers
-                    try:
-                        # Manually convert TextContent objects to dictionaries
-                        contents_list = []
-                        for content in call_result_list:
-                            try:
-                                if hasattr(content, 'model_dump'):
-                                    content_data = content.model_dump()
-                                    contents_list.append(content_data)
-                                else:
-                                    # Handle non-pydantic objects
-                                    logger.warning(f"⚠️ Non-pydantic content object: {type(content)}")
-                                    if hasattr(content, 'to_dict'):
-                                        contents_list.append(content.to_dict())
-                                    else:
-                                        # Fallback for simple objects
-                                        contents_list.append({"type": "text", "text": str(content)})
-                            except Exception as e:
-                                logger.error(f"❌ Error serializing content result: {e}")
-                                # Add simple text content as fallback
-                                contents_list.append({"type": "text", "text": str(content)})
-
-                        # Construct the response according to JSON-RPC 2.0 and MCP spec
-                        response["result"] = {"contents": contents_list}
-                    except Exception as e:
-                        logger.error(f"❌ Error constructing final response: {e}")
-                        response["error"] = {"code": -32000, "message": "Internal server error during response formatting"}
+                # Use consolidated handler for cloud clients
+                return await self.mcp_server._handle_tools_call(
+                    params=params, 
+                    client_id=client_id, 
+                    request_id=request_id, 
+                    for_cloud=True
+                )
 
             else:
                 # Unknown method
@@ -2970,65 +3042,13 @@ async def process_mcp_request(server, request, client_id=None):
             result = await server._get_resources_list()
             return {"jsonrpc": "2.0", "id": req_id, "result": {"resources": result}}
         elif method == "tools/call":
-            name = params.get("name")
-            args = params.get("arguments", {}) # MCP spec uses 'arguments'
-            user = params.get("user", None) # Extract the 'user' field that tells us who is making the call
-            session_id = params.get("session_id", None) # Extract the 'session_id' field
-            logger.info(f"🔧 Processing 'tools/call' for tool '{name}' with args: {args}")
-
-            # Log the tool name and arguments for debugging
-            logger.debug(f"Tool name: '{name}', Arguments: {json.dumps(args, default=str)}")
-            if user:
-                logger.debug(f"Call made by user: {user}")
-            if session_id:
-                logger.debug(f"Call made with session_id: {session_id}")
-
-            # Execute the tool - pass the user and session_id fields
-            result = await server._execute_tool(name=name, args=args, client_id=client_id, request_id=req_id, user=user, session_id=session_id)
-            logger.info(f"🎯 Tool '{name}' execution completed with {len(result)} content items")
-
-            # Debug what kind of result we got
-            logger.debug(f"Result type: {type(result)}, Items: {len(result)}")
-            for i, item in enumerate(result):
-                logger.debug(f"  Item {i}: {type(item).__name__}")
-
-            # Format response according to JSON-RPC 2.0 spec for MCP
-            try:
-                # Manually convert TextContent objects to dictionaries
-                contents_list = []
-                for content in result:
-                    try:
-                        if hasattr(content, 'model_dump'):
-                            content_data = content.model_dump()
-                            contents_list.append(content_data)
-                        else:
-                            # Handle non-pydantic objects
-                            logger.warning(f"⚠️ Non-pydantic content object: {type(content)}")
-                            if hasattr(content, 'to_dict'):
-                                contents_list.append(content.to_dict())
-                            else:
-                                # Fallback for simple objects
-                                contents_list.append({"type": "text", "text": str(content)})
-                    except Exception as e:
-                        logger.error(f"❌ Error serializing content result: {e}")
-                        # Add simple text content as fallback
-                        contents_list.append({"type": "text", "text": str(content)})
-
-                # Construct the response according to JSON-RPC 2.0 and MCP spec
-                response = {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "result": {
-                        "content": contents_list
-                    }
-                }
-                logger.debug(f"📦 Formatted response: {json.dumps(response, default=str)[:200]}...")
-                return response
-            except Exception as e:
-                logger.error(f"💥 Error formatting tool call response: {e}")
-                import traceback
-                logger.debug(traceback.format_exc())
-                return {"jsonrpc": "2.0", "id": req_id, "error": f"Error formatting tool call response: {e}"}
+            # Use consolidated handler for standard MCP clients  
+            return await server._handle_tools_call(
+                params=params,
+                client_id=client_id,
+                request_id=req_id,
+                for_cloud=False
+            )
         else:
             logger.warning(f"⚠️ Unknown method requested: {method}")
             return {"jsonrpc": "2.0", "id": req_id, "error": f"Unknown method: {method}"}
