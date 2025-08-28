@@ -695,7 +695,7 @@ async def {name}():
 
             # Scan all Python files in the functions directory and subdirectories
             ignore_dirs = ['OLD', '__pycache__']
-            for root, dirs, files in os.walk(self.functions_dir):
+            for root, dirs, files in os.walk(self.functions_dir, followlinks=True):
                 # Skip ignored directories and any directories starting with dot
                 dirs_to_remove = []
                 for dir_name in dirs:
@@ -1031,7 +1031,7 @@ async def {name}():
 
             # Extract session_id from kwargs if present
             session_id = kwargs.get('session_id', None)
-            
+
             context_tokens = atlantis.set_context(
                 client_log_func=bound_client_log,
                 request_id=request_id,
@@ -1279,7 +1279,7 @@ async def {name}():
             code = await self._fs_load_code(name, app_name)
         except FileNotFoundError as e:
             raise ValueError(str(e)) from e
-        
+
         if not code:
             raise ValueError(f"Function '{name}' file is empty")
 
