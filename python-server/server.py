@@ -1625,12 +1625,14 @@ class DynamicAdditionServer(Server):
             logger.debug(f"Log notification error details: {traceback.format_exc()}")
             # We intentionally don't re-raise here
 
-    async def _execute_tool(self, name: str, args: dict, client_id: str = None, request_id: str = None, user: str = None) -> list[TextContent]:
+    async def _execute_tool(self, name: str, args: dict, client_id: str = None, request_id: str = None, user: str = None, session_id: str = None) -> list[TextContent]:
         """Core logic to handle a tool call. Ensures result is List[TextContent(type='text')]"""
         logger.info(f"🔧 EXECUTING TOOL: {name}")
         logger.debug(f"WITH ARGUMENTS: {args}")
         if user:
             logger.debug(f"CALLED BY USER: {user}")
+        if session_id:
+            logger.debug(f"SESSION ID: {session_id}")
         # ---> ADDED: Log entry and raw args
         logger.debug(f"---> _execute_tool ENTERED. Name: '{name}', Raw Args: {args!r}") # <-- ADD THIS LINE
 
@@ -2060,8 +2062,8 @@ class DynamicAdditionServer(Server):
                     if user:
                         logger.info(f"Call made by user: {user}")
                     logger.debug(f"---> Calling dynamic: function_call for '{name}' with args: {args} and client_id: {client_id} and request_id: {request_id}, user: {user}") # Log args and client_id separately
-                    # Pass arguments, client_id and user distinctly
-                    result_raw = await self.function_manager.function_call(name=name, client_id=client_id, request_id=request_id, user=user, args=args)
+                    # Pass arguments, client_id, user, and session_id distinctly
+                    result_raw = await self.function_manager.function_call(name=name, client_id=client_id, request_id=request_id, user=user, session_id=session_id, args=args)
                     logger.debug(f"<--- Dynamic function '{name}' RAW result: {result_raw} (type: {type(result_raw)})")
                 except Exception as e:
                     # Error already enhanced with command context at source, just re-raise
@@ -2660,13 +2662,16 @@ class ServiceClient:
                     global client_connections
                     client_connections[client_id] = {"type": "cloud", "connection": self}
 
-                    # Extract 'user' field if present at the top level of the request
-                    user = request.get("user", None)
+                    # Extract 'user' and 'session_id' fields from params (MCP standard location)
+                    user = params.get("user", None)
+                    session_id = params.get("session_id", None)
                     if user:
                         logger.debug(f"☁️ Request includes user field: {user}")
+                    if session_id:
+                        logger.debug(f"☁️ Request includes session_id field: {session_id}")
 
-                    # Call the core logic method directly with client ID, request ID, and user
-                    call_result_list = await self.mcp_server._execute_tool(name=tool_name, args=tool_args, client_id=client_id, request_id=request_id, user=user)
+                    # Call the core logic method directly with client ID, request ID, user, and session_id
+                    call_result_list = await self.mcp_server._execute_tool(name=tool_name, args=tool_args, client_id=client_id, request_id=request_id, user=user, session_id=session_id)
                     # The _execute_tool method ensures result is List[TextContent]
                     # Convert TextContent objects to dictionaries for JSON serialization using model_dump()
                     # IMPORTANT: We use "contents" (plural) key to match format between Python and Node servers
@@ -2968,15 +2973,18 @@ async def process_mcp_request(server, request, client_id=None):
             name = params.get("name")
             args = params.get("arguments", {}) # MCP spec uses 'arguments'
             user = params.get("user", None) # Extract the 'user' field that tells us who is making the call
+            session_id = params.get("session_id", None) # Extract the 'session_id' field
             logger.info(f"🔧 Processing 'tools/call' for tool '{name}' with args: {args}")
 
             # Log the tool name and arguments for debugging
             logger.debug(f"Tool name: '{name}', Arguments: {json.dumps(args, default=str)}")
             if user:
                 logger.debug(f"Call made by user: {user}")
+            if session_id:
+                logger.debug(f"Call made with session_id: {session_id}")
 
-            # Execute the tool - pass the user field
-            result = await server._execute_tool(name=name, args=args, client_id=client_id, request_id=req_id, user=user)
+            # Execute the tool - pass the user and session_id fields
+            result = await server._execute_tool(name=name, args=args, client_id=client_id, request_id=req_id, user=user, session_id=session_id)
             logger.info(f"🎯 Tool '{name}' execution completed with {len(result)} content items")
 
             # Debug what kind of result we got

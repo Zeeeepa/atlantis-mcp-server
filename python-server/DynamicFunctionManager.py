@@ -1029,11 +1029,15 @@ async def {name}():
             logger.debug(f"Prepared bound_client_log for context. Request ID: {request_id}, Client ID: {client_id}")
             logger.debug(f"Setting context variables via atlantis. User: {user}")
 
+            # Extract session_id from kwargs if present
+            session_id = kwargs.get('session_id', None)
+            
             context_tokens = atlantis.set_context(
                 client_log_func=bound_client_log,
                 request_id=request_id,
                 client_id=client_id,
                 user=user,  # Pass the user who made the call - only works if atlantis.py has been updated
+                session_id=session_id,  # Pass the session_id
                 entry_point_name=name # Pass the actual function name (not filename)
             )
 
