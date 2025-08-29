@@ -2168,15 +2168,15 @@ class DynamicAdditionServer(Server):
 
     async def _handle_tools_call(self, params: dict, client_id: str, request_id: str, for_cloud: bool = False) -> dict:
         """Consolidated tools/call handler that works for both cloud and standard MCP clients"""
-        
+
         # Extract required parameters
         tool_name = params.get("name")
         tool_args = params.get("arguments") # MCP spec uses 'arguments'
-        
+
         # Extract optional context fields
         user = params.get("user", None)
         session_id = params.get("session_id", None)
-        
+
         # Validate required parameters
         if tool_name is None or tool_args is None:
             return {
@@ -2184,7 +2184,7 @@ class DynamicAdditionServer(Server):
                 "id": request_id,
                 "error": {"code": -32602, "message": "Invalid params: missing tool name or arguments"}
             }
-        
+
         # Log the call
         logger.info(f"🔧 Processing 'tools/call' for tool '{tool_name}' with args: {tool_args}")
         logger.debug(f"Tool name: '{tool_name}', Arguments: {json.dumps(tool_args, default=str)}")
@@ -2192,13 +2192,13 @@ class DynamicAdditionServer(Server):
             logger.debug(f"Call made by user: {user}")
         if session_id:
             logger.debug(f"Call made with session_id: {session_id}")
-            
+
         # Log the tool execution (don't re-register connections here)
         if for_cloud:
             logger.debug(f"☁️ Calling _execute_tool for: {tool_name}")
         else:
             logger.debug(f"🔧 Calling _execute_tool for: {tool_name}")
-            
+
         # Verify client connection exists (should be registered by WebSocket or ServiceClient)
         global client_connections
         if client_id not in client_connections:
@@ -2206,20 +2206,20 @@ class DynamicAdditionServer(Server):
         else:
             connection_info = client_connections[client_id]
             logger.debug(f"✅ Found client {client_id} with type: {connection_info.get('type')}")
-        
+
         try:
             # Execute the tool
             result_list = await self._execute_tool(
-                name=tool_name, 
-                args=tool_args, 
-                client_id=client_id, 
-                request_id=request_id, 
-                user=user, 
+                name=tool_name,
+                args=tool_args,
+                client_id=client_id,
+                request_id=request_id,
+                user=user,
                 session_id=session_id
             )
-            
+
             logger.info(f"🎯 Tool '{tool_name}' execution completed with {len(result_list)} content items")
-            
+
             # Format response based on client type
             if for_cloud:
                 # Cloud client expects "contents" format
@@ -2242,13 +2242,13 @@ class DynamicAdditionServer(Server):
                             logger.error(f"❌ Error serializing content result: {e}")
                             # Add simple text content as fallback
                             contents_list.append({"type": "text", "text": str(content)})
-                    
+
                     return {
                         "jsonrpc": "2.0",
                         "id": request_id,
                         "result": {"contents": contents_list}
                     }
-                    
+
                 except Exception as e:
                     logger.error(f"❌ Error constructing cloud response: {e}")
                     return {
@@ -2266,13 +2266,13 @@ class DynamicAdditionServer(Server):
                         else:
                             logger.warning(f"⚠️ Non-pydantic result item: {type(item)}")
                             contents_list.append({"type": "text", "text": str(item)})
-                    
+
                     return {
-                        "jsonrpc": "2.0", 
-                        "id": request_id, 
+                        "jsonrpc": "2.0",
+                        "id": request_id,
                         "result": {"content": contents_list}
                     }
-                    
+
                 except Exception as e:
                     logger.error(f"❌ Error constructing MCP response: {e}")
                     return {
@@ -2280,7 +2280,7 @@ class DynamicAdditionServer(Server):
                         "id": request_id,
                         "error": {"code": -32000, "message": "Internal server error during response formatting"}
                     }
-                    
+
         except Exception as e:
             logger.error(f"❌ Error executing tool '{tool_name}': {str(e)}")
             return {
@@ -2742,7 +2742,7 @@ class ServiceClient:
         # Use persistent cloud client ID for this connection
         client_id = f"cloud_{self._creation_time}_{id(self)}"
         logger.debug(f"Created persistent cloud client ID: {client_id}")
-        
+
         # Register this cloud client in client_connections (missing registration!)
         global client_connections
         client_connections[client_id] = {"type": "cloud", "connection": self}
@@ -2783,9 +2783,9 @@ class ServiceClient:
             elif method == "tools/call":
                 # Use consolidated handler for cloud clients
                 return await self.mcp_server._handle_tools_call(
-                    params=params, 
-                    client_id=client_id, 
-                    request_id=request_id, 
+                    params=params,
+                    client_id=client_id,
+                    request_id=request_id,
                     for_cloud=True
                 )
 
@@ -3059,7 +3059,7 @@ async def process_mcp_request(server, request, client_id=None):
             result = await server._get_resources_list()
             return {"jsonrpc": "2.0", "id": req_id, "result": {"resources": result}}
         elif method == "tools/call":
-            # Use consolidated handler for standard MCP clients  
+            # Use consolidated handler for standard MCP clients
             return await server._handle_tools_call(
                 params=params,
                 client_id=client_id,
@@ -3285,12 +3285,32 @@ if __name__ == "__main__":
     event_handler = DynamicConfigEventHandler(mcp_server, loop)
     observer = Observer()
     observer.schedule(event_handler, FUNCTIONS_DIR, recursive=True) # Watch subdirs for dynamic functions
+
+    # Also watch symlinked directories within FUNCTIONS_DIR
+    try:
+        for item in os.listdir(FUNCTIONS_DIR):
+            item_path = os.path.join(FUNCTIONS_DIR, item)
+            if os.path.islink(item_path) and os.path.isdir(item_path):
+                resolved_path = os.path.realpath(item_path)
+                observer.schedule(event_handler, resolved_path, recursive=True)
+                logger.info(f"👁️ Also watching symlinked directory: {item} -> {resolved_path}")
+    except Exception as e:
+        logger.warning(f"⚠️ Error setting up symlink watchers: {e}")
+
     observer.schedule(event_handler, SERVERS_DIR, recursive=False)
     observer.start()
     logger.info(f"👁️ Watching for changes in {FUNCTIONS_DIR} and {SERVERS_DIR}...")
 
-    # Start the Uvicorn server
-    config = uvicorn.Config(app, host=HOST, port=PORT, log_level="warning")
+    # Start the Uvicorn server with increased websocket message size limits
+    config = uvicorn.Config(
+        app,
+        host=HOST,
+        port=PORT,
+        log_level="warning",
+        ws_max_size=10 * 1024 * 1024,  # 10MB max websocket message size
+        ws_ping_interval=20,           # Ping interval in seconds
+        ws_ping_timeout=20             # Ping timeout in seconds
+    )
     server = uvicorn.Server(config)
 
     # Create tasks for the server and cloud connection
