@@ -1166,50 +1166,40 @@ async def {name}():
         function_names = [func_info['name'] for func_info in functions_info]
         logger.info(f"⚙️ Extracted {len(function_names)} function(s) via AST: {', '.join(function_names)}")
 
-        # 2. Determine filename to save to
+        # 2. Check if any functions already exist and determine where to save
+        existing_file = None
+        existing_app = None
+        if not target_filename:  # Only check existing files if no explicit filename was provided
+            # Check if any of the functions already exist
+            for func_name in function_names:
+                found_file = await self._find_file_containing_function(func_name, app_name)
+                if found_file:
+                    existing_file = found_file
+                    # Extract app name from the file path if it's in a subdirectory
+                    if '/' in found_file:
+                        existing_app = found_file.split('/')[0]
+                    logger.info(f"⚙️ Found existing function '{func_name}' in {found_file}")
+                    break  # Use the first match we find
+
+        # 3. Determine filename and app to save to
         if target_filename:
             # Use specified filename
             filename_to_use = target_filename
+            app_to_use = app_name  # Use provided app or None
             logger.info(f"⚙️ Using specified filename: {filename_to_use}")
+        elif existing_file:
+            # Update existing file - extract filename from existing location
+            filename_to_use = os.path.splitext(os.path.basename(existing_file))[0]
+            app_to_use = existing_app  # Use the app from existing location
+            logger.info(f"⚙️ Updating existing file: {existing_file}")
         else:
-            # Use first function name as filename (backward compatibility)
+            # Create new file using first function name (backward compatibility)
             filename_to_use = function_names[0]
-            logger.info(f"⚙️ Using first function name as filename (backward compatibility): {filename_to_use}")
+            app_to_use = app_name  # Use provided app or None
+            logger.info(f"⚙️ Creating new file using first function name: {filename_to_use}")
 
-        # --- Backup existing file before saving new one ---
-        secure_name = utils.clean_filename(filename_to_use)
-        if secure_name: # Should always be true if filename_to_use is valid
-            # Determine target directory based on app parameter
-            if app_name:
-                target_dir = os.path.join(self.functions_dir, app_name)
-                os.makedirs(target_dir, exist_ok=True)  # Ensure app directory exists
-                file_path = os.path.join(target_dir, f"{secure_name}.py")
-                logger.info(f"⚙️ Using app-specific directory: {target_dir}")
-            else:
-                file_path = os.path.join(self.functions_dir, f"{secure_name}.py")
-            if os.path.exists(file_path):
-                logger.info(f"💾 Found existing file for '{secure_name}', attempting backup...")
-                try:
-                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S%f")
-                    # Using .py.bak for clarity
-                    backup_filename = f"{secure_name}_{timestamp}.py.bak"
-                    # Make sure old_dir exists
-                    os.makedirs(self.old_dir, exist_ok=True)
-                    backup_path = os.path.join(self.old_dir, backup_filename)
-                    shutil.copy2(file_path, backup_path) # copy2 preserves metadata
-                    logger.info(f"🛡️ Successfully backed up '{secure_name}' to '{backup_path}'")
-                except Exception as e:
-                    logger.error(f"❌ Failed to backup existing file '{file_path}' to OLD folder: {e}")
-                    # Log error but continue, saving the new file might still be desired
-            else:
-                logger.info(f"ⓘ No existing file found for '{secure_name}', creating new file.")
-        else:
-            # This case should ideally not happen if name extraction was successful
-            logger.warning("⚠️ Could not create secure filename for backup check in function_set.")
-        # --- End Backup ---
-
-        # 3. Save the code (validation will happen later when tools are listed/called)
-        saved_path = await self._fs_save_code(filename_to_use, code_buffer, app_name)
+        # 4. Save the code using existing _fs_save_code method (validation will happen later when tools are listed/called)
+        saved_path = await self._fs_save_code(filename_to_use, code_buffer, app_to_use)
 
         if not saved_path:
             error_response = f"Error saving functions to file '{filename_to_use}'."
