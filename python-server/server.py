@@ -448,8 +448,10 @@ class DynamicAdditionServer(Server):
             self.awaitable_requests.pop(correlation_id, None) # Ensure cleanup
             if isinstance(e, McpError):
                 # Enhance McpError message to include command text
-                enhanced_message = f"Command '{command}' failed: {e.message}"
-                enhanced_error = McpError(enhanced_message, e.code)
+                # Handle both .message attribute and direct string access
+                error_msg = getattr(e, 'message', str(e))
+                enhanced_message = f"Command '{command}' failed: {error_msg}"
+                enhanced_error = McpError(enhanced_message, getattr(e, 'code', -32000))
                 raise enhanced_error from e
             else:
                 # For other exceptions, wrap in a new exception with command context
@@ -2191,11 +2193,19 @@ class DynamicAdditionServer(Server):
         if session_id:
             logger.debug(f"Call made with session_id: {session_id}")
             
-        # Register client connection if this is from cloud
+        # Log the tool execution (don't re-register connections here)
         if for_cloud:
             logger.debug(f"☁️ Calling _execute_tool for: {tool_name}")
-            global client_connections
-            client_connections[client_id] = {"type": "cloud", "connection": self}
+        else:
+            logger.debug(f"🔧 Calling _execute_tool for: {tool_name}")
+            
+        # Verify client connection exists (should be registered by WebSocket or ServiceClient)
+        global client_connections
+        if client_id not in client_connections:
+            logger.warning(f"⚠️ Client {client_id} not found in client_connections during tool call")
+        else:
+            connection_info = client_connections[client_id]
+            logger.debug(f"✅ Found client {client_id} with type: {connection_info.get('type')}")
         
         try:
             # Execute the tool
@@ -2732,6 +2742,11 @@ class ServiceClient:
         # Use persistent cloud client ID for this connection
         client_id = f"cloud_{self._creation_time}_{id(self)}"
         logger.debug(f"Created persistent cloud client ID: {client_id}")
+        
+        # Register this cloud client in client_connections (missing registration!)
+        global client_connections
+        client_connections[client_id] = {"type": "cloud", "connection": self}
+        logger.debug(f"☁️ Registered cloud client in client_connections: {client_id}")
 
         logger.info(f"☁️ Processing MCP request via manual routing: {method} (ID: {request_id})")
 
@@ -2877,6 +2892,8 @@ def _save_registered_clients():
 
 # --- ADDED BACK Global MCP Server Instantiation ---
 mcp_server = DynamicAdditionServer()
+# Set the server instance in utils immediately so client_log() works
+utils.set_server_instance(mcp_server)
 
 # Custom WebSocket handler for the MCP server
 async def handle_websocket(websocket: WebSocket):
