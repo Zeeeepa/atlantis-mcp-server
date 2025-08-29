@@ -103,8 +103,11 @@ async function startMcpBridge() {
   // Set up standard input/output for passthrough
   process.stdin.setEncoding('utf8');
 
-  // Create WebSocket client instance
-  const client = new WebSocketClient();
+  // Create WebSocket client instance with increased frame size limits for large scan images
+  const client = new WebSocketClient({
+    maxReceivedFrameSize: 10 * 1024 * 1024, // 10MB (much larger than the ~1.69MB scan)
+    maxReceivedMessageSize: 10 * 1024 * 1024 // 10MB for aggregate message size
+  });
 
   // Handle connection failures
   client.on('connectFailed', (error) => {
@@ -222,3 +225,4 @@ startMcpBridge().catch(error => {
   logStatus(`Fatal error: ${error.message}`, 'error');
   process.exit(1);
 });
+
