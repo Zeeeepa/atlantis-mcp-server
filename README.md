@@ -30,7 +30,7 @@ python server.py  \
   --cloud-port=443  \
   --service-name=home                        # remote name, can be anything but must be unique across all machines
 ```
-4. To use this as a regular standalone MCP server, add the following config:
+4. To use this as a regular standalone MCP server, add the following config to Windsurf or Cursor or whatever:
 
 ```json
    "mcpServers": {
@@ -44,6 +44,10 @@ python server.py  \
       },
    }
 ```
+
+To add Atlantis to Claude Code, this should work:
+
+```claude mcp add atlantis -- npx atlantis-mcp --port 8000```
 
 5. To connect to Atlantis, sign into https://www.projectatlantis.ai under the same email
 
