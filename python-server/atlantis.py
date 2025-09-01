@@ -71,16 +71,16 @@ shared = SharedContainer()
 
 async def get_and_increment_stream_seq_num(stream_id: str) -> int:
     """Get and increment the sequence number for a specific stream.
-    
+
     Args:
         stream_id: The unique stream identifier
-        
+
     Returns:
         The current sequence number for this stream before incrementing
     """
     if stream_id not in _stream_seq_counters:
         _stream_seq_counters[stream_id] = 0
-    
+
     current_seq = _stream_seq_counters[stream_id]
     _stream_seq_counters[stream_id] += 1
     return current_seq
@@ -181,11 +181,11 @@ async def client_log(message: Any, level: str = "INFO", message_type: str = "tex
         print(f"WARNING: client_log called but no logger in context. Message: {message}")
         return None # Or raise an error
 
-async def tool_log(message: Any, level: str = "INFO"):
-    """Sends a tool log message back to the requesting client for the current context.
-    This is a simple wrapper around client_log with message_type="tool".
+async def tool_result(name: str, result: Any):
+    """Sends a tool call result back to the requesting client to be added to the transcript.
+    This allows the LLM to see tool results in the next conversation turn.
     """
-    return await client_log(message, level=level, message_type="tool")
+    return await client_log(f"Tool {name} result: {result}", level="INFO", message_type="tool")
 
 # --- Other Accessors ---
 def get_request_id() -> Optional[str]:
@@ -239,7 +239,7 @@ def set_context(
     # Ensure _user_var is always set, even if to None, to get a valid token for reset_context
     actual_user = user if user is not None else None # Explicitly use None if user is not provided
     user_token = _user_var.set(actual_user)
-    
+
     # Handle optional session_id context
     # Ensure _session_id_var is always set, even if to None, to get a valid token for reset_context
     actual_session_id = session_id if session_id is not None else None # Explicitly use None if session_id is not provided
