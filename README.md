@@ -18,7 +18,7 @@ The centerpiece this project is a Python MCP host (which I call a 'remote') that
 
 2. Python 3.12 seems to be most stable right now, 3.13 is iffy
 
-3. Edit the runServer script in the `python-server` folder and set the email and service name:
+3. Edit the runServer script in the `python-server` folder and set the email and service name (it's actually best practice to create a copy "runServerFoo" that you can replace the runServer file with when we do updates):
 
 ```bash
 python server.py  \
