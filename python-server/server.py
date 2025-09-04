@@ -564,13 +564,14 @@ class DynamicAdditionServer(Server):
             ),
             Tool(
                 name="_function_history",
-                description="Gets the tool call history. Use 'app' parameter to filter history for specific app functions.",
+                description="Gets the tool call history for a specific function. Requires both app and function name since multiple apps can have functions with the same name.",
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "app": {"type": "string", "description": "Optional: The app name to filter history for functions from a specific app"}
+                        "app": {"type": "string", "description": "The app name containing the function"},
+                        "name": {"type": "string", "description": "The function name to get history for"}
                     },
-                    "required": []
+                    "required": ["app", "name"]
                 },
                 annotations=ToolAnnotations(title="_function_history")
             ),
@@ -1828,8 +1829,10 @@ class DynamicAdditionServer(Server):
                         for tool in result_raw
                     ]
             elif name == "_function_history":
-                app_name = args.get("app")  # Optional app name for filtering
-                logger.debug("---> Calling built-in: _function_history" + (f" (app: {app_name})" if app_name else ""))
+                app_name = args.get("app")  # Required app name
+                function_name = args.get("name")  # Required function name
+                logger.debug(f"---> Calling built-in: _function_history (app: {app_name}, function: {function_name})")
+                
                 if not os.path.exists(TOOL_CALL_LOG_PATH):
                     # Return an empty history array
                     result_raw = []
@@ -1839,10 +1842,17 @@ class DynamicAdditionServer(Server):
                             # Read each line and parse as JSON, skipping empty lines
                             log_entries = [json.loads(line) for line in f if line.strip()]
 
-                        # If app filter is provided, we could potentially filter here
-                        # For now, return all entries as the current history format may not track app info
-                        # TODO: Implement app-based filtering when history format includes app information
-                        result_raw = log_entries
+                        # Filter by function name (current log format only has tool_name, not app info)
+                        # For now, filter by function name only - we'll need to add app tracking to logs later
+                        filtered_entries = [
+                            entry for entry in log_entries 
+                            if entry.get("tool_name") == function_name
+                        ]
+                        
+                        # TODO: Once logging includes app_name, also filter by app:
+                        # if entry.get("app_name") == app_name and entry.get("tool_name") == function_name
+                        
+                        result_raw = filtered_entries
                     except (json.JSONDecodeError, IOError) as e:
                         logger.error(f"Error reading or parsing tool_call_log.json: {e}")
                         # Return an error message inside the tool response
