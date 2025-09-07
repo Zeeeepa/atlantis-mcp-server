@@ -1788,6 +1788,10 @@ class DynamicAdditionServer(Server):
                 # Now server_add only requires the name parameter and creates a template
                 success = await self.server_manager.server_add(svc_name)
                 if success:
+                    try:
+                        await self._notify_tool_list_changed(change_type="added", tool_name=svc_name)
+                    except Exception as e:
+                        logger.error(f"Error sending tool notification after adding server {svc_name}: {str(e)}")
                     result_raw = [TextContent(type="text", text=f"MCP '{svc_name}' added successfully.")]
                 else:
                     result_raw = [TextContent(type="text", text=f"Failed to add MCP '{svc_name}'.")]
@@ -1797,7 +1801,14 @@ class DynamicAdditionServer(Server):
                     raise ValueError("Missing required parameter: name")
                 logger.debug(f"---> Calling built-in: server_remove for '{svc_name}'")
                 success = await self.server_manager.server_remove(svc_name)
-                result_raw = [TextContent(type="text", text=f"Server '{svc_name}' removed successfully.")] if success else [TextContent(type="text", text=f"Failed to remove server '{svc_name}'.")]
+                if success:
+                    try:
+                        await self._notify_tool_list_changed(change_type="removed", tool_name=svc_name)
+                    except Exception as e:
+                        logger.error(f"Error sending tool notification after removing server {svc_name}: {str(e)}")
+                    result_raw = [TextContent(type="text", text=f"Server '{svc_name}' removed successfully.")]
+                else:
+                    result_raw = [TextContent(type="text", text=f"Failed to remove server '{svc_name}'.")]
             elif name == "_server_set":
                 logger.debug(f"---> Calling built-in: server_set with args: {args!r}")
                 # Extract the config from the args dictionary
@@ -1820,6 +1831,12 @@ class DynamicAdditionServer(Server):
 
                 # Call server_set with the correct parameters
                 result_raw = await self.server_manager.server_set(server_name, config)
+                # Notify clients that server configuration changed (could affect available tools)
+                if result_raw:  # Only notify on success
+                    try:
+                        await self._notify_tool_list_changed(change_type="updated", tool_name=server_name)
+                    except Exception as e:
+                        logger.error(f"Error sending tool notification after updating server {server_name}: {str(e)}")
             elif name == "_server_validate":
                 svc_name = args.get("name")
                 if not svc_name:
