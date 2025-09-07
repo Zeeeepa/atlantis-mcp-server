@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import datetime
 
 # Version
-SERVER_VERSION = "2.0.6"
+SERVER_VERSION = "2.0.7"
 
 from mcp.server import Server
 
@@ -1745,7 +1745,7 @@ class DynamicAdditionServer(Server):
                                 else:
                                     location = f"{existing_app_name} {filename}"
                                 existing_locations.append(location)
-                    
+
                     # Create detailed error message
                     if app_name:
                         error_message = f"Function '{func_name}' already exists in app '{app_name}'."
@@ -1868,7 +1868,7 @@ class DynamicAdditionServer(Server):
                 app_name = args.get("app")  # Required app name
                 function_name = args.get("name")  # Required function name
                 logger.debug(f"---> Calling built-in: _function_history (app: {app_name}, function: {function_name})")
-                
+
                 if not os.path.exists(TOOL_CALL_LOG_PATH):
                     # Return an empty history array
                     result_raw = []
@@ -1881,13 +1881,13 @@ class DynamicAdditionServer(Server):
                         # Filter by function name (current log format only has tool_name, not app info)
                         # For now, filter by function name only - we'll need to add app tracking to logs later
                         filtered_entries = [
-                            entry for entry in log_entries 
+                            entry for entry in log_entries
                             if entry.get("tool_name") == function_name
                         ]
-                        
+
                         # TODO: Once logging includes app_name, also filter by app:
                         # if entry.get("app_name") == app_name and entry.get("tool_name") == function_name
-                        
+
                         result_raw = filtered_entries
                     except (json.JSONDecodeError, IOError) as e:
                         logger.error(f"Error reading or parsing tool_call_log.json: {e}")
@@ -1898,11 +1898,11 @@ class DynamicAdditionServer(Server):
                 # Check if caller is the owner - only owner can access function logs
                 caller = user or client_id or "unknown"  # Use the user parameter passed to _execute_tool
                 owner = atlantis.get_owner()
-                
+
                 if owner and caller != owner:
                     logger.warning(f"Access denied: _function_log called by '{caller}' but owner is '{owner}'")
                     raise ValueError(f"Access denied: _function_log can only be accessed by owner")
-                
+
                 app_name = args.get("app")  # Optional app name for filtering
                 logger.debug("---> Calling built-in: _function_log" + (f" (app: {app_name})" if app_name else ""))
                 if not os.path.exists(OWNER_LOG_PATH):
