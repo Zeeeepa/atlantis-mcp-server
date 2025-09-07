@@ -1733,9 +1733,28 @@ class DynamicAdditionServer(Server):
                 function_file = await self.function_manager._find_file_containing_function(func_name, app_name)
 
                 if function_file:
-                    # Function already exists - inform the client rather than raise error
+                    # Function already exists - find all locations containing this function
+                    existing_locations = []
+                    if not app_name:
+                        # Find ALL apps that contain this function, with filenames
+                        for existing_app_name, app_functions in self.function_manager._function_file_mapping_by_app.items():
+                            if func_name in app_functions:
+                                filename = app_functions[func_name]
+                                if existing_app_name == "unknown":
+                                    location = f"root {filename}"
+                                else:
+                                    location = f"{existing_app_name} {filename}"
+                                existing_locations.append(location)
+                    
+                    # Create detailed error message
                     if app_name:
                         error_message = f"Function '{func_name}' already exists in app '{app_name}'."
+                    elif existing_locations:
+                        if len(existing_locations) == 1:
+                            error_message = f"Function '{func_name}' already exists in {existing_locations[0]}."
+                        else:
+                            locations_list = ", ".join(existing_locations)
+                            error_message = f"Function '{func_name}' already exists in: {locations_list}. Specify an app parameter."
                     else:
                         error_message = f"Function '{func_name}' already exists."
                     error_annotations = {
@@ -1859,6 +1878,14 @@ class DynamicAdditionServer(Server):
                         raise ValueError(f"Error accessing function history: {e}")
 
             elif name == "_function_log":
+                # Check if caller is the owner - only owner can access function logs
+                caller = user or client_id or "unknown"  # Use the user parameter passed to _execute_tool
+                owner = atlantis.get_owner()
+                
+                if owner and caller != owner:
+                    logger.warning(f"Access denied: _function_log called by '{caller}' but owner is '{owner}'")
+                    raise ValueError(f"Access denied: _function_log can only be accessed by owner")
+                
                 app_name = args.get("app")  # Optional app name for filtering
                 logger.debug("---> Calling built-in: _function_log" + (f" (app: {app_name})" if app_name else ""))
                 if not os.path.exists(OWNER_LOG_PATH):
