@@ -1248,7 +1248,7 @@ class DynamicAdditionServer(Server):
                             original_name = tool_item.name
                             original_description = tool_item.description
                             original_schema = tool_item.inputSchema
-                            original_annotations = getattr(tool_item, 'annotations', {})
+                            original_annotations = getattr(tool_item, 'annotations', {}) or {}
                         elif isinstance(tool_item, dict):
                             # It's a dictionary
                             original_name = tool_item.get('name')
@@ -1257,7 +1257,7 @@ class DynamicAdditionServer(Server):
                                 continue
                             original_description = tool_item.get('description', original_name)
                             original_schema = tool_item.get('inputSchema', {"type": "object"})
-                            original_annotations = tool_item.get('annotations', {})
+                            original_annotations = tool_item.get('annotations', {}) or {}
                         else:
                             logger.warning(f"⚠️ Received unsupported item type from {server_name}: {type(tool_item)} - {tool_item}")
                             continue
