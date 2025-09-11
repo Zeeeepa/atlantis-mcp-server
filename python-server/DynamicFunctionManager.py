@@ -936,12 +936,37 @@ async def {name}():
         Raises exceptions if the function doesn't exist, fails to load, or errors during execution.
         Gets the 'user' field that tells us who is making the call and passes it to the function context.
         '''
-        secure_name = utils.clean_filename(name)
+        # Parse special tool name format: "app*location**remote*function" or "app**remote*function"
+        actual_function_name = name
+        parsed_app_name = None
+        parsed_location_name = None
+        
+        if "**" in name and "*" in name:
+            # Split on "**" to separate app[*location] from remote*function
+            parts = name.split("**")
+            if len(parts) == 2:
+                app_location_part = parts[0]
+                remote_function_part = parts[1]
+                
+                # Parse app[*location] part
+                if "*" in app_location_part:
+                    parsed_app_name, parsed_location_name = app_location_part.split("*", 1)
+                else:
+                    parsed_app_name = app_location_part
+                
+                # Parse remote*function part
+                if "*" in remote_function_part:
+                    remote_name, actual_function_name = remote_function_part.split("*", 1)
+                    logger.info(f"🔍 PARSED TOOL NAME: app='{parsed_app_name}', location='{parsed_location_name}', remote='{remote_name}', function='{actual_function_name}'")
+        
+        secure_name = utils.clean_filename(actual_function_name)
         if not secure_name:
-            raise ValueError(f"Invalid function name '{name}' for calling.")
+            raise ValueError(f"Invalid function name '{actual_function_name}' for calling.")
 
         # NEW: Find which file contains this function
-        target_file = await self._find_file_containing_function(name)
+        # Extract app name from kwargs or parsed tool name (parsed takes precedence)
+        app_name = parsed_app_name or kwargs.get("app")
+        target_file = await self._find_file_containing_function(actual_function_name, app_name)
         if not target_file:
             raise FileNotFoundError(f"Dynamic function '{name}' not found in any file")
 
@@ -1044,21 +1069,21 @@ async def {name}():
                 client_id=client_id,
                 user=user,  # Pass the user who made the call - only works if atlantis.py has been updated
                 session_id=session_id,  # Pass the session_id
-                entry_point_name=name # Pass the actual function name (not filename)
+                entry_point_name=actual_function_name # Pass the actual function name (not filename)
             )
 
             # --- Function Execution ---
-            logger.info(f"Attempting to get function '{name}' from loaded module.")
-            function_to_call = getattr(module, name, None)
+            logger.info(f"Attempting to get function '{actual_function_name}' from loaded module.")
+            function_to_call = getattr(module, actual_function_name, None)
             if not callable(function_to_call):
-                raise ValueError(f"No callable function '{name}' found in module '{target_file}'. "
+                raise ValueError(f"No callable function '{actual_function_name}' found in module '{target_file}'. "
                               f"Please ensure the file contains a function with this name.")
 
             # Log whether we have user context available
             if user:
-                logger.debug(f"Function '{name}' will be called with user context: {user}")
+                logger.debug(f"Function '{actual_function_name}' will be called with user context: {user}")
 
-            logger.info(f"Calling dynamic function '{name}' with args: {kwargs.get('args', {})}")
+            logger.info(f"Calling dynamic function '{actual_function_name}' with args: {kwargs.get('args', {})}")
 
             # Extract args from the kwargs dictionary
             function_args = kwargs.get('args', {})
@@ -1068,12 +1093,12 @@ async def {name}():
             else:
                 result = function_to_call(**function_args)
 
-            logger.info(f"Dynamic function '{name}' executed successfully.")
+            logger.info(f"Dynamic function '{actual_function_name}' executed successfully.")
             return result
 
         except Exception as exec_err:
             # Error already enhanced and logged at source, just store and re-raise
-            self._runtime_errors[name] = str(exec_err)
+            self._runtime_errors[actual_function_name] = str(exec_err)
             raise
 
         finally:
