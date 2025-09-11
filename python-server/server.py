@@ -463,6 +463,124 @@ class DynamicAdditionServer(Server):
                  logger.warning(f"🧹 Final cleanup: Future for {correlation_id} was still in awaitable_requests.")
                  self.awaitable_requests.pop(correlation_id, None)
 
+    async def _create_tools_from_app_mappings(self) -> list[Tool]:
+        """Create tools from app-specific function mappings, showing all function variants"""
+        tools_list = []
+        
+        function_mapping_by_app = self.function_manager._function_file_mapping_by_app
+        
+        # Count total functions across all apps
+        total_functions = sum(len(app_mapping) for app_mapping in function_mapping_by_app.values())
+        logger.info(f"📝 FOUND {total_functions} FUNCTIONS FROM APP MAPPINGS")
+        
+        # For each app and function in the app-specific mappings, create Tool entries
+        for app_name, app_mapping in function_mapping_by_app.items():
+            for func_name, file_path in app_mapping.items():
+                try:
+                    # Skip if this seems to be a utility file
+                    if func_name.startswith('_') or func_name == '__init__' or func_name == '__pycache__':
+                        continue
+
+                    # Load and validate the function code directly from the file
+                    full_file_path = os.path.join(FUNCTIONS_DIR, file_path)
+                    try:
+                        with open(full_file_path, 'r', encoding='utf-8') as f:
+                            code = f.read()
+
+                        # Validate function syntax without actually loading it
+                        is_valid, error_message, functions_info = self.function_manager._code_validate_syntax(code)
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error loading file {file_path}: {str(e)}")
+                        continue
+
+                    # Handle multiple functions per file
+                    if is_valid and functions_info:
+                        # Create one tool per function in the file
+                        for func_info in functions_info:
+                            tool_name = func_info.get('name', func_name)
+                            tool_description = func_info.get('description', f"Dynamic function '{tool_name}'")
+                            tool_input_schema = func_info.get('inputSchema', {"type": "object", "properties": {}})
+                            tool_annotations = {}
+
+                            tool_annotations["type"] = "function"
+                            tool_annotations["validationStatus"] = "VALID"
+                            tool_annotations["sourceFile"] = file_path
+
+                            # Add decorator info if present
+                            decorators_from_info = func_info.get("decorators")
+                            if decorators_from_info:
+                                tool_annotations["decorators"] = decorators_from_info
+
+                            # Use app name from decorator or from app mapping
+                            app_name_from_info = func_info.get("app_name")
+                            if app_name_from_info is not None:
+                                actual_app_name = app_name_from_info
+                                logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {actual_app_name} (from @app decorator)")
+                            else:
+                                actual_app_name = app_name
+                                logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {actual_app_name} (from app mapping)")
+                            
+                            tool_annotations["app_name"] = actual_app_name
+
+                            # Check visibility overrides first (these take precedence over decorators)
+                            if tool_name in self._temporarily_hidden_functions:
+                                logger.info(f"{PINK}🙈 Skipping temporarily hidden function: {tool_name} (app: {actual_app_name}){RESET}")
+                                continue
+                            elif tool_name in self._temporarily_visible_functions:
+                                logger.info(f"{PINK}👁️ Showing temporarily visible function: {tool_name} (app: {actual_app_name}){RESET}")
+                                tool_annotations["temporarilyVisible"] = True
+                            elif decorators_from_info and "hidden" in decorators_from_info:
+                                # Skip this function if it has the @hidden decorator (and no override)
+                                logger.info(f"{PINK}🙈 Skipping hidden function: {tool_name} (app: {actual_app_name}){RESET}")
+                                continue
+
+                            # Add location_name to annotations if present in function_info
+                            location_name_from_info = func_info.get("location_name")
+                            if location_name_from_info is not None:
+                                tool_annotations["location_name"] = location_name_from_info
+
+                            # Add runtime error message if present in cache
+                            if tool_name in _runtime_errors:
+                                tool_annotations["runtimeError"] = _runtime_errors[tool_name]
+
+                            # Add server config load error if present in cache
+                            if tool_name in self.server_manager._server_load_errors:
+                                tool_annotations["loadError"] = self.server_manager._server_load_errors[tool_name]
+
+                            # Add common annotations
+                            try:
+                                tool_annotations["lastModified"] = datetime.datetime.fromtimestamp(
+                                    os.path.getmtime(full_file_path)
+                                ).isoformat()
+                                logger.debug(f"🔍 SET lastModified for {tool_name}: {tool_annotations['lastModified']}")
+                            except Exception as e:
+                                logger.warning(f"⚠️ Failed to get lastModified for {tool_name}: {e}")
+                                pass
+
+                            # Create and add the tool object
+                            custom_annotations = ToolAnnotations(**tool_annotations)
+                            tool_obj = Tool(
+                                name=tool_name,
+                                description=tool_description,
+                                inputSchema=tool_input_schema,
+                                annotations=custom_annotations
+                            )
+
+                            # Check for duplicates before adding (app-aware and case-insensitive)
+                            tool_key = f"{actual_app_name}.{tool_name}".lower()
+                            existing_tool_keys = {f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}".lower() for tool in tools_list}
+                            if tool_key not in existing_tool_keys:
+                                tools_list.append(tool_obj)
+                                logger.debug(f"📝 Added dynamic tool: {tool_name} (app: {actual_app_name}), valid: {is_valid}")
+                            else:
+                                logger.warning(f"⚠️ Skipping duplicate tool: {tool_name} from {file_path} (app: {actual_app_name}) - already exists")
+
+                except Exception as e:
+                    logger.warning(f"⚠️ Error processing function {func_name} from {file_path}: {str(e)}")
+                    continue
+        
+        return tools_list
+
     async def _get_tools_list(self, caller_context: str = "unknown") -> list[Tool]:
         """Core logic to return a list of available tools"""
         logger.info(f"{BRIGHT_WHITE}📋 === GETTING TOOL LIST (Called by: {caller_context}) ==={RESET}")
@@ -744,239 +862,9 @@ class DynamicAdditionServer(Server):
 
                         # Use the function mapping to get all discovered functions
             await self.function_manager._build_function_file_mapping()
-            function_mapping = self.function_manager._function_file_mapping
-
-            logger.info(f"📝 FOUND {len(function_mapping)} FUNCTIONS FROM MAPPING")
-
-            # For each function in the mapping, create Tool entries
-            for func_name, file_path in function_mapping.items():
-                try:
-                    # Skip if this seems to be a utility file
-                    if func_name.startswith('_') or func_name == '__init__' or func_name == '__pycache__':
-                        continue
-
-                                        # Load and validate the function code directly from the file
-                    full_file_path = os.path.join(FUNCTIONS_DIR, file_path)
-                    try:
-                        with open(full_file_path, 'r', encoding='utf-8') as f:
-                            code = f.read()
-
-                        # Validate function syntax without actually loading it
-                        is_valid, error_message, functions_info = self.function_manager._code_validate_syntax(code)
-                    except Exception as e:
-                        logger.warning(f"⚠️ Error loading file {file_path}: {str(e)}")
-                        is_valid = False
-                        error_message = str(e)
-                        functions_info = None
-
-                    # NEW: Handle multiple functions per file
-                    if is_valid and functions_info:
-                        # Create one tool per function in the file
-                        for func_info in functions_info:
-                            # --- Create Tool --- #
-                            tool_name = func_info.get('name', func_name) # Use AST name, fallback to function name
-                            tool_description = func_info.get('description', f"Dynamic function '{tool_name}'")
-                            tool_input_schema = func_info.get('inputSchema', {"type": "object", "properties": {}})
-                            tool_annotations = {}
-
-                            tool_annotations["type"] = "function"
-                            tool_annotations["validationStatus"] = "VALID"
-                            tool_annotations["sourceFile"] = file_path  # NEW: Track which file contains this function
-
-                            # Add decorator info if present (opt-in)
-                            decorators_from_info = func_info.get("decorators")
-                            if decorators_from_info: # Only add if list is not None and not empty
-                                tool_annotations["decorators"] = decorators_from_info
-
-                            # Determine app_name first (needed for logging)
-                            app_name_from_info = func_info.get("app_name")
-                            if app_name_from_info is not None:
-                                app_name = app_name_from_info
-                                tool_annotations["app_name"] = app_name
-                                logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {app_name} (from @app decorator)")
-                            else:
-                                # If no app_name from decorator, check if function is in a subfolder
-                                if '/' in file_path:
-                                    app_name = file_path.split('/')[0]
-                                    tool_annotations["app_name"] = app_name
-                                    logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {app_name} (from subfolder)")
-                                else:
-                                    app_name = "unknown"
-                                    # do not add to tool annotations
-
-                            # Check visibility overrides first (these take precedence over decorators)
-                            if tool_name in self._temporarily_hidden_functions:
-                                logger.info(f"{PINK}🙈 Skipping temporarily hidden function: {tool_name} (app: {app_name}){RESET}")
-                                continue
-                            elif tool_name in self._temporarily_visible_functions:
-                                logger.info(f"{PINK}👁️ Showing temporarily visible function: {tool_name} (app: {app_name}){RESET}")
-                                tool_annotations["temporarilyVisible"] = True
-                            elif decorators_from_info and "hidden" in decorators_from_info:
-                                # Skip this function if it has the @hidden decorator (and no override)
-                                logger.info(f"{PINK}🙈 Skipping hidden function: {tool_name} (app: {app_name}){RESET}")
-                                continue
-                            # Add location_name to annotations if present in function_info
-                            location_name_from_info = func_info.get("location_name")
-                            if location_name_from_info is not None:
-                                tool_annotations["location_name"] = location_name_from_info
-
-                            # Add runtime error message if present in cache
-                            if tool_name in _runtime_errors:
-                                tool_annotations["runtimeError"] = _runtime_errors[tool_name]
-
-                            # Add server config load error if present in cache
-                            if tool_name in self.server_manager._server_load_errors:
-                                tool_annotations["loadError"] = self.server_manager._server_load_errors[tool_name]
-
-                            # Add common annotations
-                            try:
-                                tool_annotations["lastModified"] = datetime.datetime.fromtimestamp(
-                                    os.path.getmtime(full_file_path)
-                                ).isoformat()
-                                logger.debug(f"🔍 SET lastModified for {tool_name}: {tool_annotations['lastModified']}")
-                            except Exception as e:
-                                logger.warning(f"⚠️ Failed to get lastModified for {tool_name}: {e}")
-                                pass # Ignore if file stat fails
-
-                            # Create and add the tool object
-                            logger.debug(f"🔍 Creating Tool {tool_name} with annotations: {tool_annotations}")
-                            #logger.debug(f"🔍 Tool {tool_name} lastModified before Tool creation: {tool_annotations.get('lastModified', 'NOT_SET')}")
-                            # Create custom ToolAnnotations object to allow extra fields
-                            custom_annotations = ToolAnnotations(**tool_annotations)
-                            tool_obj = Tool(
-                                name=tool_name,
-                                description=tool_description,
-                                inputSchema=tool_input_schema,
-                                annotations=custom_annotations # app_name is now inside annotations
-                            )
-                            logger.debug(f"🔍 Tool {tool_name} annotations after creation: {tool_obj.annotations}")
-                            #logger.debug(f"🔍 Tool {tool_name} lastModified after Tool creation: {getattr(tool_obj.annotations, 'lastModified', 'NOT_FOUND') if hasattr(tool_obj.annotations, 'lastModified') else 'NO_ATTR'}")
-                            #logger.debug(f"🔍 Tool {tool_name} annotations type: {type(tool_obj.annotations)}")
-                            if hasattr(tool_obj.annotations, '__dict__'):
-                                logger.debug(f"🔍 Tool {tool_name} annotations __dict__: {tool_obj.annotations.__dict__}")
-                            # Check for duplicates before adding (app-aware and case-insensitive)
-                            app_name = tool_annotations.get("app_name", "unknown")
-                            tool_key = f"{app_name}.{tool_name}".lower()
-                            existing_tool_keys = {f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}".lower() for tool in tools_list}
-                            if tool_key not in existing_tool_keys:
-                                tools_list.append(tool_obj)
-                                logger.debug(f"📝 Added dynamic tool: {tool_name} from {file_path} (app: {app_name}), valid: {is_valid}")
-                            else:
-                                logger.warning(f"⚠️ Skipping duplicate tool: {tool_name} from {file_path} (app: {app_name}) - already exists")
-
-                    elif is_valid and not functions_info:
-                         # Valid syntax but failed to extract info (should ideally not happen)
-                         tool_description = f"Dynamic function: {func_name} (Details unavailable)"
-                         tool_input_schema = {"type": "object", "description": "Could not parse arguments."}
-                         tool_annotations = {"validationStatus": "VALID_SYNTAX_UNKNOWN_STRUCTURE"}
-
-                         # Add runtime error message if present in cache (check by function name for backward compatibility)
-                         if func_name in _runtime_errors:
-                             tool_annotations["runtimeError"] = _runtime_errors[func_name]
-
-                         # Add server config load error if present in cache
-                         if func_name in self.server_manager._server_load_errors:
-                             tool_annotations["loadError"] = self.server_manager._server_load_errors[func_name]
-
-                         # Add common annotations
-                         try:
-                             tool_annotations["lastModified"] = datetime.datetime.fromtimestamp(
-                                 os.path.getmtime(full_file_path)
-                             ).isoformat()
-                         except Exception:
-                             pass # Ignore if file stat fails
-
-                         # Create and add the tool object
-                         # Create custom ToolAnnotations object to allow extra fields
-                         custom_annotations = ToolAnnotations(**tool_annotations)
-                         tool_obj = Tool(
-                             name=func_name,
-                             description=tool_description,
-                             inputSchema=tool_input_schema,
-                             annotations=custom_annotations
-                         )
-                         # Check for duplicates before adding (app-aware and case-insensitive)
-                         # For this case, we don't have app_name from decorators, so use subfolder if available
-                         app_name = "unknown"
-                         if '/' in file_path:
-                             app_name = file_path.split('/')[0]
-                         tool_key = f"{app_name}.{func_name}".lower()
-                         existing_tool_keys = {f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}".lower() for tool in tools_list}
-                         if tool_key not in existing_tool_keys:
-                             tools_list.append(tool_obj)
-                             logger.debug(f"📝 Added dynamic tool: {func_name} (app: {app_name}), valid: {is_valid}")
-                         else:
-                             logger.warning(f"⚠️ Skipping duplicate tool: {func_name} (app: {app_name}) - already exists")
-
-                    else:
-                         # Invalid syntax
-                         tool_description = f"Dynamic function: {func_name} (INVALID)"
-                         tool_input_schema = {"type": "object", "description": "Function has syntax errors."}
-                         tool_annotations = {"validationStatus": "INVALID"}
-                         if error_message:
-                             tool_annotations["errorMessage"] = error_message
-
-                         # Add runtime error message if present in cache (check by function name for backward compatibility)
-                         if func_name in _runtime_errors:
-                             tool_annotations["runtimeError"] = _runtime_errors[func_name]
-
-                         # Add server config load error if present in cache
-                         if func_name in self.server_manager._server_load_errors:
-                             tool_annotations["loadError"] = self.server_manager._server_load_errors[func_name]
-
-                         # Add common annotations
-                         try:
-                             tool_annotations["lastModified"] = datetime.datetime.fromtimestamp(
-                                 os.path.getmtime(full_file_path)
-                             ).isoformat()
-                         except Exception:
-                             pass # Ignore if file stat fails
-
-                         # Create and add the tool object
-                         # Create custom ToolAnnotations object to allow extra fields
-                         custom_annotations = ToolAnnotations(**tool_annotations)
-                         tool_obj = Tool(
-                             name=func_name,
-                             description=tool_description,
-                             inputSchema=tool_input_schema,
-                             annotations=custom_annotations
-                         )
-                         # Check for duplicates before adding (app-aware and case-insensitive)
-                         # For this case, we don't have app_name from decorators, so use subfolder if available
-                         app_name = "unknown"
-                         if '/' in file_path:
-                             app_name = file_path.split('/')[0]
-                         tool_key = f"{app_name}.{func_name}".lower()
-                         existing_tool_keys = {f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}".lower() for tool in tools_list}
-                         if tool_key not in existing_tool_keys:
-                             tools_list.append(tool_obj)
-                             logger.debug(f"📝 Added dynamic tool: {func_name} (app: {app_name}), valid: {is_valid}")
-                         else:
-                             logger.warning(f"⚠️ Skipping duplicate tool: {func_name} (app: {app_name}) - already exists")
-
-                except Exception as e:
-                    logger.warning(f"⚠️ Error processing function {func_name} from {file_path}: {str(e)}")
-                    # Add a placeholder indicating the error
-                    # Create custom ToolAnnotations object to allow extra fields
-                    error_annotations = ToolAnnotations(validationStatus="ERROR_LOADING")
-                    # Check for duplicates before adding (app-aware and case-insensitive)
-                    # For error cases, use subfolder as app name if available
-                    app_name = "unknown"
-                    if '/' in file_path:
-                        app_name = file_path.split('/')[0]
-                    tool_key = f"{app_name}.{func_name}".lower()
-                    existing_tool_keys = {f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}".lower() for tool in tools_list}
-                    if tool_key not in existing_tool_keys:
-                        tools_list.append(Tool(
-                            name=func_name,
-                            description=f"Error loading dynamic function: {str(e)}",
-                            inputSchema={"type": "object"},
-                            annotations=error_annotations
-                        ))
-                    else:
-                        logger.warning(f"⚠️ Skipping duplicate error tool: {func_name} (app: {app_name}) - already exists")
-                    continue
-
+            # Get all functions from app-specific mappings to show all variants
+            dynamic_tools = await self._create_tools_from_app_mappings()
+            tools_list.extend(dynamic_tools)
         except Exception as e:
             logger.error(f"❌ Error scanning for dynamic functions: {str(e)}")
             # Continue with just the built-in tools

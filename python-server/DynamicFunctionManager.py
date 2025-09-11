@@ -730,6 +730,12 @@ async def {name}():
                             for func_info in functions_info:
                                 func_name = func_info['name']
 
+                                # Check if function is hidden - skip it entirely from mapping
+                                decorators_from_info = func_info.get("decorators", [])
+                                if decorators_from_info and "hidden" in decorators_from_info:
+                                    logger.info(f"🙈 SKIPPING HIDDEN FUNCTION: {CYAN}{func_name}{RESET} -> {rel_path} (not eligible for calling)")
+                                    continue
+
                                 # Determine app name: prioritize @app() decorator, then file path, then "unknown"
                                 app_name_from_decorator = func_info.get('app_name')
                                 if app_name_from_decorator:
