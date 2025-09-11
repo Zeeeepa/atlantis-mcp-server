@@ -736,19 +736,19 @@ async def {name}():
                                     logger.info(f"🙈 SKIPPING HIDDEN FUNCTION: {CYAN}{func_name}{RESET} -> {rel_path} (not eligible for calling)")
                                     continue
 
-                                # Determine app name: prioritize @app() decorator, then file path, then "unknown"
+                                # Determine app name: prioritize @app() decorator, then file path
                                 app_name_from_decorator = func_info.get('app_name')
                                 if app_name_from_decorator:
                                     app_name = app_name_from_decorator
                                 elif '/' in rel_path:
                                     app_name = rel_path.split('/')[0]
                                 else:
-                                    app_name = "unknown"
+                                    app_name = None
 
                                 # Store in main mapping (last one wins for backward compatibility)
                                 self._function_file_mapping[func_name] = rel_path
 
-                                # Store in app-specific mapping
+                                # Store in app-specific mapping (use app_name as key, None if no app specified)
                                 if app_name not in self._function_file_mapping_by_app:
                                     self._function_file_mapping_by_app[app_name] = {}
                                 self._function_file_mapping_by_app[app_name][func_name] = rel_path
@@ -953,6 +953,10 @@ async def {name}():
                     parsed_app_name, parsed_location_name = app_location_part.split("*", 1)
                 else:
                     parsed_app_name = app_location_part
+                
+                # Normalize empty strings to None to match storage format
+                parsed_app_name = parsed_app_name if parsed_app_name else None
+                parsed_location_name = parsed_location_name if parsed_location_name else None
                 
                 # Parse remote*function part
                 if "*" in remote_function_part:
