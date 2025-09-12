@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import datetime
 
 # Version
-SERVER_VERSION = "2.0.7"
+SERVER_VERSION = "2.0.8"
 
 from mcp.server import Server
 
@@ -466,13 +466,13 @@ class DynamicAdditionServer(Server):
     async def _create_tools_from_app_mappings(self) -> list[Tool]:
         """Create tools from app-specific function mappings, showing all function variants"""
         tools_list = []
-        
+
         function_mapping_by_app = self.function_manager._function_file_mapping_by_app
-        
+
         # Count total functions across all apps
         total_functions = sum(len(app_mapping) for app_mapping in function_mapping_by_app.values())
         logger.info(f"📝 FOUND {total_functions} FUNCTIONS FROM APP MAPPINGS")
-        
+
         # For each app and function in the app-specific mappings, create Tool entries
         for app_name, app_mapping in function_mapping_by_app.items():
             for func_name, file_path in app_mapping.items():
@@ -519,7 +519,7 @@ class DynamicAdditionServer(Server):
                             else:
                                 actual_app_name = app_name
                                 logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {actual_app_name} (from app mapping)")
-                            
+
                             tool_annotations["app_name"] = actual_app_name
 
                             # Check visibility overrides first (these take precedence over decorators)
@@ -578,7 +578,7 @@ class DynamicAdditionServer(Server):
                 except Exception as e:
                     logger.warning(f"⚠️ Error processing function {func_name} from {file_path}: {str(e)}")
                     continue
-        
+
         return tools_list
 
     async def _get_tools_list(self, caller_context: str = "unknown") -> list[Tool]:
