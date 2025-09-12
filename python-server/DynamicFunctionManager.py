@@ -745,8 +745,9 @@ async def {name}():
                                 else:
                                     app_name = None
 
-                                # Store in main mapping (last one wins for backward compatibility)
-                                self._function_file_mapping[func_name] = rel_path
+                                # Store in main mapping (prioritize top-level functions over app-specific ones)
+                                if func_name not in self._function_file_mapping or app_name is None:
+                                    self._function_file_mapping[func_name] = rel_path
 
                                 # Store in app-specific mapping (use app_name as key, None if no app specified)
                                 if app_name not in self._function_file_mapping_by_app:
