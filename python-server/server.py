@@ -849,6 +849,16 @@ class DynamicAdditionServer(Server):
                 },
                 annotations=ToolAnnotations(title="_function_hide")
             ),
+            Tool( # Add definition for _admin_restart
+                name="_admin_restart",
+                description="Restart the server by terminating the process. Assumes a wrapper script will restart the server automatically.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                },
+                annotations=ToolAnnotations(title="_admin_restart")
+            ),
 
         ]
         # Log the static tools being included
@@ -1591,6 +1601,21 @@ class DynamicAdditionServer(Server):
 
         try:
             result_raw = None # Initialize raw result variable
+
+            # Security check: Only owner can call internal functions
+            if (actual_function_name.startswith('_function') or
+                actual_function_name.startswith('_server') or
+                actual_function_name.startswith('_admin')):
+
+                caller = user or client_id or "unknown"
+                owner = atlantis.get_owner()
+
+                if owner and caller != owner:
+                    logger.warning(f"🚨 SECURITY: Internal function '{actual_function_name}' called by '{caller}' but owner is '{owner}' - ACCESS DENIED")
+                    raise ValueError(f"Access denied: Internal functions can only be accessed by owner")
+
+                logger.debug(f"✅ Internal function '{actual_function_name}' authorized for owner: {caller}")
+
             # Handle built-in tool calls
             if actual_function_name == "_function_set":
                 logger.debug(f"---> Calling built-in: function_set") # <-- ADD THIS LINE
@@ -1812,14 +1837,6 @@ class DynamicAdditionServer(Server):
                         raise ValueError(f"Error accessing function history: {e}")
 
             elif actual_function_name == "_function_log":
-                # Check if caller is the owner - only owner can access function logs
-                caller = user or client_id or "unknown"  # Use the user parameter passed to _execute_tool
-                owner = atlantis.get_owner()
-
-                if owner and caller != owner:
-                    logger.warning(f"Access denied: _function_log called by '{caller}' but owner is '{owner}'")
-                    raise ValueError(f"Access denied: _function_log can only be accessed by owner")
-
                 app_name = args.get("app")  # Optional app name for filtering
                 logger.debug("---> Calling built-in: _function_log" + (f" (app: {app_name})" if app_name else ""))
                 if not os.path.exists(OWNER_LOG_PATH):
@@ -1933,7 +1950,26 @@ class DynamicAdditionServer(Server):
 
                     result_raw = [TextContent(type="text", text=f"Function '{func_name}' is now temporarily hidden until server restart.")]
 
-            elif actual_function_name.startswith('_function') or actual_function_name.startswith('_server'):
+            elif actual_function_name == "_admin_restart":
+                # Restart the server by terminating the process (wrapper script should restart it)
+                logger.info(f"🔄 ADMIN RESTART requested by owner: {user or 'unknown'}")
+
+                # Send response first before terminating
+                result_raw = [TextContent(type="text", text="Server restart initiated. The process will terminate and should be restarted by wrapper script.")]
+
+                # Schedule termination after a brief delay to allow response to be sent
+                import asyncio
+                import os
+
+                async def delayed_shutdown():
+                    await asyncio.sleep(0.1)  # Brief delay to send response
+                    logger.info("🛑 Sending SIGINT for graceful restart...")
+                    os.kill(os.getpid(), signal.SIGINT)  # Same as Ctrl-C - triggers graceful shutdown
+
+                # Schedule the shutdown task
+                asyncio.create_task(delayed_shutdown())
+
+            elif actual_function_name.startswith('_function') or actual_function_name.startswith('_server') or actual_function_name.startswith('_admin'):
                 # Catch-all for invalid internal functions (only _function* and _server* are internal)
                 error_message = f"Invalid internal function: '{actual_function_name}'. Check available internal functions."
                 error_annotations = {
