@@ -1527,9 +1527,38 @@ class DynamicAdditionServer(Server):
         # ---> ADDED: Log entry and raw args
         logger.debug(f"---> _execute_tool ENTERED. Name: '{name}', Raw Args: {args!r}") # <-- ADD THIS LINE
 
+        # Parse compound tool names first to extract actual function name
+        # Format: "app*location**remote*function" or "app**remote*function" or just "function"
+        actual_function_name = name
+        parsed_app_name = None
+        parsed_location_name = None
+
+        if "**" in name and "*" in name:
+            # Split on "**" to separate app[*location] from remote*function
+            parts = name.split("**")
+            if len(parts) == 2:
+                app_location_part = parts[0]
+                remote_function_part = parts[1]
+
+                # Parse app[*location] part
+                if "*" in app_location_part:
+                    parsed_app_name, parsed_location_name = app_location_part.split("*", 1)
+                else:
+                    parsed_app_name = app_location_part
+
+                # Normalize empty strings to None to match storage format
+                parsed_app_name = parsed_app_name if parsed_app_name else None
+                parsed_location_name = parsed_location_name if parsed_location_name else None
+
+                # Parse remote*function part
+                if "*" in remote_function_part:
+                    remote_name, actual_function_name = remote_function_part.split("*", 1)
+                    logger.info(f"🔍 PARSED TOOL NAME: app='{parsed_app_name}', location='{parsed_location_name}', remote='{remote_name}', function='{actual_function_name}'")
+
+        logger.debug(f"Actual function name to route: '{actual_function_name}'")
 
 
-        if not name.startswith('_'):
+        if not actual_function_name.startswith('_'):
             # --- BEGIN TOOL CALL LOGGING ---
             try:
                 # Ensure datetime, json, and os are available (they are imported at the top of server.py)
@@ -1563,7 +1592,7 @@ class DynamicAdditionServer(Server):
         try:
             result_raw = None # Initialize raw result variable
             # Handle built-in tool calls
-            if name == "_function_set":
+            if actual_function_name == "_function_set":
                 logger.debug(f"---> Calling built-in: function_set") # <-- ADD THIS LINE
                 # function_set now returns (extracted_name, result_messages)
                 extracted_name, result_messages = await self.function_manager.function_set(args, self)
@@ -1571,10 +1600,10 @@ class DynamicAdditionServer(Server):
                 if extracted_name:
                     # Notify only if function_set successfully extracted a name
                     await self._notify_tool_list_changed(change_type="updated", tool_name=extracted_name)
-            elif name == "_function_get":
+            elif actual_function_name == "_function_get":
                 logger.debug(f"---> Calling built-in: get_function_code") # <-- ADD THIS LINE
                 result_raw = await self.function_manager.get_function_code(args, self)
-            elif name == "_function_remove":
+            elif actual_function_name == "_function_remove":
                 # Remove function
                 func_name = args.get("name")
                 app_name = args.get("app")  # Optional app name for disambiguation
@@ -1608,7 +1637,7 @@ class DynamicAdditionServer(Server):
                         # Raise error to be caught by the main handler
                         raise RuntimeError(f"Function '{func_name}' could not be removed (function_remove returned False). Check logs.")
 
-            elif name == "_function_add":
+            elif actual_function_name == "_function_add":
                 # Add empty function
                 func_name = args.get("name")
                 app_name = args.get("app")  # Optional app name for disambiguation
@@ -1662,13 +1691,13 @@ class DynamicAdditionServer(Server):
                         # Raise error to be caught by the main handler
                         raise RuntimeError(f"Function '{func_name}' could not be added (function_add returned False). Check logs.")
 
-            elif name == "_server_get":
+            elif actual_function_name == "_server_get":
                 svc_name = args.get("name")
                 if not svc_name:
                     raise ValueError("Missing required parameter: name")
                 logger.debug(f"---> Calling built-in: server_get for '{svc_name}'")
                 result_raw = await self.server_manager.server_get(svc_name)
-            elif name == "_server_add":
+            elif actual_function_name == "_server_add":
                 svc_name = args.get("name")
                 if not svc_name:
                     raise ValueError("Missing required parameter: 'name' must be a string")
@@ -1683,7 +1712,7 @@ class DynamicAdditionServer(Server):
                     result_raw = [TextContent(type="text", text=f"MCP '{svc_name}' added successfully.")]
                 else:
                     result_raw = [TextContent(type="text", text=f"Failed to add MCP '{svc_name}'.")]
-            elif name == "_server_remove":
+            elif actual_function_name == "_server_remove":
                 svc_name = args.get("name")
                 if not svc_name:
                     raise ValueError("Missing required parameter: name")
@@ -1697,7 +1726,7 @@ class DynamicAdditionServer(Server):
                     result_raw = [TextContent(type="text", text=f"Server '{svc_name}' removed successfully.")]
                 else:
                     result_raw = [TextContent(type="text", text=f"Failed to remove server '{svc_name}'.")]
-            elif name == "_server_set":
+            elif actual_function_name == "_server_set":
                 logger.debug(f"---> Calling built-in: server_set with args: {args!r}")
                 # Extract the config from the args dictionary
                 config = args.get("config")
@@ -1725,19 +1754,19 @@ class DynamicAdditionServer(Server):
                         await self._notify_tool_list_changed(change_type="updated", tool_name=server_name)
                     except Exception as e:
                         logger.error(f"Error sending tool notification after updating server {server_name}: {str(e)}")
-            elif name == "_server_validate":
+            elif actual_function_name == "_server_validate":
                 svc_name = args.get("name")
                 if not svc_name:
                     raise ValueError("Missing required parameter: name")
                 logger.debug(f"---> Calling built-in: server_validate for '{svc_name}'")
                 result_raw = await self.server_manager.server_validate(svc_name)
-            elif name == "_server_start":
+            elif actual_function_name == "_server_start":
                 logger.debug(f"---> Calling built-in: server_start with args: {args!r}")
                 result_raw = await self.server_manager.server_start(args, self)
-            elif name == "_server_stop":
+            elif actual_function_name == "_server_stop":
                 logger.debug(f"---> Calling built-in: server_stop with args: {args!r}")
                 result_raw = await self.server_manager.server_stop(args, self)
-            elif name == "_server_get_tools":
+            elif actual_function_name == "_server_get_tools":
                 server_name = args.get('name')
                 if not server_name or not isinstance(server_name, str):
                      raise ValueError("Missing or invalid 'name' argument for _server_get_tools")
@@ -1752,7 +1781,7 @@ class DynamicAdditionServer(Server):
                         }
                         for tool in result_raw
                     ]
-            elif name == "_function_history":
+            elif actual_function_name == "_function_history":
                 app_name = args.get("app")  # Required app name
                 function_name = args.get("name")  # Required function name
                 logger.debug(f"---> Calling built-in: _function_history (app: {app_name}, function: {function_name})")
@@ -1782,7 +1811,7 @@ class DynamicAdditionServer(Server):
                         # Return an error message inside the tool response
                         raise ValueError(f"Error accessing function history: {e}")
 
-            elif name == "_function_log":
+            elif actual_function_name == "_function_log":
                 # Check if caller is the owner - only owner can access function logs
                 caller = user or client_id or "unknown"  # Use the user parameter passed to _execute_tool
                 owner = atlantis.get_owner()
@@ -1816,7 +1845,7 @@ class DynamicAdditionServer(Server):
                         # Return an error message inside the tool response
                         raise ValueError(f"Error accessing function history: {e}")
 
-            elif name == "_function_show":
+            elif actual_function_name == "_function_show":
                 # Make any function temporarily visible
                 app_name = args.get("app")  # Optional app name for disambiguation
                 func_name = args.get("name")
@@ -1860,7 +1889,7 @@ class DynamicAdditionServer(Server):
 
                     result_raw = [TextContent(type="text", text=f"Function '{func_name}' is now temporarily visible until server restart.")]
 
-            elif name == "_function_hide":
+            elif actual_function_name == "_function_hide":
                 # Hide any function temporarily
                 app_name = args.get("app")  # Optional app name for disambiguation
                 func_name = args.get("name")
@@ -1903,6 +1932,14 @@ class DynamicAdditionServer(Server):
                         logger.error(f"Error sending tool notification after hiding {func_name}: {str(e)}")
 
                     result_raw = [TextContent(type="text", text=f"Function '{func_name}' is now temporarily hidden until server restart.")]
+
+            elif actual_function_name.startswith('_function') or actual_function_name.startswith('_server'):
+                # Catch-all for invalid internal functions (only _function* and _server* are internal)
+                error_message = f"Invalid internal function: '{actual_function_name}'. Check available internal functions."
+                error_annotations = {
+                    "tool_error": {"tool_name": actual_function_name, "message": error_message}
+                }
+                result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
 
             # Handle MCP tool calls
             elif '.' in name or ' ' in name: # <<< UPDATED Condition
@@ -1983,7 +2020,7 @@ class DynamicAdditionServer(Server):
                     logger.error(f"❌ Unexpected error proxying tool call '{name}' to '{server_alias}': {proxy_err}", exc_info=True)
                     raise ValueError(f"Unexpected error calling '{tool_name_on_server}' on server '{server_alias}': {proxy_err}") from proxy_err
 
-            elif not name.startswith('_'): # <--- CHANGED HERE
+            elif not actual_function_name.startswith('_'): # <--- CHANGED HERE
 
                 # --- Handle Local Dynamic Function Call ---
                 logger.info(f"🔧 CALLING LOCAL DYNAMIC FUNCTION: {name}")
@@ -2005,9 +2042,13 @@ class DynamicAdditionServer(Server):
                     logger.info(f"RECEIVED FROM CLOUD: Tool: '{name}', Raw Args: {args!r}, Type: {type(args)}")
                     if user:
                         logger.info(f"Call made by user: {user}")
-                    logger.debug(f"---> Calling dynamic: function_call for '{name}' with args: {args} and client_id: {client_id} and request_id: {request_id}, user: {user}") # Log args and client_id separately
-                    # Pass arguments, client_id, user, and session_id distinctly
-                    result_raw = await self.function_manager.function_call(name=name, client_id=client_id, request_id=request_id, user=user, session_id=session_id, args=args)
+                    logger.debug(f"---> Calling dynamic: function_call for '{actual_function_name}' with args: {args} and client_id: {client_id} and request_id: {request_id}, user: {user}") # Log args and client_id separately
+                    # Pass arguments, client_id, user, and session_id distinctly, plus parsed app info
+                    # Add parsed app name to args if it was extracted from compound name
+                    final_args = args.copy() if args else {}
+                    if parsed_app_name and 'app' not in final_args:
+                        final_args['app'] = parsed_app_name
+                    result_raw = await self.function_manager.function_call(name=actual_function_name, client_id=client_id, request_id=request_id, user=user, session_id=session_id, args=final_args)
                     logger.debug(f"<--- Dynamic function '{name}' RAW result: {result_raw} (type: {type(result_raw)})")
                 except Exception as e:
                     # Error already enhanced with command context at source, just re-raise

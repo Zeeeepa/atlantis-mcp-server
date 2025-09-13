@@ -937,40 +937,15 @@ async def {name}():
         Raises exceptions if the function doesn't exist, fails to load, or errors during execution.
         Gets the 'user' field that tells us who is making the call and passes it to the function context.
         '''
-        # Parse special tool name format: "app*location**remote*function" or "app**remote*function"
+        # Function name is now pre-parsed by server.py, so 'name' is the actual function name
         actual_function_name = name
-        parsed_app_name = None
-        parsed_location_name = None
-        
-        if "**" in name and "*" in name:
-            # Split on "**" to separate app[*location] from remote*function
-            parts = name.split("**")
-            if len(parts) == 2:
-                app_location_part = parts[0]
-                remote_function_part = parts[1]
-                
-                # Parse app[*location] part
-                if "*" in app_location_part:
-                    parsed_app_name, parsed_location_name = app_location_part.split("*", 1)
-                else:
-                    parsed_app_name = app_location_part
-                
-                # Normalize empty strings to None to match storage format
-                parsed_app_name = parsed_app_name if parsed_app_name else None
-                parsed_location_name = parsed_location_name if parsed_location_name else None
-                
-                # Parse remote*function part
-                if "*" in remote_function_part:
-                    remote_name, actual_function_name = remote_function_part.split("*", 1)
-                    logger.info(f"🔍 PARSED TOOL NAME: app='{parsed_app_name}', location='{parsed_location_name}', remote='{remote_name}', function='{actual_function_name}'")
-        
+
         secure_name = utils.clean_filename(actual_function_name)
         if not secure_name:
             raise ValueError(f"Invalid function name '{actual_function_name}' for calling.")
 
-        # NEW: Find which file contains this function
-        # Extract app name from kwargs or parsed tool name (parsed takes precedence)
-        app_name = parsed_app_name or kwargs.get("app")
+        # Extract app name from kwargs (already set by server.py parsing logic)
+        app_name = kwargs.get("app")
         target_file = await self._find_file_containing_function(actual_function_name, app_name)
         if not target_file:
             raise FileNotFoundError(f"Dynamic function '{name}' not found in any file")
