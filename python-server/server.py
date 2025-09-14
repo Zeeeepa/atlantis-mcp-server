@@ -1959,7 +1959,6 @@ class DynamicAdditionServer(Server):
 
                 # Schedule termination after a brief delay to allow response to be sent
                 import asyncio
-                import os
 
                 async def delayed_shutdown():
                     await asyncio.sleep(0.1)  # Brief delay to send response
