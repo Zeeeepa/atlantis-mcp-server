@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import datetime
 
 # Version
-SERVER_VERSION = "2.0.9"
+SERVER_VERSION = "2.0.10"
 
 from mcp.server import Server
 
