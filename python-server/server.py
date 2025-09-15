@@ -859,6 +859,18 @@ class DynamicAdditionServer(Server):
                 },
                 annotations=ToolAnnotations(title="_admin_restart")
             ),
+            Tool( # Add definition for _admin_pip_install
+                name="_admin_pip_install",
+                description="Install Python packages using pip. Only available to server owner.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "package": {"type": "string", "description": "The package name to install (e.g., 'requests', 'numpy==1.21.0')"}
+                    },
+                    "required": ["package"]
+                },
+                annotations=ToolAnnotations(title="_admin_pip_install")
+            ),
 
         ]
         # Log the static tools being included
@@ -1968,6 +1980,55 @@ class DynamicAdditionServer(Server):
                 # Schedule the shutdown task
                 asyncio.create_task(delayed_shutdown())
 
+            elif actual_function_name == "_admin_pip_install":
+                # Install Python packages using pip
+                package = args.get("package")
+                force = False  # Hardcoded to false for now
+
+                if not package:
+                    raise ValueError("Missing required parameter: package")
+
+                logger.info(f"📦 ADMIN PIP INSTALL requested by owner: {user or 'unknown'} - Package: {package}")
+
+                # Build pip command
+                pip_cmd = [sys.executable, "-m", "pip", "install", package]
+                if force:
+                    pip_cmd.append("--force-reinstall")
+
+                try:
+                    # Run pip install command
+                    import subprocess
+                    result = subprocess.run(
+                        pip_cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=300  # 5 minute timeout
+                    )
+
+                    if result.returncode == 0:
+                        success_msg = f"✅ Successfully installed package: {package}"
+                        if result.stdout:
+                            success_msg += f"\n\nOutput:\n{result.stdout}"
+                        logger.info(f"📦 Package '{package}' installed successfully")
+                        result_raw = [TextContent(type="text", text=success_msg)]
+                    else:
+                        error_msg = f"❌ Failed to install package: {package}"
+                        if result.stderr:
+                            error_msg += f"\n\nError output:\n{result.stderr}"
+                        if result.stdout:
+                            error_msg += f"\n\nStdout:\n{result.stdout}"
+                        logger.error(f"📦 Failed to install package '{package}': {result.stderr}")
+                        result_raw = [TextContent(type="text", text=error_msg)]
+
+                except subprocess.TimeoutExpired:
+                    timeout_msg = f"⏰ Pip install timed out after 5 minutes for package: {package}"
+                    logger.error(f"📦 Pip install timeout for package '{package}'")
+                    result_raw = [TextContent(type="text", text=timeout_msg)]
+                except Exception as e:
+                    error_msg = f"💥 Error during pip install for package '{package}': {str(e)}"
+                    logger.error(f"📦 Pip install error for package '{package}': {str(e)}")
+                    result_raw = [TextContent(type="text", text=error_msg)]
+
             elif actual_function_name.startswith('_function') or actual_function_name.startswith('_server') or actual_function_name.startswith('_admin'):
                 # Catch-all for invalid internal functions (only _function* and _server* are internal)
                 error_message = f"Invalid internal function: '{actual_function_name}'. Check available internal functions."
@@ -2078,11 +2139,9 @@ class DynamicAdditionServer(Server):
                     if user:
                         logger.info(f"Call made by user: {user}")
                     logger.debug(f"---> Calling dynamic: function_call for '{actual_function_name}' with args: {args} and client_id: {client_id} and request_id: {request_id}, user: {user}") # Log args and client_id separately
-                    # Pass arguments, client_id, user, and session_id distinctly, plus parsed app info
-                    # Add parsed app name to args if it was extracted from compound name
+                    # Pass arguments, client_id, user, and session_id distinctly
+                    # App name should be ambient context, not a function parameter
                     final_args = args.copy() if args else {}
-                    if parsed_app_name and 'app' not in final_args:
-                        final_args['app'] = parsed_app_name
                     result_raw = await self.function_manager.function_call(name=actual_function_name, client_id=client_id, request_id=request_id, user=user, session_id=session_id, args=final_args)
                     logger.debug(f"<--- Dynamic function '{name}' RAW result: {result_raw} (type: {type(result_raw)})")
                 except Exception as e:
