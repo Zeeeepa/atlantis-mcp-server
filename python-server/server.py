@@ -1549,33 +1549,25 @@ class DynamicAdditionServer(Server):
         # ---> ADDED: Log entry and raw args
         logger.debug(f"---> _execute_tool ENTERED. Name: '{name}', Raw Args: {args!r}") # <-- ADD THIS LINE
 
-        # Parse compound tool names first to extract actual function name
-        # Format: "app*location**remote*function" or "app**remote*function" or just "function"
+        # Parse compound tool names by splitting on '*'
+        # Format: "app*location*owner*remote*function" (empty fields allowed)
         actual_function_name = name
         parsed_app_name = None
         parsed_location_name = None
+        parsed_owner_name = None
+        parsed_remote_name = None
 
-        if "**" in name and "*" in name:
-            # Split on "**" to separate app[*location] from remote*function
-            parts = name.split("**")
-            if len(parts) == 2:
-                app_location_part = parts[0]
-                remote_function_part = parts[1]
+        if "*" in name:
+            parts = name.split("*")
+            if len(parts) >= 5:
+                # Full format: app*location*owner*remote*function
+                parsed_app_name = parts[0] if parts[0] else None
+                parsed_location_name = parts[1] if parts[1] else None
+                parsed_owner_name = parts[2] if parts[2] else None
+                parsed_remote_name = parts[3] if parts[3] else None
+                actual_function_name = parts[4]
 
-                # Parse app[*location] part
-                if "*" in app_location_part:
-                    parsed_app_name, parsed_location_name = app_location_part.split("*", 1)
-                else:
-                    parsed_app_name = app_location_part
-
-                # Normalize empty strings to None to match storage format
-                parsed_app_name = parsed_app_name if parsed_app_name else None
-                parsed_location_name = parsed_location_name if parsed_location_name else None
-
-                # Parse remote*function part
-                if "*" in remote_function_part:
-                    remote_name, actual_function_name = remote_function_part.split("*", 1)
-                    logger.info(f"🔍 PARSED TOOL NAME: app='{parsed_app_name}', location='{parsed_location_name}', remote='{remote_name}', function='{actual_function_name}'")
+                logger.info(f"🔍 PARSED TOOL NAME: app='{parsed_app_name}', location='{parsed_location_name}', owner='{parsed_owner_name}', remote='{parsed_remote_name}', function='{actual_function_name}'")
 
         logger.debug(f"Actual function name to route: '{actual_function_name}'")
 
