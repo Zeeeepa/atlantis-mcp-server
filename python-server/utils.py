@@ -110,7 +110,15 @@ async def client_log(
     # Log locally first (always using INFO level for local display)
     seq_prefix = f"(Seq: {seq_num}) " if seq_num is not None else ""
     log_prefix = f"{PINK}CLIENT LOG [{level.upper()}] {seq_prefix}"
-    log_suffix = f"(Client: {client_id_for_routing}, Req: {request_id}, Entry: {entry_point_name}, Logger: {logger_name}): {message}{RESET}"
+
+    # Trim long messages for debug output
+    message_str = str(message)
+    if len(message_str) > 200:
+        trimmed_message = message_str[:200] + f"... (truncated, full length: {len(message_str)})"
+    else:
+        trimmed_message = message_str
+
+    log_suffix = f"(Client: {client_id_for_routing}, Req: {request_id}, Entry: {entry_point_name}, Logger: {logger_name}): {trimmed_message}{RESET}"
     logger.info(f"{log_prefix}{log_suffix}") # Add seq_num to local log too
 
     # Send to client if server is available

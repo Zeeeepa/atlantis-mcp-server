@@ -69,6 +69,13 @@ shared = SharedContainer()
 
 # --- Helper Functions ---
 
+def _trim_message_for_debug(message: Any, max_len: int = 200) -> str:
+    """Trim a message for debug output to avoid console spam from long content like base64."""
+    msg_str = str(message)
+    if len(msg_str) <= max_len:
+        return msg_str
+    return msg_str[:max_len] + f"... (truncated, full length: {len(msg_str)})"
+
 async def get_and_increment_stream_seq_num(stream_id: str) -> int:
     """Get and increment the sequence number for a specific stream.
 
@@ -672,3 +679,16 @@ async def owner_log(message: str):
         return f"Error writing to log file {log_file_path}: {e}"
 
     return False
+
+async def client_onclick(element_id: str, callback_func: Callable):
+    """Registers an onclick handler for an HTML element.
+
+    Args:
+        element_id: The ID of the HTML element to attach the click handler to
+        callback_func: The async function to call when the element is clicked
+    """
+    # Store the callback for when we get a click notification back
+    shared.set(f"onclick_{element_id}", callback_func)
+
+    # Send registration message to client
+    await client_log(element_id, message_type="onclick_register")
