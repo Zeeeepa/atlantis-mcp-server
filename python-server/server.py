@@ -1572,7 +1572,7 @@ class DynamicAdditionServer(Server):
         logger.debug(f"Actual function name to route: '{actual_function_name}'")
 
 
-        if not actual_function_name.startswith('_'):
+        if not (actual_function_name.startswith('_function') or actual_function_name.startswith('_server') or actual_function_name.startswith('_admin')):
             # --- BEGIN TOOL CALL LOGGING ---
             try:
                 # Ensure datetime, json, and os are available (they are imported at the top of server.py)
@@ -2108,7 +2108,7 @@ class DynamicAdditionServer(Server):
                     logger.error(f"❌ Unexpected error proxying tool call '{name}' to '{server_alias}': {proxy_err}", exc_info=True)
                     raise ValueError(f"Unexpected error calling '{tool_name_on_server}' on server '{server_alias}': {proxy_err}") from proxy_err
 
-            elif not actual_function_name.startswith('_'): # <--- CHANGED HERE
+            elif not (actual_function_name.startswith('_function') or actual_function_name.startswith('_server') or actual_function_name.startswith('_admin')):
 
                 # --- Handle Local Dynamic Function Call ---
                 logger.info(f"🔧 CALLING LOCAL DYNAMIC FUNCTION: {name}")
