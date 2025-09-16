@@ -2132,9 +2132,9 @@ class DynamicAdditionServer(Server):
                         logger.info(f"Call made by user: {user}")
                     logger.debug(f"---> Calling dynamic: function_call for '{actual_function_name}' with args: {args} and client_id: {client_id} and request_id: {request_id}, user: {user}") # Log args and client_id separately
                     # Pass arguments, client_id, user, and session_id distinctly
-                    # App name should be ambient context, not a function parameter
+                    # Pass parsed app name for proper function routing
                     final_args = args.copy() if args else {}
-                    result_raw = await self.function_manager.function_call(name=actual_function_name, client_id=client_id, request_id=request_id, user=user, session_id=session_id, args=final_args)
+                    result_raw = await self.function_manager.function_call(name=actual_function_name, client_id=client_id, request_id=request_id, user=user, session_id=session_id, app=parsed_app_name, args=final_args)
                     logger.debug(f"<--- Dynamic function '{name}' RAW result: {result_raw} (type: {type(result_raw)})")
                 except Exception as e:
                     # Error already enhanced with command context at source, just re-raise
