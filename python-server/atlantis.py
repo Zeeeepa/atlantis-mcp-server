@@ -680,7 +680,7 @@ async def owner_log(message: str):
 
     return False
 
-async def client_onclick(element_id: str, callback_func: Callable):
+async def client_onclick(element_id: str):
     """Registers an onclick handler for an HTML element.
 
     Args:
