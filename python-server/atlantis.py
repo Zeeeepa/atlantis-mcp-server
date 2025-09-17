@@ -688,7 +688,7 @@ async def client_onclick(element_id: str, callback_func: Callable):
         callback_func: The async function to call when the element is clicked
     """
     # Store the callback for when we get a click notification back
-    shared.set(f"onclick_{element_id}", callback_func)
+    #shared.set(f"onclick_{element_id}", callback_func)
 
     # Send registration message to client
     await client_log(element_id, message_type="onclick_register")
