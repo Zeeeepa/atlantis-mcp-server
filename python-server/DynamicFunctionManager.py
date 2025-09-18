@@ -960,10 +960,8 @@ async def {name}():
         module_name = f"{PARENT_PACKAGE_NAME}.{module_path}"
         module = None # Define module outside the lock
 
-        # --- Clear ALL dynamic function child modules from cache FIRST ---
-        # This acquires the lock internally, clears, and releases.
-        await self.invalidate_all_dynamic_module_cache()
-        # --- End Cache Clear ---
+        # Cache invalidation is now handled by the file watcher to avoid unnecessary rebuilds
+        # on every function call. Modules will be reloaded when files actually change.
 
         # --- Acquire lock *only* for parent check and specific module loading ---
         async with self._dynamic_load_lock:

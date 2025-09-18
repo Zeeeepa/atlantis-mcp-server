@@ -607,9 +607,8 @@ class DynamicAdditionServer(Server):
             current_active_keys = set(running_servers)
             servers_changed = current_active_keys != self._last_active_server_keys
 
-            # Add 'and False' to always invalidate cache for now
             # Use current_active_keys here too
-            if not dirs_changed and not servers_changed and self._cached_tools is not None and False:
+            if not dirs_changed and not servers_changed and self._cached_tools is not None:
                 logger.info(f"⚡️ USING CACHED TOOL LIST (Dirs unchanged - func mtime: {current_mtime}, server mtime: {server_mtime}; Active Servers unchanged: {self._last_active_server_keys})")
                 return list(self._cached_tools)
             # Log reason for regeneration
