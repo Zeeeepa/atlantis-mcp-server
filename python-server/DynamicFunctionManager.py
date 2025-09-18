@@ -984,7 +984,7 @@ async def {name}():
                 # between the invalidate call above and acquiring this lock.
                 # Although invalidate_all should have removed it, this is belt-and-suspenders.
                 if module_name in sys.modules:
-                    logger.warning(f"Module {module_name} unexpectedly found in cache before load, removing again.")
+                    logger.debug(f"Module {module_name} found in cache, reloading for freshness.")
                     del sys.modules[module_name]
 
                 logger.info(f"Loading module fresh: {module_name}")
