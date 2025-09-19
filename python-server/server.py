@@ -870,6 +870,16 @@ class DynamicAdditionServer(Server):
                 },
                 annotations=ToolAnnotations(title="_admin_pip_install")
             ),
+            Tool( # Add definition for _admin_click
+                name="_admin_click",
+                description="Admin test function that logs a message. Only available to server owner.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                },
+                annotations=ToolAnnotations(title="_admin_click")
+            ),
 
         ]
         # Log the static tools being included
@@ -2019,6 +2029,12 @@ class DynamicAdditionServer(Server):
                     error_msg = f"💥 Error during pip install for package '{package}': {str(e)}"
                     logger.error(f"📦 Pip install error for package '{package}': {str(e)}")
                     result_raw = [TextContent(type="text", text=error_msg)]
+
+            elif actual_function_name == "_admin_click":
+                # Simple admin test function that logs a message
+                logger.info(f"🖱️ ADMIN CLICK called by owner: {user or 'unknown'}")
+                click_msg = f"🖱️ Admin click function executed by: {user or 'unknown'}"
+                result_raw = [TextContent(type="text", text=click_msg)]
 
             elif actual_function_name.startswith('_function') or actual_function_name.startswith('_server') or actual_function_name.startswith('_admin'):
                 # Catch-all for invalid internal functions (only _function* and _server* are internal)
