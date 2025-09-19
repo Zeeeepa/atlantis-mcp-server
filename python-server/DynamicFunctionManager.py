@@ -946,6 +946,48 @@ async def {name}():
 
         # Extract app name from kwargs (already set by server.py parsing logic)
         app_name = kwargs.get("app")
+
+        # Special handling for click callback functions
+        if actual_function_name.startswith("_click_callback_"):
+            # This is a temporary click callback - handle it directly from atlantis
+            if hasattr(atlantis, actual_function_name):
+                callback_func = getattr(atlantis, actual_function_name)
+
+                # Set up atlantis context for the callback
+                context_tokens = atlantis.set_context(
+                    client_log_func=lambda message, level="INFO", message_type="text": utils.client_log(
+                        client_id_for_routing=client_id,
+                        request_id=request_id,
+                        entry_point_name=actual_function_name,
+                        message_type=message_type,
+                        message=message,
+                        level=level,
+                        caller_name=actual_function_name
+                    ),
+                    request_id=request_id,
+                    client_id=client_id,
+                    entry_point_name=actual_function_name,
+                    user=user,
+                    session_id=kwargs.get("session_id")
+                )
+
+                try:
+                    # Execute the callback with proper atlantis context
+                    if inspect.iscoroutinefunction(callback_func):
+                        result = await callback_func()
+                    else:
+                        result = callback_func()
+
+                    # do not return anything
+
+                finally:
+                    # Reset atlantis context
+                    if context_tokens:
+                        atlantis.reset_context(context_tokens)
+            else:
+                raise FileNotFoundError(f"Click callback function '{actual_function_name}' not found in atlantis")
+
+        # Normal file-based function handling
         target_file = await self._find_file_containing_function(actual_function_name, app_name)
         if not target_file:
             raise FileNotFoundError(f"Dynamic function '{name}' not found in any file")

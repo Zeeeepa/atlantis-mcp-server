@@ -872,11 +872,13 @@ class DynamicAdditionServer(Server):
             ),
             Tool( # Add definition for _admin_click
                 name="_admin_click",
-                description="Admin test function that logs a message. Only available to server owner.",
+                description="Handles click events from the client UI. Only available to server owner.",
                 inputSchema={
                     "type": "object",
-                    "properties": {},
-                    "required": []
+                    "properties": {
+                        "key": {"type": "string", "description": "The click key to identify which callback to invoke"}
+                    },
+                    "required": ["key"]
                 },
                 annotations=ToolAnnotations(title="_admin_click")
             ),
@@ -2031,10 +2033,46 @@ class DynamicAdditionServer(Server):
                     result_raw = [TextContent(type="text", text=error_msg)]
 
             elif actual_function_name == "_admin_click":
-                # Simple admin test function that logs a message
-                logger.info(f"🖱️ ADMIN CLICK called by owner: {user or 'unknown'}")
-                click_msg = f"🖱️ Admin click function executed by: {user or 'unknown'}"
-                result_raw = [TextContent(type="text", text=click_msg)]
+                # Handle click events by invoking stored callbacks as dynamic functions
+                key = args.get("key")
+                if not key:
+                    raise ValueError("Missing required parameter: key")
+
+                logger.info(f"🖱️ ADMIN CLICK: {user} clicked key: {key}")
+
+                # Check if we have a callback for this key using the global atlantis
+                callback = atlantis._click_callbacks.get(key)
+                logger.info(f"🖱️ Available callback keys: {list(atlantis._click_callbacks.keys())}")
+
+                if callback:
+                    logger.info(f"🖱️ Found callback for key '{key}', invoking as dynamic function...")
+
+                    # Create a wrapper function that can be called as a dynamic function
+                    # We'll inject it temporarily into atlantis and call it through function_manager
+                    wrapper_name = f"_click_callback_{key.replace('-', '_').replace('.', '_')}"
+
+                    # Inject the callback into the existing atlantis context temporarily
+                    setattr(atlantis, wrapper_name, callback)
+
+                    try:
+                        # Invoke through function manager to get full dynamic function context
+                        result_raw = await self.function_manager.function_call(
+                            name=wrapper_name,
+                            client_id=client_id,
+                            request_id=request_id,
+                            user=user,
+                            session_id=session_id,
+                            app=None,  # No specific app
+                            args={}    # No additional args
+                        )
+                    finally:
+                        # Clean up the temporary wrapper
+                        if hasattr(atlantis, wrapper_name):
+                            delattr(atlantis, wrapper_name)
+                else:
+                    logger.info(f"🖱️ No callback found for key '{key}'")
+                    click_msg = f"🖱️ Click received for key '{key}' but no callback registered"
+                    result_raw = [TextContent(type="text", text=click_msg)]
 
             elif actual_function_name.startswith('_function') or actual_function_name.startswith('_server') or actual_function_name.startswith('_admin'):
                 # Catch-all for invalid internal functions (only _function* and _server* are internal)

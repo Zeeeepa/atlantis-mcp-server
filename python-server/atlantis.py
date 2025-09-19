@@ -36,6 +36,9 @@ _log_tasks_var: contextvars.ContextVar[Optional[List[asyncio.Task]]] = contextva
 # Per-stream sequence numbers - each stream_id gets its own counter
 _stream_seq_counters: dict = {}
 
+# Click callback lookup table - maps click keys to callback functions
+_click_callbacks: dict = {}
+
 # --- Shared Object Container ---
 # This container persists across dynamic function reloads and can store
 # shared resources like database connections, cache objects, etc.
@@ -680,15 +683,89 @@ async def owner_log(message: str):
 
     return False
 
-async def client_onclick(element_id: str):
-    """Registers an onclick handler for an HTML element.
+async def client_onclick(key: str, callback: Callable):
+    """Registers an onclick handler for a click key.
 
     Args:
-        element_id: The ID of the HTML element to attach the click handler to
-        callback_func: The async function to call when the element is clicked
+        key: The unique key to identify this click handler
+        callback: The async function to call when the click event occurs
     """
-    # Store the callback for when we get a click notification back
-    #shared.set(f"onclick_{element_id}", callback_func)
+    # Store the callback in the global lookup table
+    _click_callbacks[key] = callback
+    #await client_log(f"DEBUG: Stored callback for key '{key}', total callbacks: {len(_click_callbacks)}")
 
     # Send registration message to client
-    await client_log(element_id, message_type="onclick_register")
+    await client_log(key, message_type="onclick_register")
+
+async def invoke_click_callback(key: str) -> Any:
+    """Invokes a stored click callback by its key.
+
+    Args:
+        key: The key of the callback to invoke
+
+    Returns:
+        The result of the callback function, or None if key not found
+    """
+    import logging
+    logger = logging.getLogger("mcp_server")
+    logger.info(f"DEBUG: Looking up callback for key '{key}', available keys: {list(_click_callbacks.keys())}")
+
+    callback = _click_callbacks.get(key)
+    if callback:
+        logger.info(f"DEBUG: Found callback for key '{key}', executing...")
+        # Callback runs in the current context, which should have client_log available
+        if inspect.iscoroutinefunction(callback):
+            result = await callback()
+            logger.info(f"DEBUG: Callback executed, result: {result}")
+            return result
+        else:
+            result = callback()
+            logger.info(f"DEBUG: Callback executed, result: {result}")
+            return result
+    else:
+        logger.info(f"DEBUG: No callback found for key '{key}'")
+    return None
+
+async def invoke_click_callback_with_context(key: str, bound_client_log) -> Any:
+    """Invokes a stored click callback with a specific client_log context.
+
+    Args:
+        key: The key of the callback to invoke
+        bound_client_log: A bound client_log function with proper context
+
+    Returns:
+        The result of the callback function, or None if key not found
+    """
+    import logging
+    logger = logging.getLogger("mcp_server")
+    logger.info(f"DEBUG: Looking up callback for key '{key}' with context")
+
+    callback = _click_callbacks.get(key)
+    if callback:
+        logger.info(f"DEBUG: Found callback for key '{key}', executing with context...")
+
+        # Temporarily replace the client_log implementation for this callback
+        original_client_log = globals().get('client_log')
+
+        async def context_client_log(message, level="INFO", message_type="text"):
+            # Use the bound client_log directly instead of the context-dependent one
+            await bound_client_log(message, level=level, message_type=message_type,
+                                 caller_name="callback", entry_point_name="click_callback")
+
+        # Replace client_log temporarily
+        globals()['client_log'] = context_client_log
+
+        try:
+            if inspect.iscoroutinefunction(callback):
+                result = await callback()
+            else:
+                result = callback()
+            logger.info(f"DEBUG: Callback executed with context, result: {result}")
+            return result
+        finally:
+            # Restore original client_log
+            if original_client_log:
+                globals()['client_log'] = original_client_log
+    else:
+        logger.info(f"DEBUG: No callback found for key '{key}'")
+    return None
