@@ -978,7 +978,8 @@ async def {name}():
                     else:
                         result = callback_func()
 
-                    # do not return anything
+                    # Click callbacks should not return anything to the MCP client
+                    return None
 
                 finally:
                     # Reset atlantis context
