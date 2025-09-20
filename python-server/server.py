@@ -882,6 +882,18 @@ class DynamicAdditionServer(Server):
                 },
                 annotations=ToolAnnotations(title="_admin_click")
             ),
+            Tool( # Add definition for _admin_app_create
+                name="_admin_app_create",
+                description="Create a new app directory with main.py containing empty index() and readme() functions. Only available to server owner.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "appName": {"type": "string", "description": "The name of the app directory to create"}
+                    },
+                    "required": ["appName"]
+                },
+                annotations=ToolAnnotations(title="_admin_app_create")
+            ),
 
         ]
         # Log the static tools being included
@@ -2073,6 +2085,28 @@ class DynamicAdditionServer(Server):
                     logger.info(f"🖱️ No callback found for key '{key}'")
                     click_msg = f"🖱️ Click received for key '{key}' but no callback registered"
                     result_raw = [TextContent(type="text", text=click_msg)]
+
+            elif actual_function_name == "_admin_app_create":
+                # Create a new app directory with index.py containing empty index() and readme() functions
+                app_name = args.get("appName")
+                if not app_name:
+                    raise ValueError("Missing required parameter: appName")
+
+                logger.info(f"📁 ADMIN APP CREATE requested by owner: {user or 'unknown'} - App: {app_name}")
+
+                # Use the existing function_add method to create the app directory and index.py
+                # Pass None for code to use the standard stub generation
+                added = await self.function_manager.function_add("index", None, app_name)
+                if added:
+                    try:
+                        await self._notify_tool_list_changed(change_type="added", tool_name="index")
+                    except Exception as e:
+                        logger.error(f"Error sending tool notification after adding index: {str(e)}")
+                    result_raw = [TextContent(type="text", text=f"✅ Successfully created app '{app_name}' with index.py containing index() function")]
+                else:
+                    error_msg = f"❌ Failed to create app '{app_name}' - app directory may already exist"
+                    logger.error(f"📁 App creation failed: {error_msg}")
+                    result_raw = [TextContent(type="text", text=error_msg)]
 
             elif actual_function_name.startswith('_function') or actual_function_name.startswith('_server') or actual_function_name.startswith('_admin'):
                 # Catch-all for invalid internal functions (only _function* and _server* are internal)
