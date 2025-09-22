@@ -884,7 +884,7 @@ class DynamicAdditionServer(Server):
             ),
             Tool( # Add definition for _admin_app_create
                 name="_admin_app_create",
-                description="Create a new app directory with main.py containing empty index() and readme() functions. Only available to server owner.",
+                description="Create a new app directory with main.py containing empty index() function. Only available to server owner.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -2087,7 +2087,7 @@ class DynamicAdditionServer(Server):
                     result_raw = [TextContent(type="text", text=click_msg)]
 
             elif actual_function_name == "_admin_app_create":
-                # Create a new app directory with index.py containing empty index() and readme() functions
+                # Create a new app directory with index.py containing empty index() function
                 app_name = args.get("appName")
                 if not app_name:
                     raise ValueError("Missing required parameter: appName")
