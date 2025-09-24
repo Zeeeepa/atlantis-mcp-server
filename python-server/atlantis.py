@@ -281,7 +281,7 @@ def reset_context(tokens: tuple):
 
 # --- Utility Functions ---
 
-async def client_image(image_path: str, level: str = "INFO", image_format: str = "image/png"):
+async def client_image(image_path: str, image_format: str = "image/png"):
     """Sends an image back to the requesting client for the current context.
     This is a wrapper around client_log that automatically loads the image,
     converts it to base64, and sets the appropriate message type.
@@ -303,7 +303,7 @@ async def client_image(image_path: str, level: str = "INFO", image_format: str =
 
     # Send to client_log with appropriate message_type
     # client_log is now async and returns a result
-    result = await client_log(prefixed_data, level=level, message_type=image_format)
+    result = await client_log(prefixed_data, level="INFO", message_type=image_format)
     return result
 
 def image_to_base64(image_path: str) -> str:
@@ -522,7 +522,7 @@ async def client_command(command: str, data: Any = None) -> Any:
         # Just re-raise to let the dynamic function manager handle final logging
         raise
 
-async def client_html(html_content: str, level: str = "INFO"):
+async def client_html(html_content: str):
     """Sends HTML content back to the requesting client for the current context.
     This is a wrapper around client_log that automatically sets the message type to 'html'.
 
@@ -534,10 +534,10 @@ async def client_html(html_content: str, level: str = "INFO"):
     """
     # Send to client_log with message_type set to 'html'
     # client_log is now async and returns a result
-    result = await client_log(html_content, level=level, message_type="html")
+    result = await client_log(html_content, level="INFO", message_type="html")
     return result
 
-async def client_markdown(content: str, level: str = "INFO"):
+async def client_markdown(content: str):
     """Sends HTML content back to the requesting client for the current context.
     This is a wrapper around client_log that automatically sets the message type to 'html'.
 
@@ -549,7 +549,7 @@ async def client_markdown(content: str, level: str = "INFO"):
     """
     # Send to client_log with message_type set to 'html'
     # client_log is now async and returns a result
-    result = await client_log(content, level=level, message_type="md")
+    result = await client_log(content, level="INFO", message_type="md")
     return result
 
 async def client_data(description: str, data: Any, level: str = "INFO"):
