@@ -7,6 +7,7 @@ attrs==25.3.0
 bidict==0.23.1
 certifi==2025.1.31
 click==8.1.8
+cryptography==43.0.3
 distro==1.9.0
 frozenlist==1.5.0
 h11==0.14.0
@@ -26,6 +27,7 @@ mypy==1.15.0
 mypy_extensions==1.1.0
 netifaces==0.10.6
 openai==1.82.0
+Pillow==11.1.0
 propcache==0.3.1
 psutil==7.0.0
 pydantic==2.11.3
@@ -33,10 +35,12 @@ pydantic-settings==2.8.1
 pydantic_core==2.33.1
 python-dotenv==1.1.0
 python-engineio==4.11.2
+python-magic
 python-multipart==0.0.20
 python-socketio==5.12.1
 PyYAML==6.0.2
 referencing==0.36.2
+requests
 rpds-py==0.27.0
 setuptools==3.3
 simple-websocket==1.1.0
