@@ -947,8 +947,8 @@ async def {name}():
         # Extract app name from kwargs (already set by server.py parsing logic)
         app_name = kwargs.get("app")
 
-        # Special handling for click callback functions
-        if actual_function_name.startswith("_click_callback_"):
+        # Special handling for click and upload callback functions
+        if actual_function_name.startswith("_click_callback_") or actual_function_name.startswith("_upload_callback_"):
             # This is a temporary click callback - handle it directly from atlantis
             if hasattr(atlantis, actual_function_name):
                 callback_func = getattr(atlantis, actual_function_name)
@@ -973,10 +973,23 @@ async def {name}():
 
                 try:
                     # Execute the callback with proper atlantis context
-                    if inspect.iscoroutinefunction(callback_func):
-                        result = await callback_func()
+                    if actual_function_name.startswith("_upload_callback_"):
+                        # Upload callbacks get arguments
+                        upload_args = kwargs.get("args", {})
+                        filename = upload_args.get("filename")
+                        filetype = upload_args.get("filetype")
+                        base64Content = upload_args.get("base64Content")
+
+                        if inspect.iscoroutinefunction(callback_func):
+                            result = await callback_func(filename, filetype, base64Content)
+                        else:
+                            result = callback_func(filename, filetype, base64Content)
                     else:
-                        result = callback_func()
+                        # Click callbacks get no arguments
+                        if inspect.iscoroutinefunction(callback_func):
+                            result = await callback_func()
+                        else:
+                            result = callback_func()
 
                     # Click callbacks should not return anything to the MCP client
                     return None

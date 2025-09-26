@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import datetime
 
 # Version
-SERVER_VERSION = "2.0.16"
+SERVER_VERSION = "2.0.17"
 
 from mcp.server import Server
 
@@ -881,6 +881,21 @@ class DynamicAdditionServer(Server):
                     "required": ["key"]
                 },
                 annotations=ToolAnnotations(title="_admin_click")
+            ),
+            Tool( # Add definition for _admin_upload
+                name="_admin_upload",
+                description="Handles upload calls from the client UI. Only available to server owner.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "key": {"type": "string", "description": "The upload key/identifier"},
+                        "filename": {"type": "string", "description": "The name of the uploaded file"},
+                        "filetype": {"type": "string", "description": "The file extension/type e.g. mp3"},
+                        "base64Content": {"type": "string", "description": "The base64 encoded file data"}
+                    },
+                    "required": ["key", "filename", "filetype", "base64Content"]
+                },
+                annotations=ToolAnnotations(title="_admin_upload")
             ),
             Tool( # Add definition for _admin_app_create
                 name="_admin_app_create",
@@ -2085,6 +2100,58 @@ class DynamicAdditionServer(Server):
                     logger.info(f"🖱️ No callback found for key '{key}'")
                     click_msg = f"🖱️ Click received for key '{key}' but no callback registered"
                     result_raw = [TextContent(type="text", text=click_msg)]
+
+            elif actual_function_name == "_admin_upload":
+                # Handle uploads by invoking stored callbacks as dynamic functions
+                key = args.get("key")
+                filename = args.get("filename")
+                filetype = args.get("filetype")
+                base64Content = args.get("base64Content")
+
+                if not key:
+                    raise ValueError("Missing required parameter: key")
+                if not filename:
+                    raise ValueError("Missing required parameter: filename")
+                if not filetype:
+                    raise ValueError("Missing required parameter: filetype")
+                if not base64Content:
+                    raise ValueError("Missing required parameter: base64Content")
+
+                logger.info(f"🖱️ ADMIN UPLOAD: {user} uploading id: {key}, filename: {filename}, filetype: {filetype}")
+
+                # Check if we have a callback for this key using the global atlantis
+                callback = atlantis._upload_callbacks.get(key)
+                logger.info(f"🖱️ Available callback keys: {list(atlantis._upload_callbacks.keys())}")
+
+                if callback:
+                    logger.info(f"🖱️ Found callback for key '{key}', invoking as dynamic function...")
+
+                    # Create a wrapper function that can be called as a dynamic function
+                    # We'll inject it temporarily into atlantis and call it through function_manager
+                    wrapper_name = f"_upload_callback_{key.replace('-', '_').replace('.', '_')}"
+
+                    # Inject the callback into the existing atlantis context temporarily
+                    setattr(atlantis, wrapper_name, callback)
+
+                    try:
+                        # Invoke through function manager to get full dynamic function context
+                        result_raw = await self.function_manager.function_call(
+                            name=wrapper_name,
+                            client_id=client_id,
+                            request_id=request_id,
+                            user=user,
+                            session_id=session_id,
+                            app=None,  # No specific app
+                            args={"filename": filename, "filetype": filetype, "base64Content": base64Content}
+                        )
+                    finally:
+                        # Clean up the temporary wrapper
+                        if hasattr(atlantis, wrapper_name):
+                            delattr(atlantis, wrapper_name)
+                else:
+                    logger.info(f"🖱️ No callback found for key '{key}'")
+                    upload_msg = f"🖱️ Upload received for key '{key}' but no callback registered"
+                    result_raw = [TextContent(type="text", text=upload_msg)]
 
             elif actual_function_name == "_admin_app_create":
                 # Create a new app directory with index.py containing empty index() function
