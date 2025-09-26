@@ -39,6 +39,11 @@ _stream_seq_counters: dict = {}
 # Click callback lookup table - maps click keys to callback functions
 _click_callbacks: dict = {}
 
+# upload callback lookup table - maps upload keys to callback functions
+_upload_callbacks: dict = {}
+
+
+
 # --- Shared Object Container ---
 # This container persists across dynamic function reloads and can store
 # shared resources like database connections, cache objects, etc.
@@ -700,6 +705,21 @@ async def client_onclick(key: str, callback: Callable):
     # Send registration message to client
     await client_log(key, message_type="onclick_register")
 
+async def client_upload(key: str, callback: Callable):
+    """Registers an upload handler
+
+    Args:
+        key: The unique key to identify this upload handler
+        callback: The async function to call when upload occurs
+    """
+    # Store the callback in the global lookup table
+    _upload_callbacks[key] = callback
+
+    # Send registration message to client
+    await client_log(key, message_type="upload_register")
+
+
+# possibly obsolete
 async def invoke_click_callback(key: str) -> Any:
     """Invokes a stored click callback by its key.
 
@@ -729,6 +749,7 @@ async def invoke_click_callback(key: str) -> Any:
         logger.info(f"DEBUG: No callback found for key '{key}'")
     return None
 
+# possibly obsolete
 async def invoke_click_callback_with_context(key: str, bound_client_log) -> Any:
     """Invokes a stored click callback with a specific client_log context.
 
