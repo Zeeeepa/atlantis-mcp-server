@@ -909,6 +909,19 @@ class DynamicAdditionServer(Server):
                 },
                 annotations=ToolAnnotations(title="_admin_app_create")
             ),
+            Tool( # Add definition for _admin_git_update
+                name="_admin_git_update",
+                description="Update the server code by running git fetch and git merge. Only available to server owner.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "remote": {"type": "string", "description": "The remote to fetch from (defaults to 'origin')", "default": "origin"},
+                        "branch": {"type": "string", "description": "The branch to merge (defaults to 'main')", "default": "main"}
+                    },
+                    "required": []
+                },
+                annotations=ToolAnnotations(title="_admin_git_update")
+            ),
 
         ]
         # Log the static tools being included
@@ -2173,6 +2186,53 @@ class DynamicAdditionServer(Server):
                 else:
                     error_msg = f"❌ Failed to create app '{app_name}' - app directory may already exist"
                     logger.error(f"📁 App creation failed: {error_msg}")
+                    result_raw = [TextContent(type="text", text=error_msg)]
+
+            elif actual_function_name == "_admin_git_update":
+                # Update server code by running git fetch and git merge
+                remote = args.get("remote", "origin")
+                branch = args.get("branch", "main")
+
+                logger.info(f"🔄 ADMIN GIT UPDATE requested by owner: {user or 'unknown'} - Remote: {remote}, Branch: {branch}")
+
+                try:
+                    import subprocess
+
+                    # Run git fetch
+                    fetch_result = subprocess.run(
+                        ["git", "fetch", remote],
+                        capture_output=True,
+                        text=True,
+                        cwd=os.path.dirname(os.path.abspath(__file__))
+                    )
+
+                    if fetch_result.returncode != 0:
+                        error_msg = f"❌ Git fetch failed: {fetch_result.stderr.strip()}"
+                        logger.error(f"🔄 Git fetch error: {error_msg}")
+                        result_raw = [TextContent(type="text", text=error_msg)]
+                    else:
+                        # Run git merge
+                        merge_result = subprocess.run(
+                            ["git", "merge", f"{remote}/{branch}"],
+                            capture_output=True,
+                            text=True,
+                            cwd=os.path.dirname(os.path.abspath(__file__))
+                        )
+
+                        if merge_result.returncode != 0:
+                            error_msg = f"❌ Git merge failed: {merge_result.stderr.strip()}"
+                            logger.error(f"🔄 Git merge error: {error_msg}")
+                            result_raw = [TextContent(type="text", text=error_msg)]
+                        else:
+                            success_msg = f"✅ Successfully updated from {remote}/{branch}"
+                            if merge_result.stdout.strip():
+                                success_msg += f"\n{merge_result.stdout.strip()}"
+                            logger.info(f"🔄 Git update successful: {success_msg}")
+                            result_raw = [TextContent(type="text", text=success_msg)]
+
+                except Exception as e:
+                    error_msg = f"❌ Git update failed with exception: {str(e)}"
+                    logger.error(f"🔄 Git update exception: {error_msg}")
                     result_raw = [TextContent(type="text", text=error_msg)]
 
             elif actual_function_name.startswith('_function') or actual_function_name.startswith('_server') or actual_function_name.startswith('_admin'):
