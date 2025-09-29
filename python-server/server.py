@@ -26,6 +26,14 @@ SERVER_VERSION = "2.0.17"
 from mcp.server import Server
 
 from mcp.client.websocket import websocket_client
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+import anyio
+from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
+from pydantic import ValidationError
+from websockets.asyncio.client import connect as ws_connect
+from websockets.typing import Subprotocol
+from mcp.shared.message import SessionMessage
 from mcp.types import (
     Tool,
     TextContent,
@@ -41,12 +49,22 @@ from starlette.routing import WebSocketRoute, Route
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from mcp.shared.exceptions import McpError # <--- ADD THIS IMPORT
 
 # Custom ToolAnnotations class that allows extra fields
 class ToolAnnotations(McpToolAnnotations):
     """Custom ToolAnnotations that allows extra fields to avoid Pydantic warnings."""
     model_config = ConfigDict(extra='allow')
+
+# Monkey patch websockets to support larger message sizes globally
+import websockets.asyncio.server
+original_serve = websockets.asyncio.server.serve
+def patched_serve(*args, **kwargs):
+    kwargs.setdefault('max_size', 100 * 1024 * 1024)  # 100MB default
+    return original_serve(*args, **kwargs)
+websockets.asyncio.server.serve = patched_serve
 
 # Import shared state and utilities
 from state import (
@@ -225,7 +243,7 @@ class DynamicConfigEventHandler(FileSystemEventHandler):
             # --- Existing Tool List Cache Clearing & Notification ---
             # This still runs regardless of whether it was a function or server config change
             logger.info(f"🧹 Clearing tool list cache on server due to file change in {os.path.basename(file_path)}.")
-            self.mcp_server._cached_tools = None
+            #self.mcp_server._cached_tools = None
             self.mcp_server._last_functions_dir_mtime = None # Reset functions mtime to force reload
             self.mcp_server._last_servers_dir_mtime = None   # Reset servers mtime to force reload
             # Notify clients
@@ -473,6 +491,9 @@ class DynamicAdditionServer(Server):
         total_functions = sum(len(app_mapping) for app_mapping in function_mapping_by_app.values())
         logger.info(f"📝 FOUND {total_functions} FUNCTIONS FROM APP MAPPINGS")
 
+        # Track processed files to avoid redundant validation
+        processed_files = {}  # file_path -> functions_info cache
+
         # For each app and function in the app-specific mappings, create Tool entries
         for app_name, app_mapping in function_mapping_by_app.items():
             for func_name, file_path in app_mapping.items():
@@ -481,17 +502,25 @@ class DynamicAdditionServer(Server):
                     if func_name.startswith('_') or func_name == '__init__' or func_name == '__pycache__':
                         continue
 
-                    # Load and validate the function code directly from the file
-                    full_file_path = os.path.join(FUNCTIONS_DIR, file_path)
-                    try:
-                        with open(full_file_path, 'r', encoding='utf-8') as f:
-                            code = f.read()
+                    # Check if we've already processed this file
+                    if file_path in processed_files:
+                        functions_info = processed_files[file_path]
+                        is_valid = functions_info is not None
+                    else:
+                        # Load and validate the function code directly from the file
+                        full_file_path = os.path.join(FUNCTIONS_DIR, file_path)
+                        try:
+                            with open(full_file_path, 'r', encoding='utf-8') as f:
+                                code = f.read()
 
-                        # Validate function syntax without actually loading it
-                        is_valid, error_message, functions_info = self.function_manager._code_validate_syntax(code)
-                    except Exception as e:
-                        logger.warning(f"⚠️ Error loading file {file_path}: {str(e)}")
-                        continue
+                            # Validate function syntax without actually loading it
+                            is_valid, error_message, functions_info = self.function_manager._code_validate_syntax(code)
+                            # Cache the result (even if None/invalid)
+                            processed_files[file_path] = functions_info if is_valid else None
+                        except Exception as e:
+                            logger.warning(f"⚠️ Error loading file {file_path}: {str(e)}")
+                            processed_files[file_path] = None
+                            continue
 
                     # Handle multiple functions per file
                     if is_valid and functions_info:
@@ -573,7 +602,8 @@ class DynamicAdditionServer(Server):
                                 tools_list.append(tool_obj)
                                 logger.debug(f"📝 Added dynamic tool: {tool_name} (app: {actual_app_name}), valid: {is_valid}")
                             else:
-                                logger.warning(f"⚠️ Skipping duplicate tool: {tool_name} from {file_path} (app: {actual_app_name}) - already exists")
+                                #logger.warning(f"⚠️ Skipping duplicate tool: {tool_name} from {file_path} (app: {actual_app_name}) - already exists")
+                                pass
 
                 except Exception as e:
                     logger.warning(f"⚠️ Error processing function {func_name} from {file_path}: {str(e)}")
@@ -1926,7 +1956,7 @@ class DynamicAdditionServer(Server):
 
                 logger.debug(f"---> Calling built-in: _function_show for '{func_name}'" + (f" (app: {app_name})" if app_name else ""))
 
-                                # Check if function exists using the function mapping (supports subfolders and app-specific lookup)
+                # Check if function exists using the function mapping (supports subfolders and app-specific lookup)
                 function_file = await self.function_manager._find_file_containing_function(func_name, app_name)
 
                 if not function_file:
@@ -1941,7 +1971,7 @@ class DynamicAdditionServer(Server):
                 else:
                     # Function exists, continue with showing it
                     pass
-                                        # Remove from temporarily hidden set if it was there
+                    # Remove from temporarily hidden set if it was there
                     if func_name in self._temporarily_hidden_functions:
                         self._temporarily_hidden_functions.remove(func_name)
                         logger.info(f"{PINK}👁️ Removed '{func_name}' from temporarily hidden list{RESET}")
@@ -1951,7 +1981,7 @@ class DynamicAdditionServer(Server):
                     logger.info(f"{PINK}👁️ Made function '{func_name}' temporarily visible{RESET}")
 
                     # Invalidate tool cache to refresh the list
-                    self._cached_tools = None
+                    #self._cached_tools = None
 
                     # Notify clients about the tool list change
                     try:
@@ -1995,7 +2025,7 @@ class DynamicAdditionServer(Server):
                     logger.info(f"{PINK}🙈 Made function '{func_name}' temporarily hidden{RESET}")
 
                     # Invalidate tool cache to refresh the list
-                    self._cached_tools = None
+                    #self._cached_tools = None
 
                     # Notify clients about the tool list change
                     try:
@@ -2961,6 +2991,7 @@ class ServiceClient:
         # Service message event
         @self.sio.event(namespace=self.namespace)
         async def service_message(data):
+            logger.info(f"☁️ RAW RECEIVED SERVICE MESSAGE")
             logger.debug(f"☁️ RAW RECEIVED SERVICE MESSAGE: {data}")
 
             # --- Handle Awaitable Command Responses from Cloud Client ---
@@ -3490,12 +3521,30 @@ async def handle_health_check(request: Request) -> JSONResponse:
         }
     })
 
+class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        # Override the max body size for large file uploads
+        original_receive = request.receive
+
+        async def custom_receive():
+            message = await original_receive()
+            # Allow up to 100MB body size
+            if message['type'] == 'http.request' and 'body' in message:
+                return message
+            return message
+
+        request.receive = custom_receive
+        return await call_next(request)
+
 app = Starlette(
     routes=[
         WebSocketRoute("/mcp", endpoint=handle_websocket),
         Route("/register", endpoint=handle_registration, methods=["POST"]),
         Route("/mcp", endpoint=handle_mcp_http, methods=["POST"]),
         Route("/health", endpoint=handle_health_check, methods=["GET"])
+    ],
+    middleware=[
+        Middleware(RequestSizeLimitMiddleware)
     ]
 )
 
@@ -3590,9 +3639,12 @@ if __name__ == "__main__":
         host=HOST,
         port=PORT,
         log_level="warning",
-        ws_max_size=10 * 1024 * 1024,  # 10MB max websocket message size
-        ws_ping_interval=20,           # Ping interval in seconds
-        ws_ping_timeout=20             # Ping timeout in seconds
+        ws_max_size=100 * 1024 * 1024,  # 100MB max websocket message size
+        ws_ping_interval=60,           # Ping interval in seconds
+        ws_ping_timeout=120,           # Ping timeout in seconds
+        limit_max_requests=1000,       # Max concurrent requests
+        limit_concurrency=1000,        # Max concurrent connections
+        h11_max_incomplete_event_size=100 * 1024 * 1024  # 100MB max HTTP body size
     )
     server = uvicorn.Server(config)
 

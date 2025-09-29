@@ -1288,8 +1288,9 @@ async def {name}():
             logger.warning(f"⚠️ Basic syntax validation (AST parse) failed for '{filename_to_use}': {syntax_error}")
 
         # 5. Clear cache (server needs to reload tools)
-        logger.info(f"🧹 Clearing tool cache on server due to function_set for '{filename_to_use}'.")
-        server._cached_tools = None
+        #logger.info(f"🧹 Clearing tool cache on server due to function_set for '{filename_to_use}'.")
+        #server._cached_tools = None
+        logger.info(f"🧹 Clearing tool cache timestamp on server due to function_set for '{filename_to_use}'.")
         server._last_functions_dir_mtime = None # Reset mtime to force reload
         server._last_servers_dir_mtime = None # Reset mtime to force reload
 
