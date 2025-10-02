@@ -583,7 +583,8 @@ class DynamicAdditionServer(Server):
                             # Add common annotations
                             try:
                                 tool_annotations["lastModified"] = datetime.datetime.fromtimestamp(
-                                    os.path.getmtime(full_file_path)
+                                    os.path.getmtime(full_file_path),
+                                    tz=datetime.timezone.utc
                                 ).isoformat()
                                 logger.debug(f"🔍 SET lastModified for {tool_name}: {tool_annotations['lastModified']}")
                             except Exception as e:
@@ -1045,7 +1046,7 @@ class DynamicAdditionServer(Server):
                     try:
                         server_file = os.path.join(SERVERS_DIR, f"{server_name}.json")
                         mtime = os.path.getmtime(server_file)
-                        annotations["lastModified"] = datetime.datetime.fromtimestamp(mtime).isoformat()
+                        annotations["lastModified"] = datetime.datetime.fromtimestamp(mtime, tz=datetime.timezone.utc).isoformat()
                         # Store relative path for display
                         annotations["sourceFile"] = f"dynamic_servers/{server_name}.json"
                     except Exception as me:
