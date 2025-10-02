@@ -3020,12 +3020,6 @@ class ServiceClient:
                 for _, _, formatted_line in hidden_info_list:
                     logger.info(f"    {formatted_line}")
 
-            if server_info_list:
-                logger.info(f"")
-                logger.info(f"  {BOLD_COLOR}MCP Servers: {len(server_info_list)}{RESET_COLOR}")
-                for _, _, formatted_line in server_info_list:
-                    logger.info(f"    {formatted_line}")
-
             # Report skipped hidden functions
             if hasattr(self.mcp_server.function_manager, '_skipped_hidden_functions') and self.mcp_server.function_manager._skipped_hidden_functions:
                 logger.info(f"")
@@ -3033,6 +3027,16 @@ class ServiceClient:
                 for item in sorted(self.mcp_server.function_manager._skipped_hidden_functions, key=lambda x: (x['app'] or 'top-level', x['name'])):
                     app_display = item['app'] if item['app'] else 'top-level'
                     logger.info(f"    {BOLD_COLOR}{app_display:20}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR}")
+
+
+
+            if server_info_list:
+                logger.info(f"")
+                logger.info(f"  {BOLD_COLOR}MCP Servers: {len(server_info_list)}{RESET_COLOR}")
+                for _, _, formatted_line in server_info_list:
+                    logger.info(f"    {formatted_line}")
+
+
 
 
         # Connection error event
