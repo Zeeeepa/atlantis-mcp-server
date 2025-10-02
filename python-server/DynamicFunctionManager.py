@@ -116,6 +116,7 @@ class DynamicFunctionManager:
         self._function_file_mapping = {}  # function_name -> filename mapping
         self._function_file_mapping_by_app = {}  # app_name -> {function_name -> filename mapping}
         self._function_file_mapping_mtime = 0.0  # track when mapping was last built
+        self._skipped_hidden_functions = []  # Track functions skipped due to @hidden decorator
 
         # Create directories if they don't exist
         os.makedirs(self.functions_dir, exist_ok=True)
@@ -734,6 +735,20 @@ async def {name}():
                                 decorators_from_info = func_info.get("decorators", [])
                                 if decorators_from_info and "hidden" in decorators_from_info:
                                     logger.info(f"🙈 SKIPPING HIDDEN FUNCTION: {CYAN}{func_name}{RESET} -> {rel_path} (not eligible for calling)")
+                                    # Determine app name for tracking
+                                    app_name_from_decorator = func_info.get('app_name')
+                                    if app_name_from_decorator:
+                                        track_app_name = app_name_from_decorator
+                                    elif '/' in rel_path:
+                                        track_app_name = rel_path.split('/')[0]
+                                    else:
+                                        track_app_name = None
+                                    # Track this hidden function
+                                    self._skipped_hidden_functions.append({
+                                        'name': func_name,
+                                        'app': track_app_name,
+                                        'file': rel_path
+                                    })
                                     continue
 
                                 # Determine app name: prioritize @app() decorator, then file path
@@ -752,6 +767,18 @@ async def {name}():
                                 # Store in app-specific mapping (use app_name as key, None if no app specified)
                                 if app_name not in self._function_file_mapping_by_app:
                                     self._function_file_mapping_by_app[app_name] = {}
+
+                                # Check for duplicates in app-specific mapping
+                                if func_name in self._function_file_mapping_by_app[app_name]:
+                                    existing_path = self._function_file_mapping_by_app[app_name][func_name]
+                                    logger.error(
+                                        f"❌ DUPLICATE FUNCTION DETECTED: '{func_name}' for app '{app_name}'\n"
+                                        f"   📂 First occurrence:  {existing_path}\n"
+                                        f"   📂 Second occurrence: {rel_path}\n"
+                                        f"   ⚠️  This is an error - same function cannot exist in multiple files for the same app!"
+                                    )
+                                    # Still store it so we can report all duplicates in tools list
+
                                 self._function_file_mapping_by_app[app_name][func_name] = rel_path
 
                                 logger.info(f"🎯 FOUND FUNCTION: {CYAN}{func_name}{RESET} -> {rel_path} (app: {app_name})")

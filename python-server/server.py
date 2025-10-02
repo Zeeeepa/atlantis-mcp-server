@@ -504,8 +504,8 @@ class DynamicAdditionServer(Server):
 
                     # Check if we've already processed this file
                     if file_path in processed_files:
-                        functions_info = processed_files[file_path]
-                        is_valid = functions_info is not None
+                        # Already processed this file, skip to avoid duplicates
+                        continue
                     else:
                         # Load and validate the function code directly from the file
                         full_file_path = os.path.join(FUNCTIONS_DIR, file_path)
@@ -544,12 +544,15 @@ class DynamicAdditionServer(Server):
                             app_name_from_info = func_info.get("app_name")
                             if app_name_from_info is not None:
                                 actual_app_name = app_name_from_info
+                                app_source = "decorator"
                                 logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {actual_app_name} (from @app decorator)")
                             else:
                                 actual_app_name = app_name
+                                app_source = "directory" if app_name else "NA"
                                 logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {actual_app_name} (from app mapping)")
 
                             tool_annotations["app_name"] = actual_app_name
+                            tool_annotations["app_source"] = app_source
 
                             # Check visibility overrides first (these take precedence over decorators)
                             if tool_name in self._temporarily_hidden_functions:
@@ -560,6 +563,7 @@ class DynamicAdditionServer(Server):
                                 tool_annotations["temporarilyVisible"] = True
                             elif decorators_from_info and "hidden" in decorators_from_info:
                                 # Skip this function if it has the @hidden decorator (and no override)
+                                # Note: This should never happen as hidden functions are filtered earlier
                                 logger.info(f"{PINK}🙈 Skipping hidden function: {tool_name} (app: {actual_app_name}){RESET}")
                                 continue
 
@@ -595,15 +599,17 @@ class DynamicAdditionServer(Server):
                                 annotations=custom_annotations
                             )
 
-                            # Check for duplicates before adding (app-aware and case-insensitive)
-                            tool_key = f"{actual_app_name}.{tool_name}".lower()
-                            existing_tool_keys = {f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}".lower() for tool in tools_list}
+                            # Check for duplicates - CASE SENSITIVE since function names are case-sensitive
+                            tool_key = f"{actual_app_name}.{tool_name}"
+                            existing_tool_keys = {f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}" for tool in tools_list}
                             if tool_key not in existing_tool_keys:
                                 tools_list.append(tool_obj)
                                 logger.debug(f"📝 Added dynamic tool: {tool_name} (app: {actual_app_name}), valid: {is_valid}")
                             else:
-                                #logger.warning(f"⚠️ Skipping duplicate tool: {tool_name} from {file_path} (app: {actual_app_name}) - already exists")
-                                pass
+                                # This is an ERROR - same function appearing twice for the same app
+                                # DO NOT add it to the tools list - just log the error
+                                logger.error(f"❌ DUPLICATE TOOL DETECTED: {tool_name} from {file_path} (app: {actual_app_name}) - already exists in tools list! SKIPPING.")
+                                # The duplicate detection in DynamicFunctionManager already reported the file paths
 
                 except Exception as e:
                     logger.warning(f"⚠️ Error processing function {func_name} from {file_path}: {str(e)}")
@@ -1035,11 +1041,13 @@ class DynamicAdditionServer(Server):
                     annotations["serverConfig"] = config or {}
                     annotations["runningStatus"] = status # Add status from outer loop
 
-                    # Try to get file modified time
+                    # Try to get file modified time and store source file
                     try:
                         server_file = os.path.join(SERVERS_DIR, f"{server_name}.json")
                         mtime = os.path.getmtime(server_file)
                         annotations["lastModified"] = datetime.datetime.fromtimestamp(mtime).isoformat()
+                        # Store relative path for display
+                        annotations["sourceFile"] = f"dynamic_servers/{server_name}.json"
                     except Exception as me:
                         logger.warning(f"⚠️ Could not get mtime for server '{server_name}': {me}")
 
@@ -2682,13 +2690,8 @@ async def get_all_tools_for_response(server: 'DynamicAdditionServer', caller_con
             logger.debug(f"🔍 SERIALIZING TOOL '{tool.name}' with annotations: {getattr(tool, 'annotations', None)}")
             if hasattr(tool, 'annotations') and isinstance(tool.annotations, dict):
                 source_file = tool.annotations.get('sourceFile', 'NOT_FOUND')
-                logger.debug(f"🔍 Tool '{tool.name}' sourceFile before serialization: {source_file}")
-                #logger.debug(f"🔍 Tool '{tool.name}' lastModified before serialization: {tool.annotations.get('lastModified', 'NOT_FOUND')}")
-                #logger.debug(f"🔍 Tool '{tool.name}' type before serialization: {tool.annotations.get('type', 'NOT_FOUND')}")
             elif hasattr(tool, 'annotations') and hasattr(tool.annotations, 'sourceFile'):
                 source_file = getattr(tool.annotations, 'sourceFile', 'NOT_FOUND')
-                logger.debug(f"🔍 Tool '{tool.name}' sourceFile (attr) before serialization: {source_file}")
-                #logger.debug(f"🔍 Tool '{tool.name}' lastModified (attr) before serialization: {getattr(tool.annotations, 'lastModified', 'NOT_FOUND')}")
 
             # Ensure model_dump is called correctly for each tool
             tool_dict = tool.model_dump(mode='json') # Use mode='json' for better serialization
@@ -2697,9 +2700,6 @@ async def get_all_tools_for_response(server: 'DynamicAdditionServer', caller_con
             annotations = tool_dict.get('annotations') if tool_dict else None
             if annotations and isinstance(annotations, dict):
                 source_file = annotations.get('sourceFile', 'NOT_FOUND')
-                logger.debug(f"🔍 Tool '{tool.name}' sourceFile after serialization: {source_file}")
-            #logger.debug(f"🔍 Tool '{tool.name}' lastModified after serialization: {annotations.get('lastModified', 'NOT_FOUND') if annotations else 'NO_ANNOTATIONS'}")
-            #logger.debug(f"🔍 Tool '{tool.name}' type after serialization: {annotations.get('type', 'NOT_FOUND') if annotations else 'NO_ANNOTATIONS'}")
 
             if tool_dict and annotations and isinstance(annotations, dict) and annotations.get('type') == 'server':
                 logger.debug(f"🔍 SERIALIZED SERVER TOOL '{tool_dict.get('name')}' to dict: {tool_dict}")
@@ -2955,8 +2955,84 @@ class ServiceClient:
 
             # Get the list of tools to log them
             tools_list = await self.mcp_server._get_tools_list(caller_context="_handle_connect_cloud")
-            tool_names = [tool.name for tool in tools_list]
-            logger.info(f"📊 REGISTERING {len(tools_list)} TOOLS WITH CLOUD: {', '.join(tool_names)}")
+            # Create list with app names and source files for easier inspection of duplicates
+            # Import colors for formatting (at function scope to avoid shadowing module imports)
+            from ColoredFormatter import CYAN as CYAN_COLOR, YELLOW, GREY as GREY_COLOR, RESET as RESET_COLOR, BOLD as BOLD_COLOR, PINK
+
+            tool_info_list = []
+            hidden_info_list = []
+            server_info_list = []
+            for tool in tools_list:
+                app_name = getattr(tool.annotations, 'app_name', None) if hasattr(tool, 'annotations') else None
+                source_file = getattr(tool.annotations, 'sourceFile', 'unknown') if hasattr(tool, 'annotations') else 'unknown'
+                app_source = getattr(tool.annotations, 'app_source', 'unknown') if hasattr(tool, 'annotations') else 'unknown'
+
+                # Check if tool is hidden
+                is_hidden = getattr(tool.annotations, 'temporarilyVisible', False) if hasattr(tool, 'annotations') else False
+                tool_type = getattr(tool.annotations, 'type', None) if hasattr(tool, 'annotations') else None
+                is_server = tool_type == 'server'  # Server entries are not callable tools
+
+                # Check if this is an internal tool - check the tool name regardless of app_source
+                is_internal = tool.name.startswith('_admin') or tool.name.startswith('_function') or tool.name.startswith('_server')
+
+                if is_internal:
+                    app_source = 'internal'
+                    app_display = 'internal'
+                else:
+                    app_display = app_name if app_name else 'top-level'
+
+                # Color code based on app source
+                if app_source == 'decorator':
+                    source_color = CYAN_COLOR
+                elif app_source == 'directory':
+                    source_color = YELLOW
+                elif app_source == 'internal':
+                    source_color = PINK
+                else:
+                    source_color = GREY_COLOR
+
+                # Format the line with colors
+                # Format differently for servers (no app name column)
+                if is_server:
+                    formatted_line = f"{tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR}"
+                    server_info_list.append((app_display, tool.name, formatted_line))
+                elif is_hidden:
+                    formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source}]{RESET_COLOR}"
+                    hidden_info_list.append((app_display, tool.name, formatted_line))
+                else:
+                    formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source}]{RESET_COLOR}"
+                    tool_info_list.append((app_display, tool.name, formatted_line))
+
+            # Sort by app name then tool name
+            tool_info_list.sort(key=lambda x: (x[0], x[1]))
+            hidden_info_list.sort(key=lambda x: (x[0], x[1]))
+            server_info_list.sort(key=lambda x: (x[0], x[1]))
+
+            logger.info(f"📊 REGISTERING {len(tools_list)} TOOLS WITH CLOUD:")
+            logger.info(f"")
+            logger.info(f"  {BOLD_COLOR}Functions: {len(tool_info_list)}{RESET_COLOR}")
+            for _, _, formatted_line in tool_info_list:
+                logger.info(f"    {formatted_line}")
+
+            if hidden_info_list:
+                logger.info(f"")
+                logger.info(f"  {BOLD_COLOR}Hidden Functions (temporarily visible): {len(hidden_info_list)}{RESET_COLOR}")
+                for _, _, formatted_line in hidden_info_list:
+                    logger.info(f"    {formatted_line}")
+
+            if server_info_list:
+                logger.info(f"")
+                logger.info(f"  {BOLD_COLOR}MCP Servers: {len(server_info_list)}{RESET_COLOR}")
+                for _, _, formatted_line in server_info_list:
+                    logger.info(f"    {formatted_line}")
+
+            # Report skipped hidden functions
+            if hasattr(self.mcp_server.function_manager, '_skipped_hidden_functions') and self.mcp_server.function_manager._skipped_hidden_functions:
+                logger.info(f"")
+                logger.info(f"  {BOLD_COLOR}Skipped (@hidden): {len(self.mcp_server.function_manager._skipped_hidden_functions)}{RESET_COLOR}")
+                for item in sorted(self.mcp_server.function_manager._skipped_hidden_functions, key=lambda x: (x['app'] or 'top-level', x['name'])):
+                    app_display = item['app'] if item['app'] else 'top-level'
+                    logger.info(f"    {BOLD_COLOR}{app_display:20}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR}")
 
 
         # Connection error event
