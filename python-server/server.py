@@ -2962,6 +2962,7 @@ class ServiceClient:
             tool_info_list = []
             hidden_info_list = []
             server_info_list = []
+            internal_count = 0
             for tool in tools_list:
                 app_name = getattr(tool.annotations, 'app_name', None) if hasattr(tool, 'annotations') else None
                 source_file = getattr(tool.annotations, 'sourceFile', 'unknown') if hasattr(tool, 'annotations') else 'unknown'
@@ -2976,6 +2977,7 @@ class ServiceClient:
                 is_internal = tool.name.startswith('_admin') or tool.name.startswith('_function') or tool.name.startswith('_server')
 
                 if is_internal:
+                    internal_count += 1
                     app_source = 'internal'
                     app_display = 'internal'
                 else:
@@ -3008,7 +3010,9 @@ class ServiceClient:
             hidden_info_list.sort(key=lambda x: (x[0], x[1]))
             server_info_list.sort(key=lambda x: (x[0], x[1]))
 
-            logger.info(f"📊 REGISTERING {len(tools_list)} TOOLS WITH CLOUD:")
+            # Calculate counts
+            external_count = len(tools_list) - internal_count
+            logger.info(f"📊 REGISTERING {len(tools_list)} TOOLS WITH CLOUD ({external_count} external + {internal_count} internal):")
             logger.info(f"")
             logger.info(f"  {BOLD_COLOR}Functions: {len(tool_info_list)}{RESET_COLOR}")
             for _, _, formatted_line in tool_info_list:
@@ -3036,7 +3040,20 @@ class ServiceClient:
                 for _, _, formatted_line in server_info_list:
                     logger.info(f"    {formatted_line}")
 
+            # App summary section
+            from collections import defaultdict
+            app_counts = defaultdict(int)
+            for app_display, _, _ in tool_info_list:
+                app_counts[app_display] += 1
+            for app_display, _, _ in hidden_info_list:
+                app_counts[app_display] += 1
 
+            if app_counts:
+                logger.info(f"")
+                logger.info(f"  {BOLD_COLOR}Apps Summary:{RESET_COLOR}")
+                for app_name in sorted(app_counts.keys()):
+                    count = app_counts[app_name]
+                    logger.info(f"    {BOLD_COLOR}{app_name:20}{RESET_COLOR} {count} function(s)")
 
 
         # Connection error event
