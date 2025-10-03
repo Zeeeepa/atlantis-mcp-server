@@ -995,7 +995,8 @@ async def {name}():
                     client_id=client_id,
                     entry_point_name=actual_function_name,
                     user=user,
-                    session_id=kwargs.get("session_id")
+                    session_id=kwargs.get("session_id"),
+                    command_seq=kwargs.get("command_seq")
                 )
 
                 try:
@@ -1123,6 +1124,8 @@ async def {name}():
 
             # Extract session_id from kwargs if present
             session_id = kwargs.get('session_id', None)
+            # Extract command_seq from kwargs if present
+            command_seq = kwargs.get('command_seq', None)
 
             context_tokens = atlantis.set_context(
                 client_log_func=bound_client_log,
@@ -1130,6 +1133,7 @@ async def {name}():
                 client_id=client_id,
                 user=user,  # Pass the user who made the call - only works if atlantis.py has been updated
                 session_id=session_id,  # Pass the session_id
+                command_seq=command_seq,  # Pass the command_seq
                 entry_point_name=actual_function_name # Pass the actual function name (not filename)
             )
 

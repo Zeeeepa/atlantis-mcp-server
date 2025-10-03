@@ -1628,7 +1628,7 @@ class DynamicAdditionServer(Server):
             logger.debug(f"Log notification error details: {traceback.format_exc()}")
             # We intentionally don't re-raise here
 
-    async def _execute_tool(self, name: str, args: dict, client_id: str = None, request_id: str = None, user: str = None, session_id: str = None) -> list[TextContent]:
+    async def _execute_tool(self, name: str, args: dict, client_id: str = None, request_id: str = None, user: str = None, session_id: str = None, command_seq: int = None) -> list[TextContent]:
         """Core logic to handle a tool call. Ensures result is List[TextContent(type='text')]"""
         logger.info(f"🔧 EXECUTING TOOL: {name}")
         logger.debug(f"WITH ARGUMENTS: {args}")
@@ -2387,7 +2387,7 @@ class DynamicAdditionServer(Server):
                     # Pass arguments, client_id, user, and session_id distinctly
                     # Pass parsed app name for proper function routing
                     final_args = args.copy() if args else {}
-                    result_raw = await self.function_manager.function_call(name=actual_function_name, client_id=client_id, request_id=request_id, user=user, session_id=session_id, app=parsed_app_name, args=final_args)
+                    result_raw = await self.function_manager.function_call(name=actual_function_name, client_id=client_id, request_id=request_id, user=user, session_id=session_id, command_seq=command_seq, app=parsed_app_name, args=final_args)
                     logger.debug(f"<--- Dynamic function '{name}' RAW result: {result_raw} (type: {type(result_raw)})")
                 except Exception as e:
                     # Error already enhanced with command context at source, just re-raise
@@ -2498,6 +2498,7 @@ class DynamicAdditionServer(Server):
         # Extract optional context fields
         user = params.get("user", None)
         session_id = params.get("session_id", None)
+        command_seq = params.get("command_seq", None)
 
         # Validate required parameters
         if tool_name is None or tool_args is None:
@@ -2537,7 +2538,8 @@ class DynamicAdditionServer(Server):
                 client_id=client_id,
                 request_id=request_id,
                 user=user,
-                session_id=session_id
+                session_id=session_id,
+                command_seq=command_seq
             )
 
             logger.info(f"🎯 Tool '{tool_name}' execution completed with {len(result_list)} content items")

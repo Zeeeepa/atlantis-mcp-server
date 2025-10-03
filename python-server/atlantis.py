@@ -26,6 +26,7 @@ _entry_point_name_var: contextvars.ContextVar[Optional[str]] = contextvars.Conte
 
 _user_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_user_var", default=None)
 _session_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_session_id_var", default=None)
+_command_seq_var: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar("_command_seq_var", default=None)
 
 # Owner of the remote server instance
 _owner: Optional[str] = ""
@@ -222,7 +223,9 @@ def get_caller() -> Optional[str]:
     """Returns the username who called this function"""
     return _user_var.get()
 
-
+def get_command_seq() -> Optional[int]:
+    """Returns the command sequence number for this function call"""
+    return _command_seq_var.get()
 
 def get_invoking_tool_name() -> Optional[str]:
     """Returns the name of the tool that initiated the current execution chain."""
@@ -246,7 +249,8 @@ def set_context(
         client_id: str,
         entry_point_name: str,
         user: Optional[str] = None,
-        session_id: Optional[str] = None):
+        session_id: Optional[str] = None,
+        command_seq: Optional[int] = None):
     """Sets all context variables and returns a tuple of their tokens for resetting."""
     client_log_token = _client_log_var.set(client_log_func)
     request_id_token = _request_id_var.set(request_id)
@@ -265,19 +269,23 @@ def set_context(
     actual_session_id = session_id if session_id is not None else None # Explicitly use None if session_id is not provided
     session_id_token = _session_id_var.set(actual_session_id)
 
+    # Handle optional command_seq context
+    # Ensure _command_seq_var is always set, even if to None, to get a valid token for reset_context
+    actual_command_seq = command_seq if command_seq is not None else None # Explicitly use None if command_seq is not provided
+    command_seq_token = _command_seq_var.set(actual_command_seq)
 
-    return (client_log_token, request_id_token, client_id_token, log_seq_num_token, entry_point_token, user_token, session_id_token)
+    return (client_log_token, request_id_token, client_id_token, log_seq_num_token, entry_point_token, user_token, session_id_token, command_seq_token)
 
 def reset_context(tokens: tuple):
     """Resets the context variables using the provided tuple of tokens."""
-    # Expected order: client_log, request_id, client_id, log_seq_num, entry_point, user, session_id
-    if not isinstance(tokens, tuple) or len(tokens) != 7:
-        print(f"ERROR: reset_context expected a tuple of 7 tokens, got {tokens}")
+    # Expected order: client_log, request_id, client_id, log_seq_num, entry_point, user, session_id, command_seq
+    if not isinstance(tokens, tuple) or len(tokens) != 8:
+        print(f"ERROR: reset_context expected a tuple of 8 tokens, got {tokens}")
         # Add more robust error handling or logging as needed
         return
 
     # Unpack tokens
-    client_log_token, request_id_token, client_id_token, log_seq_num_token, entry_point_token, user_token, session_id_token = tokens
+    client_log_token, request_id_token, client_id_token, log_seq_num_token, entry_point_token, user_token, session_id_token, command_seq_token = tokens
 
     # Reset each context variable if its token is present (not strictly necessary with .set(None) giving a token)
     _client_log_var.reset(client_log_token)
@@ -287,6 +295,7 @@ def reset_context(tokens: tuple):
     _entry_point_name_var.reset(entry_point_token)
     _user_var.reset(user_token) # user_token will be valid even if user was None
     _session_id_var.reset(session_id_token) # session_id_token will be valid even if session_id was None
+    _command_seq_var.reset(command_seq_token) # command_seq_token will be valid even if command_seq was None
 
 
 # --- Utility Functions ---
