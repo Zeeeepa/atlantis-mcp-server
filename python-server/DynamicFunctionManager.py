@@ -860,6 +860,16 @@ async def {name}():
             logger.error(f"Create failed: Invalid function name '{name}'")
             return False
 
+        # Check for reserved function name prefixes
+        if name.startswith('_admin') or name.startswith('_function') or name.startswith('_server'):
+            logger.error(f"Create failed: Function name '{name}' uses a reserved prefix")
+            raise ValueError(f"Function names starting with '_admin', '_function', or '_server' are reserved for internal tools")
+
+        # Check for reserved app names
+        if app and app == "Internal":
+            logger.error(f"Create failed: 'Internal' is a reserved app name")
+            raise ValueError("'Internal' is a reserved app name and cannot be used for creating functions")
+
         # Determine the correct file path based on app parameter
         if app:
             target_dir = os.path.join(self.functions_dir, app)

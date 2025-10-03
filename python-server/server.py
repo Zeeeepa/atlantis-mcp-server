@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import datetime
 
 # Version
-SERVER_VERSION = "2.0.19"
+SERVER_VERSION = "2.1.1"
 
 from mcp.server import Server
 
@@ -3021,10 +3021,10 @@ class ServiceClient:
                     formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source}]{RESET_COLOR}{timestamp_str}"
                     tool_info_list.append((app_display, tool.name, formatted_line))
 
-            # Sort by app name then tool name
-            tool_info_list.sort(key=lambda x: (x[0], x[1]))
-            hidden_info_list.sort(key=lambda x: (x[0], x[1]))
-            server_info_list.sort(key=lambda x: (x[0], x[1]))
+            # Sort by app name then tool name (case-insensitive)
+            tool_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
+            hidden_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
+            server_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
 
             # Calculate counts
             external_count = len(tools_list) - internal_count
@@ -3044,7 +3044,7 @@ class ServiceClient:
             if hasattr(self.mcp_server.function_manager, '_skipped_hidden_functions') and self.mcp_server.function_manager._skipped_hidden_functions:
                 logger.info(f"")
                 logger.info(f"  {BOLD_COLOR}Skipped (@hidden): {len(self.mcp_server.function_manager._skipped_hidden_functions)}{RESET_COLOR}")
-                for item in sorted(self.mcp_server.function_manager._skipped_hidden_functions, key=lambda x: (x['app'] or 'top-level', x['name'])):
+                for item in sorted(self.mcp_server.function_manager._skipped_hidden_functions, key=lambda x: ((x['app'] or 'top-level').lower(), x['name'].lower())):
                     app_display = item['app'] if item['app'] else 'top-level'
                     logger.info(f"    {BOLD_COLOR}{app_display:20}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR}")
 
@@ -3067,7 +3067,7 @@ class ServiceClient:
             if app_counts:
                 logger.info(f"")
                 logger.info(f"  {BOLD_COLOR}Apps Summary:{RESET_COLOR}")
-                for app_name in sorted(app_counts.keys()):
+                for app_name in sorted(app_counts.keys(), key=str.lower):
                     count = app_counts[app_name]
                     logger.info(f"    {BOLD_COLOR}{app_name:20}{RESET_COLOR} {count} function(s)")
 

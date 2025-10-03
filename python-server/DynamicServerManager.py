@@ -317,7 +317,7 @@ class DynamicServerManager:
             servers_path = pathlib.Path(self.servers_dir)
             server_files = list(servers_path.glob('*.json'))
             server_names = [file.stem for file in server_files]
-            return sorted(server_names)
+            return sorted(server_names, key=str.lower)
         except Exception as e:
             logger.error(f"❌ Error listing servers: {e}")
             return []
