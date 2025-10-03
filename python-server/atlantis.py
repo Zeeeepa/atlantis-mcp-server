@@ -203,21 +203,26 @@ async def tool_result(name: str, result: Any):
     return await client_log(f"Tool {name} result: {result}", level="INFO", message_type="tool")
 
 # --- Other Accessors ---
+# this is established by the tool caller
 def get_request_id() -> Optional[str]:
     """Returns the request_id"""
     return _request_id_var.get()
 
+# this is established in server.py when a connection is made
 def get_client_id() -> Optional[str]:
     """Returns the client_id"""
     return _client_id_var.get()
 
-def get_caller() -> Optional[str]:
-    """Returns the user who called this function"""
-    return _user_var.get()
-
+# this is usually the cloud session num, which is per user
 def get_session_id() -> Optional[str]:
     """Returns the session_id for this function call"""
     return _session_id_var.get()
+
+def get_caller() -> Optional[str]:
+    """Returns the username who called this function"""
+    return _user_var.get()
+
+
 
 def get_invoking_tool_name() -> Optional[str]:
     """Returns the name of the tool that initiated the current execution chain."""
