@@ -3166,6 +3166,8 @@ class ServiceClient:
         method = request.get("method")
         params = request.get("params", {})
 
+        logger.warning(f"🔴 CLOUD PATH: {method}")
+
         # Use persistent cloud client ID for this connection
         client_id = f"cloud_{self._creation_time}_{id(self)}"
         logger.debug(f"Created persistent cloud client ID: {client_id}")
@@ -3389,6 +3391,7 @@ async def handle_websocket(websocket: WebSocket):
                 # --- End Awaitable Command Response Handling ---
 
                 logger.debug(f"📥 Received (for MCP processing): {request_data}")
+                logger.warning(f"🟡 WEBSOCKET→process_mcp_request: {request_data.get('method')}")
                 # Process the request using our MCP server (include client_id)
                 response = await process_mcp_request(mcp_server, request_data, client_id)
 
@@ -3433,13 +3436,13 @@ async def process_mcp_request(server, request, client_id=None):
         client_id: Optional ID of the requesting client for tracking
     """
 
-    logger.info(f"🚀 Processing MCP request")
+    method = request.get("method")
+    logger.warning(f"🟢 WS/HTTP PATH: {method}")
 
     if "id" not in request:
         return {"error": "Missing request ID"}
 
     req_id = request.get("id")
-    method = request.get("method")
     params = request.get("params", {})
 
     # Store client_id in thread-local storage or other request context
@@ -3604,6 +3607,7 @@ async def handle_mcp_http(request: Request) -> Response:
         client_id = f"http_{client_ip}_{hash(user_agent) % 10000}"
 
         logger.info(f"🌐 HTTP MCP request from {client_id}: {request_data.get('method', 'unknown')}")
+        logger.warning(f"🟠 HTTP→process_mcp_request: {request_data.get('method')}")
 
         # Process the MCP request using the same logic as WebSocket
         response_data = await process_mcp_request(mcp_server, request_data, client_id)
