@@ -545,11 +545,11 @@ class DynamicAdditionServer(Server):
                             if app_name_from_info is not None:
                                 actual_app_name = app_name_from_info
                                 app_source = "decorator"
-                                logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {actual_app_name} (from @app decorator)")
+                                #logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {actual_app_name} (from @app decorator)")
                             else:
                                 actual_app_name = app_name
                                 app_source = "directory" if app_name else "NA"
-                                logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {actual_app_name} (from app mapping)")
+                                #logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {actual_app_name} (from app mapping)")
 
                             tool_annotations["app_name"] = actual_app_name
                             tool_annotations["app_source"] = app_source
@@ -586,7 +586,7 @@ class DynamicAdditionServer(Server):
                                     os.path.getmtime(full_file_path),
                                     tz=datetime.timezone.utc
                                 ).isoformat()
-                                logger.debug(f"🔍 SET lastModified for {tool_name}: {tool_annotations['lastModified']}")
+                                #logger.debug(f"🔍 SET lastModified for {tool_name}: {tool_annotations['lastModified']}")
                             except Exception as e:
                                 logger.warning(f"⚠️ Failed to get lastModified for {tool_name}: {e}")
                                 pass
@@ -605,7 +605,7 @@ class DynamicAdditionServer(Server):
                             existing_tool_keys = {f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}" for tool in tools_list}
                             if tool_key not in existing_tool_keys:
                                 tools_list.append(tool_obj)
-                                logger.debug(f"📝 Added dynamic tool: {tool_name} (app: {actual_app_name}), valid: {is_valid}")
+                                #logger.debug(f"📝 Added dynamic tool: {tool_name} (app: {actual_app_name}), valid: {is_valid}")
                             else:
                                 # This is an ERROR - same function appearing twice for the same app
                                 # DO NOT add it to the tools list - just log the error
@@ -1475,7 +1475,10 @@ class DynamicAdditionServer(Server):
                             #logger.debug(f"  -> Preserved lastModified: {getattr(tool.annotations, 'lastModified')}")
                             pass
                 else:
-                    logger.debug(f"  -> No lastModified in original annotations for {tool.name}")
+                    # Don't complain about missing lastModified for internal tools
+                    is_internal = tool.name.startswith('_admin') or tool.name.startswith('_function') or tool.name.startswith('_server')
+                    if not is_internal:
+                        logger.debug(f"  -> No lastModified in original annotations for {tool.name}")
 
         # --- Update Cache --- #
         # Final verification: report any duplicates as validation errors (app-aware)
@@ -2690,7 +2693,7 @@ async def get_all_tools_for_response(server: 'DynamicAdditionServer', caller_con
     for tool in raw_tool_list:
         try:
             # Debug log to see all tools and their annotations BEFORE serialization
-            logger.debug(f"🔍 SERIALIZING TOOL '{tool.name}' with annotations: {getattr(tool, 'annotations', None)}")
+            #logger.debug(f"🔍 SERIALIZING TOOL '{tool.name}' with annotations: {getattr(tool, 'annotations', None)}")
             if hasattr(tool, 'annotations') and isinstance(tool.annotations, dict):
                 source_file = tool.annotations.get('sourceFile', 'NOT_FOUND')
             elif hasattr(tool, 'annotations') and hasattr(tool.annotations, 'sourceFile'):
@@ -3070,6 +3073,9 @@ class ServiceClient:
                 for app_name in sorted(app_counts.keys(), key=str.lower):
                     count = app_counts[app_name]
                     logger.info(f"    {BOLD_COLOR}{app_name:20}{RESET_COLOR} {count} function(s)")
+
+            logger.info(f" ")
+            logger.info(f"- tools report done -")
 
 
         # Connection error event

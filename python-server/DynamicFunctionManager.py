@@ -527,14 +527,14 @@ class DynamicFunctionManager:
 
         try:
             tree = ast.parse(code_buffer)
-            logger.debug("⚙️ Code validation successful (AST parse).")
+            #logger.debug("⚙️ Code validation successful (AST parse).")
 
             functions_info = []
             # Find ALL top-level function definitions
             for node in tree.body:
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     func_def_node = node
-                    logger.debug(f"⚙️ Found function definition: {func_def_node.name}")
+                    #logger.debug(f"⚙️ Found function definition: {func_def_node.name}")
 
                     func_name = func_def_node.name
                     docstring = ast.get_docstring(func_def_node)
@@ -624,7 +624,7 @@ class DynamicFunctionManager:
                     functions_info.append(function_info)
 
             if functions_info:
-                logger.debug(f"⚙️ Found {len(functions_info)} function(s) in file")
+                #logger.debug(f"⚙️ Found {len(functions_info)} function(s) in file")
                 return True, None, functions_info
             else:
                 logger.warning("⚠️ Syntax valid, but no top-level function definition found.")
@@ -702,7 +702,7 @@ async def {name}():
                 for dir_name in dirs:
                     if dir_name in ignore_dirs or dir_name.startswith('.'):
                         dirs_to_remove.append(dir_name)
-                        logger.debug(f"🚫 Skipping directory: {os.path.join(root, dir_name)}")
+                        #logger.debug(f"🚫 Skipping directory: {os.path.join(root, dir_name)}")
 
                 for dir_name in dirs_to_remove:
                     dirs.remove(dir_name)
@@ -710,7 +710,7 @@ async def {name}():
                 # Check if we're in a subdirectory and log it prominently
                 if root != self.functions_dir:
                     subdir_name = os.path.basename(root)
-                    logger.info(f"🎯 EXPLORING SUBFOLDER: {CYAN}{subdir_name}{RESET}")
+                    #logger.info(f"🎯 EXPLORING SUBFOLDER: {CYAN}{subdir_name}{RESET}")
 
                 for filename in files:
                     if not filename.endswith('.py'):
@@ -781,9 +781,9 @@ async def {name}():
 
                                 self._function_file_mapping_by_app[app_name][func_name] = rel_path
 
-                                logger.info(f"🎯 FOUND FUNCTION: {CYAN}{func_name}{RESET} -> {rel_path} (app: {app_name})")
-                                if root != self.functions_dir:
-                                    logger.info(f"   📁 IN SUBFOLDER: {CYAN}{os.path.basename(root)}{RESET}")
+                                #logger.info(f"🎯 FOUND FUNCTION: {CYAN}{func_name}{RESET} -> {rel_path} (app: {app_name})")
+                                #if root != self.functions_dir:
+                                #    logger.info(f"   📁 IN SUBFOLDER: {CYAN}{os.path.basename(root)}{RESET}")
                         else:
                             if root != self.functions_dir:
                                 logger.warning(f"⚠️ NO FUNCTIONS FOUND in {rel_path} (subfolder: {os.path.basename(root)})")
