@@ -41,7 +41,7 @@ python server.py  \
             "--port",
             "8000"
             ]
-      },
+      }
    }
 ```
 

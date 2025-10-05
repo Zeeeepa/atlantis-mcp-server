@@ -1707,6 +1707,10 @@ class DynamicAdditionServer(Server):
                 caller = user or client_id or "unknown"
                 owner = atlantis.get_owner()
 
+                # Treat localhost websocket connections as the owner
+                if caller.startswith("ws_127.0.0.1_") and owner:
+                    caller = owner
+
                 if owner and caller != owner:
                     logger.warning(f"🚨 SECURITY: Internal function '{actual_function_name}' called by '{caller}' but owner is '{owner}' - ACCESS DENIED")
                     raise ValueError(f"Access denied: Internal functions can only be accessed by owner")
