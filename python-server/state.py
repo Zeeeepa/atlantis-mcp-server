@@ -68,7 +68,7 @@ SERVERS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dynamic_
 os.makedirs(SERVERS_DIR, exist_ok=True)
 
 # Server configuration
-HOST = "0.0.0.0"  # Listen on all interfaces by default
+HOST = "127.0.0.1"  # Listen on localhost only for security
 PORT = 8000
 
 SERVER_REQUEST_TIMEOUT = 30.0 # Seconds to wait for proxied server requests
