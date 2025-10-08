@@ -2831,8 +2831,25 @@ class ServiceClient:
             logger.info("☁️ Starting _maintain_connection loop iteration") # DEBUG ADDED
             # logger.info(f"☁️ Socket.IO version: {socketio.__version__}") # Commented out for debugging freeze
             try:
-                # Create a new Socket.IO client instance
-                self.sio = socketio.AsyncClient()
+                # Create a new Socket.IO client instance with increased buffer size
+                # Default max_http_buffer_size is 1MB (1,000,000 bytes) - increase to 100MB
+                # This must match or be less than the server's max_http_buffer_size setting
+                self.sio = socketio.AsyncClient(
+                    logger=False,  # Disable Socket.IO's own logger to avoid conflicts
+                    engineio_logger=False,  # Disable engine.io logger
+                    # Pass engine.io client options via kwargs
+                    # max_http_buffer_size controls the maximum size of a single message
+                    http_session=None,  # Let it create its own session
+                    request_timeout=30,  # Increase timeout for large payloads
+                )
+
+                # Set max_http_buffer_size on the underlying engine.io client
+                # This needs to be set before connecting
+                if hasattr(self.sio, 'eio') and self.sio.eio:
+                    self.sio.eio.max_http_buffer_size = 100 * 1024 * 1024  # 100MB
+                    logger.info(f"☁️ Set Socket.IO client max_http_buffer_size to 100MB (before connect)")
+                else:
+                    logger.warning(f"⚠️ Could not set max_http_buffer_size before connect - eio not yet initialized")
 
                 # Register event handlers
                 self._register_event_handlers()
@@ -2856,6 +2873,13 @@ class ServiceClient:
                     },
                     retry=False # We handle retries manually with backoff
                 )
+
+                # Verify max_http_buffer_size after connection
+                if hasattr(self.sio, 'eio') and self.sio.eio:
+                    actual_buffer_size = getattr(self.sio.eio, 'max_http_buffer_size', 'UNKNOWN')
+                    logger.info(f"☁️ VERIFIED: Socket.IO eio.max_http_buffer_size = {actual_buffer_size:,} bytes ({actual_buffer_size/1024/1024:.2f} MB)" if isinstance(actual_buffer_size, int) else f"☁️ WARNING: max_http_buffer_size = {actual_buffer_size}")
+                else:
+                    logger.warning(f"⚠️ Could not verify max_http_buffer_size - eio attribute not found after connect")
 
                 # Wait for disconnection
                 await self.sio.wait()
@@ -2923,6 +2947,25 @@ class ServiceClient:
         """Register Socket.IO event handlers"""
         if not self.sio:
             return
+
+        # Catch-all handler to log ALL incoming events (fires before specific handlers)
+        @self.sio.on('*', namespace=self.namespace)
+        async def catch_all_events(event, *args):
+            """Log all incoming Socket.IO events before they reach specific handlers"""
+            try:
+                import sys
+                # Calculate total size of all args
+                total_size = sum(sys.getsizeof(arg) for arg in args)
+                logger.info(f"☁️ SOCKETIO EVENT RECEIVED: '{event}' - Args count: {len(args)}, Total size: {total_size:,} bytes ({total_size/1024/1024:.2f} MB)")
+
+                # Log size of each argument if large
+                if total_size > 1024 * 1024:  # > 1MB
+                    logger.warning(f"⚠️ LARGE SOCKETIO PAYLOAD DETECTED: {total_size/1024/1024:.2f} MB")
+                    for i, arg in enumerate(args):
+                        arg_size = sys.getsizeof(arg)
+                        logger.info(f"  - Arg[{i}] type: {type(arg).__name__}, size: {arg_size:,} bytes ({arg_size/1024/1024:.2f} MB)")
+            except Exception as e:
+                logger.error(f"❌ Error in catch_all_events logger: {e}")
 
         @self.sio.event(namespace=self.namespace)
         async def connect():
