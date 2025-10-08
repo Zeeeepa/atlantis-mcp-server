@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import datetime
 
 # Version
-SERVER_VERSION = "2.1.2"
+SERVER_VERSION = "2.1.3"
 
 from mcp.server import Server
 
@@ -2832,24 +2832,26 @@ class ServiceClient:
             # logger.info(f"☁️ Socket.IO version: {socketio.__version__}") # Commented out for debugging freeze
             try:
                 # Create a new Socket.IO client instance with increased buffer size
-                # Default max_http_buffer_size is 1MB (1,000,000 bytes) - increase to 100MB
-                # This must match or be less than the server's max_http_buffer_size setting
+                # Engine.IO uses aiohttp for WebSocket connections, which has a default
+                # max_msg_size of ~4MB. We need to increase this to handle large payloads
+                # from the cloud server (e.g., file uploads, large tool responses).
+                MAX_MESSAGE_SIZE = 100 * 1024 * 1024  # 100MB
+
+                # Configure websocket options for aiohttp
+                # This controls the maximum size of messages we can RECEIVE from the cloud
+                websocket_options = {
+                    'max_msg_size': MAX_MESSAGE_SIZE,  # Maximum message size in bytes (aiohttp parameter)
+                    'timeout': 30.0,  # WebSocket timeout in seconds
+                }
+
                 self.sio = socketio.AsyncClient(
                     logger=False,  # Disable Socket.IO's own logger to avoid conflicts
                     engineio_logger=False,  # Disable engine.io logger
-                    # Pass engine.io client options via kwargs
-                    # max_http_buffer_size controls the maximum size of a single message
-                    http_session=None,  # Let it create its own session
-                    request_timeout=30,  # Increase timeout for large payloads
+                    request_timeout=30,  # Increase timeout for large payloads (HTTP requests)
+                    websocket_extra_options=websocket_options  # Pass aiohttp WebSocket options
                 )
 
-                # Set max_http_buffer_size on the underlying engine.io client
-                # This needs to be set before connecting
-                if hasattr(self.sio, 'eio') and self.sio.eio:
-                    self.sio.eio.max_http_buffer_size = 100 * 1024 * 1024  # 100MB
-                    logger.info(f"☁️ Set Socket.IO client max_http_buffer_size to 100MB (before connect)")
-                else:
-                    logger.warning(f"⚠️ Could not set max_http_buffer_size before connect - eio not yet initialized")
+                logger.info(f"☁️ Created Socket.IO client with max_msg_size={MAX_MESSAGE_SIZE:,} bytes ({MAX_MESSAGE_SIZE/1024/1024:.1f} MB)")
 
                 # Register event handlers
                 self._register_event_handlers()
@@ -2874,12 +2876,12 @@ class ServiceClient:
                     retry=False # We handle retries manually with backoff
                 )
 
-                # Verify max_http_buffer_size after connection
+                # Verify configuration after connection
                 if hasattr(self.sio, 'eio') and self.sio.eio:
-                    actual_buffer_size = getattr(self.sio.eio, 'max_http_buffer_size', 'UNKNOWN')
-                    logger.info(f"☁️ VERIFIED: Socket.IO eio.max_http_buffer_size = {actual_buffer_size:,} bytes ({actual_buffer_size/1024/1024:.2f} MB)" if isinstance(actual_buffer_size, int) else f"☁️ WARNING: max_http_buffer_size = {actual_buffer_size}")
+                    websocket_options_actual = getattr(self.sio.eio, 'websocket_extra_options', {})
+                    logger.info(f"☁️ VERIFIED: websocket_extra_options = {websocket_options_actual}")
                 else:
-                    logger.warning(f"⚠️ Could not verify max_http_buffer_size - eio attribute not found after connect")
+                    logger.warning(f"⚠️ Could not verify websocket configuration - eio attribute not found after connect")
 
                 # Wait for disconnection
                 await self.sio.wait()
