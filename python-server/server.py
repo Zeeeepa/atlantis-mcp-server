@@ -3095,7 +3095,7 @@ class ServiceClient:
             # Report skipped hidden functions
             if hasattr(self.mcp_server.function_manager, '_skipped_hidden_functions') and self.mcp_server.function_manager._skipped_hidden_functions:
                 logger.info(f"")
-                logger.info(f"  {BOLD_COLOR}Skipped (@hidden): {len(self.mcp_server.function_manager._skipped_hidden_functions)}{RESET_COLOR}")
+                logger.info(f"  {BOLD_COLOR}Hidden: {len(self.mcp_server.function_manager._skipped_hidden_functions)}{RESET_COLOR}")
                 for item in sorted(self.mcp_server.function_manager._skipped_hidden_functions, key=lambda x: ((x['app'] or 'top-level').lower(), x['name'].lower())):
                     app_display = item['app'] if item['app'] else 'top-level'
                     logger.info(f"    {BOLD_COLOR}{app_display:20}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR}")
