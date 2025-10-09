@@ -121,38 +121,53 @@ The dynamic functions system has **one source of truth**: the **file mapping**. 
 
 ## Security Model
 
-### Function Visibility
+### Function Visibility (Opt-In System)
 
-**Three layers of visibility control**:
+**Default Behavior: Functions are HIDDEN unless decorated with `@visible` or `@public`**
 
-1. **File Mapping (Primary Security Boundary)**
-   - Hidden functions are NOT in the mapping
+**Two layers of visibility control**:
+
+1. **File Mapping (Primary Security Boundary)** - DynamicFunctionManager.py:646-671
+   - Functions WITHOUT `@visible` decorator are NOT in the mapping (unless internal `_function`/`_server`/`_admin`)
    - Functions not in mapping CANNOT be called
    - Functions not in mapping do NOT appear in tools list
+   - **Opt-in visibility**: Must use `@visible` or `@public` decorator to expose
+   - `@hidden` decorator is **obsolete** (everything is hidden by default)
 
-2. **Temporary Overrides (In-Memory, Owner Only)**
-   - `_temporarily_visible_functions: Set[str]` - overrides `@hidden`
-   - `_temporarily_hidden_functions: Set[str]` - hides visible functions
-   - Reset on server restart
-
-3. **Redundant Check (Defense in Depth)**
-   - `_get_tools_list()` checks `@hidden` decorator again (line 564)
-   - Should never trigger (hidden functions already excluded from mapping)
+2. **Redundant Check (Defense in Depth)** - server.py:564
+   - `_get_tools_list()` checks decorators again during tool list generation
+   - Should never trigger (non-visible functions already excluded from mapping)
    - Defensive programming for safety
+
+**Note:** Temporary visibility overrides (`_function_show`/`_function_hide`) are currently disabled. Use decorators to control visibility.
 
 ### Visibility Check Order
 
-In `_create_tools_from_app_mappings()` (line 558-568):
+In `_build_function_file_mapping()` (DynamicFunctionManager.py:646-671):
 
 ```python
+# Check decorators during file mapping build
+is_internal = func_name.startswith('_function') or func_name.startswith('_server') or func_name.startswith('_admin')
+is_visible = "visible" in decorators_from_info if decorators_from_info else False
+is_hidden = "hidden" in decorators_from_info if decorators_from_info else False
+
+# Skip if explicitly hidden OR if not visible and not internal
+if is_hidden or (not is_visible and not is_internal):
+    skip_reason = "hidden by @hidden" if is_hidden else "missing @visible decorator"
+    # Function NOT added to mapping - cannot be called!
+    continue
+```
+
+In `_create_tools_from_app_mappings()` (server.py:558-568):
+
+```python
+# Temporary override sets exist but are currently unused (functionality disabled)
 if tool_name in self._temporarily_hidden_functions:
-    # 1. Temporary hide (highest priority)
     continue
 elif tool_name in self._temporarily_visible_functions:
-    # 2. Temporary show (overrides @hidden)
     show_function()
 elif decorators_from_info and "hidden" in decorators_from_info:
-    # 3. Permanent hide via decorator (should never happen)
+    # Redundant check (should never happen - already filtered from mapping)
     continue
 ```
 
@@ -247,25 +262,26 @@ Load module, execute function
 Return result to client
 ```
 
-### Example 2: Calling a Hidden Function (Security)
+### Example 2: Calling a Non-Visible Function (Security)
 
 ```
-Client: tools/call {name: "hidden_func", args: {...}}
+Client: tools/call {name: "non_visible_func", args: {...}}
     ↓
-server._execute_tool("hidden_func", {...})
+server._execute_tool("non_visible_func", {...})
     ↓
-function_manager.function_call("hidden_func", ...)
+function_manager.function_call("non_visible_func", ...)
     ↓
-_find_file_containing_function("hidden_func")
+_find_file_containing_function("non_visible_func")
     ↓
 _build_function_file_mapping() (if cache stale)
-    → File contains @hidden decorator
-    → Function NOT added to mapping (line 752 continue)
+    → File does NOT contain @visible decorator
+    → Function NOT added to mapping (line 653-671 continue)
+    → Logged as: "SKIPPING NON-VISIBLE FUNCTION: non_visible_func (missing @visible decorator)"
     ↓
-_function_file_mapping.get("hidden_func")
+_function_file_mapping.get("non_visible_func")
     → Returns: None
     ↓
-Raise FileNotFoundError (line 1045)
+Raise FileNotFoundError (line 964)
     ↓
 Return error to client
 ```
@@ -325,72 +341,75 @@ Return tools list to client
 
 ## Testing the Security Model
 
-### Test: Hidden Function Cannot Be Called
+### Test: Non-Visible Function Cannot Be Called
 
 ```python
-# Create a hidden function
-@hidden
-async def test_hidden():
+# Create a function without @visible decorator
+async def test_non_visible():
     return "secret"
 
 # Try to call it
-result = await function_manager.function_call("test_hidden", ...)
-# Expected: FileNotFoundError "Dynamic function 'test_hidden' not found in any file"
+result = await function_manager.function_call("test_non_visible", ...)
+# Expected: FileNotFoundError "Dynamic function 'test_non_visible' not found in any file"
 ```
 
-### Test: Hidden Function Not in Tools List
+### Test: Non-Visible Function Not in Tools List
 
 ```python
-# Create a hidden function (as above)
+# Create a function without @visible decorator (as above)
 
 # Get tools list
 tools = await server._get_tools_list("test")
 tool_names = [t.name for t in tools]
 
-# Expected: "test_hidden" NOT in tool_names
-assert "test_hidden" not in tool_names
+# Expected: "test_non_visible" NOT in tool_names
+assert "test_non_visible" not in tool_names
 ```
 
-### Test: Temporary Visibility Override
+### Test: @visible Decorator Makes Function Visible
 
 ```python
-# Create a hidden function (as above)
+# Create a function with @visible decorator
+@visible
+async def test_visible():
+    return "public"
 
-# Show it temporarily (owner only)
-await server._execute_tool("_function_show", {"name": "test_hidden"}, ...)
-
-# Check tools list
+# Get tools list
 tools = await server._get_tools_list("test")
 tool_names = [t.name for t in tools]
 
-# Expected: "test_hidden" IS in tool_names
-assert "test_hidden" in tool_names
+# Expected: "test_visible" IS in tool_names
+assert "test_visible" in tool_names
 
-# Can now call it
-result = await function_manager.function_call("test_hidden", ...)
-# Expected: "secret"
+# Can call it
+result = await function_manager.function_call("test_visible", ...)
+# Expected: "public"
 ```
 
 ## FAQ
 
-**Q: Why check for `@hidden` in both the file mapping AND the tools list?**
+**Q: Why is visibility opt-in instead of opt-out?**
 
-A: Defense in depth. The file mapping is the primary security boundary, but the tools list has a redundant check (line 564) as defensive programming. If something goes wrong with the mapping, the tools list check provides a backup.
+A: Security by default. Functions must explicitly declare they want to be exposed as MCP tools using `@visible` or `@public`. This prevents accidentally exposing internal helper functions, debug tools, or incomplete code.
 
-**Q: What happens if I manually add a function to the mapping but it has `@hidden`?**
-
-A: The tools list check would catch it and skip it. However, this scenario shouldn't happen in normal operation since the mapping is built from the same AST parsing that detects `@hidden`.
-
-**Q: Can hidden functions call each other internally?**
-
-A: No, hidden functions cannot be called via the MCP system at all (not in mapping). However, they can be imported and called directly by other Python code within the same module or via normal Python imports.
-
-**Q: What's the difference between `@hidden` and `_temporarily_hidden_functions`?**
+**Q: What's the difference between `@visible` and `@public`?**
 
 A:
-- `@hidden`: Permanent, decorator-based, set in code, excluded from file mapping
-- `_temporarily_hidden_functions`: Runtime override, in-memory set, owner-controlled, resets on restart
+- `@visible`: Makes function visible in tools list and callable by owner
+- `@public`: Makes function visible AND accessible to all users (handled in cloud infrastructure, implies @visible)
+
+**Q: Is `@hidden` still needed?**
+
+A: No, `@hidden` is obsolete. Functions are hidden by default unless decorated with `@visible` or `@public`. You can simply omit the decorator instead of using `@hidden`.
+
+**Q: Can non-visible functions call each other internally?**
+
+A: Yes! Functions without `@visible` cannot be called via MCP, but they can be imported and called directly by other Python code within the same module or via normal Python imports. This makes them perfect for helper functions.
 
 **Q: Why does `_skipped_hidden_functions` exist?**
 
-A: For debugging and introspection. It allows admins to see what functions exist but are hidden. It's not used for any security decisions.
+A: For debugging and introspection. It tracks all functions that were skipped during mapping build (both those with `@hidden` and those missing `@visible`), showing the reason they were skipped. Not used for security decisions.
+
+**Q: Can I change visibility at runtime?**
+
+A: No, the temporary visibility override system (`_function_show`/`_function_hide`) is currently disabled. Use decorators (`@visible` or `@public`) to control function visibility. Changes require editing the function file and rely on the file watcher for automatic reload.

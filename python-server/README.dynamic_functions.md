@@ -27,14 +27,14 @@ Organize functions however makes sense - one per file or group related functions
 ```python
 import atlantis
 
-@public
+@visible
 async def add(x: float, y: float):
     """Add two numbers. Use for basic addition operations."""
     result = x + y
     await atlantis.client_log(f"{x} + {y} = {result}")
     return result
 
-@hidden
+# No decorator = hidden by default
 async def helper():
     """Helper function - not exposed as tool."""
     return "internal use only"
@@ -64,22 +64,63 @@ Write for AI consumption. Be explicit about purpose and when to use.
 
 ## Decorators
 
+### Visibility (Required)
+- **`@visible`** - Make function visible in tools list (REQUIRED for all functions except internal `_function`/`_server`/`_admin`)
+- **`@public`** - Make function publicly accessible to all users (handled in cloud, implies @visible)
+- **No decorator** - Function is hidden by default, not exposed as tool
+
+### Optional Metadata
 - **`@chat`** - Chat functions that get transcript/tools and call LLM
-- **`@public`** - Publicly accessible (most common)
 - **`@app(name="app_name")`** - Associate with specific app
 - **`@location(name="location_name")`** - Associate with location
 - **`@shared`** - Persist across reloads
-- **`@hidden`** - Hide from tools list
+
+### Deprecated
+- **`@hidden`** - Obsolete (functions are hidden by default without @visible)
 
 **Combine decorators:**
 ```python
 @app(name="calculator")
 @location(name="office")
-@public
+@visible
 async def calculate(x: float, y: float):
     """Calculate with app and location context."""
     return x + y
 ```
+
+## Decorator Behavior
+
+### @visible vs @public
+
+Understanding the difference between `@visible` and `@public` is important for access control:
+
+**`@visible`** - Owner-only access:
+```python
+@visible
+async def admin_command(action: str):
+    """Execute admin action. Only accessible by function owner."""
+    return f"Executing {action}"
+```
+- Function appears in tools list
+- Only the **owner** can call this function
+- Use for admin tools, private operations, owner-specific features
+
+**`@public`** - Multi-user access:
+```python
+@public
+async def public_service(query: str):
+    """Public API service. Accessible to all users."""
+    return f"Result for {query}"
+```
+- Function appears in tools list (implies `@visible`)
+- **Anyone** can call this function (handled in cloud infrastructure)
+- Use for shared tools, public APIs, multi-user features
+- No need to combine with `@visible` - `@public` includes visibility
+
+**Access Control Summary:**
+- No decorator → Hidden, not callable
+- `@visible` → Visible, owner-only
+- `@public` → Visible, accessible to all users
 
 ## Atlantis Module
 
@@ -100,9 +141,6 @@ async def calculate(x: float, y: float):
 - `owner_log(message)` - Log to owner file
 - `shared` - Persistent memory container (connections, not data)
 
-**Built-in Functions:**
-- `_function_show(name)` - Make any function temporarily visible until server restart
-- `_function_hide(name)` - Hide any function temporarily until server restart
 
 ## Shared Container
 
@@ -130,22 +168,22 @@ You can put many functions in one file - each becomes its own MCP tool:
 # File: user_management.py
 import atlantis
 
-@public
+@visible
 async def create_user(username: str, email: str):
     """Create user account. Use for user registration."""
     return {"user_id": 123, "username": username}
 
-@public
+@visible
 async def get_user(username: str):
     """Get user by username. Use to retrieve user details."""
     return {"username": username, "email": "user@example.com"}
 
-@public
+@visible
 async def delete_user(username: str):
     """Delete user account. Use to remove users."""
     return {"success": True}
 
-@hidden
+# No decorator = hidden by default
 def _validate_email(email: str):
     """Helper function - not exposed as MCP tool."""
     return "@" in email
@@ -156,7 +194,7 @@ def _validate_email(email: str):
 
 ### Streaming
 ```python
-@public
+@visible
 async def stream_data():
     """Stream data to client."""
     stream_id = await atlantis.stream_start("data", "stream_data")
@@ -166,57 +204,47 @@ async def stream_data():
 
 ### Client Commands
 ```python
-@public
+@visible
 async def get_input():
     """Get input from client."""
     name = await atlantis.client_command("\\input", {"prompt": "Name?"})
     return f"Hello {name}"
 ```
 
-### State-Dependent Visibility
-Use `@hidden` with `_function_show` for state-dependent function visibility, or use `_function_show`/`_function_hide` directly for any function:
+### Helper Functions
+Functions without `@visible` are hidden by default - perfect for internal helpers:
 
 ```python
-@public
-async def init_app():
-    """Initialize app and show hidden functions."""
-    # Initialize your app
-    await atlantis.client_log("Initializing app...")
+@visible
+async def process_data(data: str):
+    """Process and validate data."""
+    # Use internal helper functions
+    if not _validate_data(data):
+        return "Invalid data"
 
-    # Make hidden functions visible
-    await atlantis.client_command("_function_show", {"name": "start_service"})
-    await atlantis.client_command("_function_show", {"name": "stop_service"})
+    cleaned = _clean_data(data)
+    return f"Processed: {cleaned}"
 
-    return "App initialized"
+# No decorator = hidden by default, not exposed as MCP tool
+def _validate_data(data: str):
+    """Internal helper - validates data format."""
+    return len(data) > 0 and data.strip() != ""
 
-@hidden
-async def start_service():
-    """Start service - only visible after initialization."""
-    return "Service started"
-
-@hidden
-async def stop_service():
-    """Stop service - only visible after initialization."""
-    return "Service stopped"
-
-# You can also hide any function temporarily
-@public
-async def hide_debug_functions():
-    """Hide debug functions from the tool list."""
-    await atlantis.client_command("_function_hide", {"name": "debug_log"})
-    await atlantis.client_command("_function_hide", {"name": "test_function"})
-    return "Debug functions hidden"
+# No decorator = hidden by default, not exposed as MCP tool
+def _clean_data(data: str):
+    """Internal helper - cleans and formats data."""
+    return data.strip().lower()
 ```
 
 **Patterns:**
-- Show `init()` first, then reveal other methods after initialization
-- Hide debug/test functions when not needed
-- Temporarily hide functions during maintenance
+- Keep helper/utility functions without decorators (hidden by default)
+- Only add `@visible` to functions that should be MCP tools
+- Internal functions can still be called by visible functions
 
 ### Chat Function
 ```python
 @chat
-@public
+@visible
 async def chat():
     """Chat function that processes conversation and calls LLM."""
     # Get conversation history
