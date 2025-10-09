@@ -1987,25 +1987,25 @@ class DynamicAdditionServer(Server):
                 else:
                     # Function exists, continue with showing it
                     pass
-                    # Remove from temporarily hidden set if it was there
-                    if func_name in self._temporarily_hidden_functions:
-                        self._temporarily_hidden_functions.remove(func_name)
-                        logger.info(f"{PINK}👁️ Removed '{func_name}' from temporarily hidden list{RESET}")
+                    # # Remove from temporarily hidden set if it was there
+                    # if func_name in self._temporarily_hidden_functions:
+                    #     self._temporarily_hidden_functions.remove(func_name)
+                    #     logger.info(f"{PINK}👁️ Removed '{func_name}' from temporarily hidden list{RESET}")
 
-                    # Add to temporarily visible functions set
-                    self._temporarily_visible_functions.add(func_name)
-                    logger.info(f"{PINK}👁️ Made function '{func_name}' temporarily visible{RESET}")
+                    # # Add to temporarily visible functions set
+                    # self._temporarily_visible_functions.add(func_name)
+                    # logger.info(f"{PINK}👁️ Made function '{func_name}' temporarily visible{RESET}")
 
-                    # Invalidate tool cache to refresh the list
-                    #self._cached_tools = None
+                    # # Invalidate tool cache to refresh the list
+                    # #self._cached_tools = None
 
-                    # Notify clients about the tool list change
-                    try:
-                        await self._notify_tool_list_changed(change_type="updated", tool_name=func_name)
-                    except Exception as e:
-                        logger.error(f"Error sending tool notification after showing {func_name}: {str(e)}")
+                    # # Notify clients about the tool list change
+                    # try:
+                    #     await self._notify_tool_list_changed(change_type="updated", tool_name=func_name)
+                    # except Exception as e:
+                    #     logger.error(f"Error sending tool notification after showing {func_name}: {str(e)}")
 
-                    result_raw = [TextContent(type="text", text=f"Function '{func_name}' is now temporarily visible until server restart.")]
+                    result_raw = [TextContent(type="text", text=f"Use decorators instead of temporary visibility overrides.")]
 
             elif actual_function_name == "_function_hide":
                 # Hide any function temporarily
@@ -2031,25 +2031,25 @@ class DynamicAdditionServer(Server):
                 else:
                     # Function exists, continue with hiding it
                     pass
-                                        # Remove from temporarily visible set if it was there
-                    if func_name in self._temporarily_visible_functions:
-                        self._temporarily_visible_functions.remove(func_name)
-                        logger.info(f"{PINK}🙈 Removed '{func_name}' from temporarily visible list{RESET}")
+                    # # Remove from temporarily visible set if it was there
+                    # if func_name in self._temporarily_visible_functions:
+                    #     self._temporarily_visible_functions.remove(func_name)
+                    #     logger.info(f"{PINK}🙈 Removed '{func_name}' from temporarily visible list{RESET}")
 
-                    # Add to temporarily hidden functions set
-                    self._temporarily_hidden_functions.add(func_name)
-                    logger.info(f"{PINK}🙈 Made function '{func_name}' temporarily hidden{RESET}")
+                    # # Add to temporarily hidden functions set
+                    # self._temporarily_hidden_functions.add(func_name)
+                    # logger.info(f"{PINK}🙈 Made function '{func_name}' temporarily hidden{RESET}")
 
-                    # Invalidate tool cache to refresh the list
-                    #self._cached_tools = None
+                    # # Invalidate tool cache to refresh the list
+                    # #self._cached_tools = None
 
-                    # Notify clients about the tool list change
-                    try:
-                        await self._notify_tool_list_changed(change_type="updated", tool_name=func_name)
-                    except Exception as e:
-                        logger.error(f"Error sending tool notification after hiding {func_name}: {str(e)}")
+                    # # Notify clients about the tool list change
+                    # try:
+                    #     await self._notify_tool_list_changed(change_type="updated", tool_name=func_name)
+                    # except Exception as e:
+                    #     logger.error(f"Error sending tool notification after hiding {func_name}: {str(e)}")
 
-                    result_raw = [TextContent(type="text", text=f"Function '{func_name}' is now temporarily hidden until server restart.")]
+                    result_raw = [TextContent(type="text", text=f"Use decorators instead of temporary visibility overrides.")]
 
             elif actual_function_name == "_admin_restart":
                 # Restart the server by terminating the process (wrapper script should restart it)
