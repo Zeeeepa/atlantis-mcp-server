@@ -104,6 +104,22 @@ def hidden(func):
     setattr(func, '_is_hidden', True)
     return func
 
+# --- Visible Decorator Definition ---
+def visible(func):
+    """
+    Decorator that marks a function as 'visible'.
+    When applied, the function will be included in the tools list.
+    This is required for all functions to be callable (opt-in visibility).
+
+    Usage: @visible
+           def my_visible_function():
+               # This function will be visible in tools/list
+               ...
+    """
+    # Mark the function as visible by setting an attribute
+    setattr(func, '_is_visible', True)
+    return func
+
 class DynamicFunctionManager:
     def __init__(self, functions_dir):
         # State that was previously global
@@ -731,10 +747,16 @@ async def {name}():
                             for func_info in functions_info:
                                 func_name = func_info['name']
 
-                                # Check if function is hidden - skip it entirely from mapping
+                                # NEW OPT-IN VISIBILITY: Check if function has @visible decorator or is internal
                                 decorators_from_info = func_info.get("decorators", [])
-                                if decorators_from_info and "hidden" in decorators_from_info:
-                                    logger.info(f"🙈 SKIPPING HIDDEN FUNCTION: {CYAN}{func_name}{RESET} -> {rel_path} (not eligible for calling)")
+                                is_internal = func_name.startswith('_function') or func_name.startswith('_server') or func_name.startswith('_admin')
+                                is_visible = "visible" in decorators_from_info if decorators_from_info else False
+                                is_hidden = "hidden" in decorators_from_info if decorators_from_info else False
+
+                                # Skip if explicitly hidden OR if not visible and not internal
+                                if is_hidden or (not is_visible and not is_internal):
+                                    skip_reason = "hidden by @hidden" if is_hidden else "missing @visible decorator"
+                                    logger.info(f"🙈 SKIPPING NON-VISIBLE FUNCTION: {CYAN}{func_name}{RESET} -> {rel_path} ({skip_reason})")
                                     # Determine app name for tracking
                                     app_name_from_decorator = func_info.get('app_name')
                                     if app_name_from_decorator:
@@ -743,11 +765,12 @@ async def {name}():
                                         track_app_name = rel_path.split('/')[0]
                                     else:
                                         track_app_name = None
-                                    # Track this hidden function
+                                    # Track this skipped function
                                     self._skipped_hidden_functions.append({
                                         'name': func_name,
                                         'app': track_app_name,
-                                        'file': rel_path
+                                        'file': rel_path,
+                                        'reason': skip_reason
                                     })
                                     continue
 
@@ -1100,6 +1123,8 @@ async def {name}():
                     module.__dict__['location'] = location
                     # Add hidden decorator
                     module.__dict__['hidden'] = hidden
+                    # Add visible decorator
+                    module.__dict__['visible'] = visible
                     # Add other known decorator names here if they arise
 
                     spec.loader.exec_module(module)
