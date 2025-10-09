@@ -747,10 +747,10 @@ async def {name}():
                             for func_info in functions_info:
                                 func_name = func_info['name']
 
-                                # NEW OPT-IN VISIBILITY: Check if function has @visible decorator or is internal
+                                # NEW OPT-IN VISIBILITY: Check if function has @visible or @public decorator or is internal
                                 decorators_from_info = func_info.get("decorators", [])
                                 is_internal = func_name.startswith('_function') or func_name.startswith('_server') or func_name.startswith('_admin')
-                                is_visible = "visible" in decorators_from_info if decorators_from_info else False
+                                is_visible = ("visible" in decorators_from_info or "public" in decorators_from_info) if decorators_from_info else False
                                 is_hidden = "hidden" in decorators_from_info if decorators_from_info else False
 
                                 # Skip if explicitly hidden OR if not visible and not internal
@@ -770,7 +770,8 @@ async def {name}():
                                         'name': func_name,
                                         'app': track_app_name,
                                         'file': rel_path,
-                                        'reason': skip_reason
+                                        'reason': skip_reason,
+                                        'decorators': decorators_from_info
                                     })
                                     continue
 

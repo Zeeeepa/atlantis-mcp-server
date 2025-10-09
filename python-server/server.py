@@ -3025,6 +3025,7 @@ class ServiceClient:
                 source_file = getattr(tool.annotations, 'sourceFile', 'unknown') if hasattr(tool, 'annotations') else 'unknown'
                 app_source = getattr(tool.annotations, 'app_source', 'unknown') if hasattr(tool, 'annotations') else 'unknown'
                 last_modified = getattr(tool.annotations, 'lastModified', None) if hasattr(tool, 'annotations') else None
+                decorators = getattr(tool.annotations, 'decorators', []) if hasattr(tool, 'annotations') else []
 
                 # Check if tool is hidden
                 is_hidden = getattr(tool.annotations, 'temporarilyVisible', False) if hasattr(tool, 'annotations') else False
@@ -3061,16 +3062,24 @@ class ServiceClient:
                     except Exception as e:
                         timestamp_str = f" {GREY_COLOR}[{last_modified}]{RESET_COLOR}"
 
+                # Determine visibility indicator for non-internal functions
+                visibility_str = ""
+                if not is_internal and not is_server:
+                    if 'public' in decorators:
+                        visibility_str = f" {CYAN_COLOR}[@public]{RESET_COLOR}"
+                    elif 'visible' in decorators:
+                        visibility_str = f" {GREY_COLOR}[@visible]{RESET_COLOR}"
+
                 # Format the line with colors
                 # Format differently for servers (no app name column)
                 if is_server:
                     formatted_line = f"{tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR}{timestamp_str}"
                     server_info_list.append((app_display, tool.name, formatted_line))
                 elif is_hidden:
-                    formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source}]{RESET_COLOR}{timestamp_str}"
+                    formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source}]{RESET_COLOR}{visibility_str}{timestamp_str}"
                     hidden_info_list.append((app_display, tool.name, formatted_line))
                 else:
-                    formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source}]{RESET_COLOR}{timestamp_str}"
+                    formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source}]{RESET_COLOR}{visibility_str}{timestamp_str}"
                     tool_info_list.append((app_display, tool.name, formatted_line))
 
             # Sort by app name then tool name (case-insensitive)
