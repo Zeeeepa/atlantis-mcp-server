@@ -673,6 +673,7 @@ class DynamicFunctionManager:
         stub = f"""\
 import atlantis
 
+@visible
 async def {name}():
     \"\"\"
     This is a placeholder function for '{name}'
