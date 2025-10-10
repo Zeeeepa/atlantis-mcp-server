@@ -239,6 +239,21 @@ self._temporarily_hidden_functions = set()   # Set[str]
 **Reset by**:
 - Server restart
 
+## Compound Tool Names
+
+Tool names can include routing context using asterisk delimiters:
+
+**Format:** `remote_owner*remote_name*app*location*function`
+
+All fields except function name are optional (empty strings allowed).
+
+**Examples:**
+- `alice*prod*Admin**restart` → owner=alice, remote=prod, app=Admin, function=restart
+- `**MyApp**func` → app=MyApp, function=func
+- `simple_func` → No parsing, use name directly
+
+Parsing happens in `server.py:1645-1663`. The parsed fields provide routing context; `actual_function_name` is used for execution.
+
 ## Call Flow Examples
 
 ### Example 1: Calling a Regular Function

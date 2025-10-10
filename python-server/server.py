@@ -1643,7 +1643,7 @@ class DynamicAdditionServer(Server):
         logger.debug(f"---> _execute_tool ENTERED. Name: '{name}', Raw Args: {args!r}") # <-- ADD THIS LINE
 
         # Parse compound tool names by splitting on '*'
-        # Format: "app*location*owner*remote*function" (empty fields allowed)
+        # Format: "remote_owner*remote_name*app*location*function" (empty fields allowed)
         actual_function_name = name
         parsed_app_name = None
         parsed_location_name = None
@@ -1653,14 +1653,14 @@ class DynamicAdditionServer(Server):
         if "*" in name:
             parts = name.split("*")
             if len(parts) >= 5:
-                # Full format: app*location*owner*remote*function
-                parsed_app_name = parts[0] if parts[0] else None
-                parsed_location_name = parts[1] if parts[1] else None
-                parsed_owner_name = parts[2] if parts[2] else None
-                parsed_remote_name = parts[3] if parts[3] else None
+                # Full format: remote_owner*remote_name*app*location*function
+                parsed_owner_name = parts[0] if parts[0] else None
+                parsed_remote_name = parts[1] if parts[1] else None
+                parsed_app_name = parts[2] if parts[2] else None
+                parsed_location_name = parts[3] if parts[3] else None
                 actual_function_name = parts[4]
 
-                logger.info(f"🔍 PARSED TOOL NAME: app='{parsed_app_name}', location='{parsed_location_name}', owner='{parsed_owner_name}', remote='{parsed_remote_name}', function='{actual_function_name}'")
+                logger.info(f"🔍 PARSED TOOL NAME: owner='{parsed_owner_name}', remote='{parsed_remote_name}', app='{parsed_app_name}', location='{parsed_location_name}', function='{actual_function_name}'")
 
         logger.debug(f"Actual function name to route: '{actual_function_name}'")
 
