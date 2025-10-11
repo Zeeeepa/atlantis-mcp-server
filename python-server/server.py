@@ -2989,6 +2989,7 @@ class ServiceClient:
             logger.info(f"{BOLD}{BRIGHT_WHITE}🚀✨🎉 CONNECTED TO ATLANTIS CLOUD SERVER! 🎉✨🚀{RESET}")
             logger.info(f"{BOLD}{CYAN}=================================================={RESET}")
             logger.info("") # Blank line after
+            logger.info(f"{BOLD}{BRIGHT_WHITE}VERSION     : {SERVER_VERSION}{RESET}")
             logger.info(f"{BOLD}{BRIGHT_WHITE}CLOUD URL   : {self.server_url}{RESET}")
             logger.info(f"{BOLD}{BRIGHT_WHITE}REMOTE NAME : {self.serviceName}{RESET}")
             logger.info(f"{BOLD}{BRIGHT_WHITE}LOGIN       : {self.email}{RESET}")
@@ -3042,6 +3043,11 @@ class ServiceClient:
                 else:
                     app_display = app_name if app_name else 'top-level'
 
+                # Replace NA with [Nyaa] for top-level functions
+                app_source_display = app_source
+                if app_source == 'NA':
+                    app_source_display = 'Nyaa'
+
                 # Color code based on app source
                 if app_source == 'decorator':
                     source_color = CYAN_COLOR
@@ -3076,10 +3082,10 @@ class ServiceClient:
                     formatted_line = f"{tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR}{timestamp_str}"
                     server_info_list.append((app_display, tool.name, formatted_line))
                 elif is_hidden:
-                    formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source}]{RESET_COLOR}{visibility_str}{timestamp_str}"
+                    formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
                     hidden_info_list.append((app_display, tool.name, formatted_line))
                 else:
-                    formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source}]{RESET_COLOR}{visibility_str}{timestamp_str}"
+                    formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
                     tool_info_list.append((app_display, tool.name, formatted_line))
 
             # Sort by app name then tool name (case-insensitive)
