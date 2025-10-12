@@ -1185,10 +1185,10 @@ async def {name}():
             if user:
                 logger.debug(f"Function '{actual_function_name}' will be called with user context: {user}")
 
-            logger.info(f"Calling dynamic function '{actual_function_name}' with args: {kwargs.get('args', {})}")
-
             # Extract args from the kwargs dictionary
             function_args = kwargs.get('args', {})
+            logger.info(f"Calling dynamic function '{actual_function_name}' with args: {function_args}")
+            logger.info(f"📊 Args as JSON: {json.dumps(function_args, indent=2)}")
 
             if inspect.iscoroutinefunction(function_to_call):
                 result = await function_to_call(**function_args)

@@ -208,6 +208,7 @@ async def execute_client_command_awaitable(
 
     try:
         logger.info(f"🚀 Utils: Relaying dedicated awaitable command '{command}' to server for client {client_id_for_routing}, seq_num={seq_num}")
+        logger.info(f"   📦 Command data type: {type(command_data)}, data: {command_data}")
         # This specifically calls the method designed for awaitable command-response cycles
         result = await _server_instance.send_awaitable_client_command(
             client_id_for_routing=client_id_for_routing,
@@ -218,6 +219,7 @@ async def execute_client_command_awaitable(
             entry_point_name=entry_point_name
         )
         logger.info(f"✅ Utils: Received result for dedicated awaitable command '{command}' from server.")
+        logger.info(f"   📥 Result type: {type(result)}, length: {len(str(result)) if result else 0}")
         return result
     except Exception as e:
         # Errors (including McpError for timeouts/client errors from server's send_awaitable_client_command) will propagate

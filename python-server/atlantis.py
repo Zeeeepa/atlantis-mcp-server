@@ -524,6 +524,7 @@ async def client_command(command: str, data: Any = None) -> Any:
         current_seq_to_send = await get_and_increment_seq_num(context_name="client_command")
 
         print(f"INFO: Atlantis: Sending awaitable command '{command}' for client {client_id}, request {request_id}, seq {current_seq_to_send}")
+        print(f"INFO: Atlantis: Command data type: {type(data)}, data: {data}")
         # Call the dedicated utility function for awaitable commands
         result = await execute_client_command_awaitable(
             client_id_for_routing=client_id,
@@ -534,7 +535,7 @@ async def client_command(command: str, data: Any = None) -> Any:
             entry_point_name=entry_point_name  # Pass the entry point name for logging
         )
         #print(f"INFO: Atlantis: Received result for awaitable command '{command}': {result}")
-        print(f"INFO: Atlantis: Received result for awaitable command '{command}'")
+        print(f"INFO: Atlantis: Received result for awaitable command '{command}', type: {type(result)}")
         return result
     except Exception as e:
         # Server layer already logged with enhanced error message including command context

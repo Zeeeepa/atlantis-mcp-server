@@ -445,6 +445,7 @@ class DynamicAdditionServer(Server):
                     "method": "notifications/message",
                     "params": cloud_notification_params
                 }
+                logger.info(f"☁️ About to send cloud payload with params: {cloud_notification_params}")
                 await connection.send_message('mcp_notification', cloud_wrapper_payload)
                 logger.info(f"☁️ Sent awaitable command '{command}' (as flat notifications/message) to cloud client {client_id_for_routing} (correlationId: {correlation_id}) via 'mcp_notification' event")
             else:
@@ -527,6 +528,18 @@ class DynamicAdditionServer(Server):
                         # Create one tool per function in the file
                         for func_info in functions_info:
                             tool_name = func_info.get('name', func_name)
+
+                            # NEW OPT-IN VISIBILITY: Check if function has @visible or @public decorator or is internal
+                            decorators_from_info = func_info.get("decorators", [])
+                            is_internal = tool_name.startswith('_function') or tool_name.startswith('_server') or tool_name.startswith('_admin')
+                            is_visible = ("visible" in decorators_from_info or "public" in decorators_from_info) if decorators_from_info else False
+                            is_hidden = "hidden" in decorators_from_info if decorators_from_info else False
+
+                            # Skip if explicitly hidden OR if not visible and not internal
+                            if is_hidden or (not is_visible and not is_internal):
+                                logger.debug(f"🙈 Skipping non-visible function in tool creation: {tool_name} from {file_path}")
+                                continue
+
                             tool_description = func_info.get('description', f"Dynamic function '{tool_name}'")
                             tool_input_schema = func_info.get('inputSchema', {"type": "object", "properties": {}})
                             tool_annotations = {}
@@ -535,8 +548,7 @@ class DynamicAdditionServer(Server):
                             tool_annotations["validationStatus"] = "VALID"
                             tool_annotations["sourceFile"] = file_path
 
-                            # Add decorator info if present
-                            decorators_from_info = func_info.get("decorators")
+                            # Add decorator info if present (decorators_from_info already retrieved above)
                             if decorators_from_info:
                                 tool_annotations["decorators"] = decorators_from_info
 
