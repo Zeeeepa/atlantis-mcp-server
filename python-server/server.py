@@ -3020,6 +3020,7 @@ class ServiceClient:
             tool_info_list = []
             hidden_info_list = []
             server_info_list = []
+            internal_info_list = []
             internal_count = 0
             for tool in tools_list:
                 app_name = getattr(tool.annotations, 'app_name', None) if hasattr(tool, 'annotations') else None
@@ -3077,10 +3078,13 @@ class ServiceClient:
                         visibility_str = f" {GREY_COLOR}[@visible]{RESET_COLOR}"
 
                 # Format the line with colors
-                # Format differently for servers (no app name column)
+                # Format differently for servers (no app name column), internal tools, hidden, or regular
                 if is_server:
                     formatted_line = f"{tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR}{timestamp_str}"
                     server_info_list.append((app_display, tool.name, formatted_line))
+                elif is_internal:
+                    formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{timestamp_str}"
+                    internal_info_list.append((app_display, tool.name, formatted_line))
                 elif is_hidden:
                     formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
                     hidden_info_list.append((app_display, tool.name, formatted_line))
@@ -3092,6 +3096,7 @@ class ServiceClient:
             tool_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
             hidden_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
             server_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
+            internal_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
 
             # Calculate counts
             external_count = len(tools_list) - internal_count
@@ -3100,6 +3105,12 @@ class ServiceClient:
             logger.info(f"  {BOLD_COLOR}Functions: {len(tool_info_list)}{RESET_COLOR}")
             for _, _, formatted_line in tool_info_list:
                 logger.info(f"    {formatted_line}")
+
+            if internal_info_list:
+                logger.info(f"")
+                logger.info(f"  {BOLD_COLOR}Internal: {len(internal_info_list)}{RESET_COLOR}")
+                for _, _, formatted_line in internal_info_list:
+                    logger.info(f"    {formatted_line}")
 
             if hidden_info_list:
                 logger.info(f"")
