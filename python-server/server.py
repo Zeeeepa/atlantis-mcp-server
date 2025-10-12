@@ -40,7 +40,8 @@ from mcp.types import (
     CallToolResult,
     NotificationParams,
     Annotations, # Ensure Annotation, ToolErrorAnnotation are NOT imported
-    ToolAnnotations as McpToolAnnotations
+    ToolAnnotations as McpToolAnnotations,
+    ErrorData
 )
 from pydantic import ConfigDict
 from typing import Any, Dict
@@ -409,7 +410,11 @@ class DynamicAdditionServer(Server):
         if not client_id_for_routing or client_id_for_routing not in client_connections:
             self.awaitable_requests.pop(correlation_id, None) # Clean up future
             logger.error(f"❌ Cannot send awaitable command '{command}': Client ID '{client_id_for_routing}' not found or invalid.")
-            raise McpError(f"Client ID '{client_id_for_routing}' not found for awaitable command.")
+            error_data = ErrorData(
+                code=-32602,
+                message=f"Client ID '{client_id_for_routing}' not found for awaitable command."
+            )
+            raise McpError(error_data)
 
         client_info = client_connections[client_id_for_routing]
         client_type = client_info.get("type")
@@ -451,7 +456,11 @@ class DynamicAdditionServer(Server):
             else:
                 self.awaitable_requests.pop(correlation_id, None) # Clean up future
                 logger.error(f"❌ Cannot send awaitable command '{command}': Client '{client_id_for_routing}' has no valid/active connection.")
-                raise McpError(f"Client '{client_id_for_routing}' has no active connection for awaitable command.")
+                error_data = ErrorData(
+                    code=-32602,
+                    message=f"Client '{client_id_for_routing}' has no active connection for awaitable command."
+                )
+                raise McpError(error_data)
 
             # Wait for the future to be resolved
             logger.debug(f"⏳ Waiting for response for command '{command}' (correlationId: {correlation_id}) timeout: {self.awaitable_request_timeout}s")
@@ -461,17 +470,28 @@ class DynamicAdditionServer(Server):
         except asyncio.TimeoutError:
             logger.error(f"⏰ Timeout waiting for response for command '{command}' (correlationId {correlation_id}) from client {client_id_for_routing}")
             self.awaitable_requests.pop(correlation_id, None)
-            raise McpError(f"Timeout waiting for client response for command: {command} (correlationId: {correlation_id})")
+            error_data = ErrorData(
+                code=-32000,
+                message=f"Timeout waiting for client response for command: {command} (correlationId: {correlation_id})"
+            )
+            raise McpError(error_data)
         except Exception as e:
             logger.error(f"❌ Error during awaitable command '{command}' processing (correlationId {correlation_id}): {type(e).__name__} - {e}")
             self.awaitable_requests.pop(correlation_id, None) # Ensure cleanup
             if isinstance(e, McpError):
                 # Enhance McpError message to include command text
-                # Handle both .message attribute and direct string access
-                error_msg = getattr(e, 'message', str(e))
+                # Access the error data from the McpError
+                original_error = e.error if hasattr(e, 'error') else None
+                if original_error:
+                    error_msg = original_error.message if hasattr(original_error, 'message') else str(e)
+                    error_code = original_error.code if hasattr(original_error, 'code') else -32000
+                else:
+                    error_msg = str(e)
+                    error_code = -32000
+
                 enhanced_message = f"Command '{command}' failed: {error_msg}"
-                enhanced_error = McpError(enhanced_message, getattr(e, 'code', -32000))
-                raise enhanced_error from e
+                enhanced_error_data = ErrorData(code=error_code, message=enhanced_message)
+                raise McpError(enhanced_error_data) from e
             else:
                 # For other exceptions, wrap in a new exception with command context
                 enhanced_message = f"Command '{command}' failed: {str(e)}"
@@ -3333,7 +3353,11 @@ class ServiceClient:
             # but good to have defense in depth. More importantly, this ensures this method's
             # contract is to raise on failure, not return False.
             logger.warning(f"⚠️ ServiceClient: Attempted to send event '{event}' but not connected.")
-            raise McpError(f"ServiceClient not connected. Cannot send event '{event}'.")
+            error_data = ErrorData(
+                code=-32000,
+                message=f"ServiceClient not connected. Cannot send event '{event}'."
+            )
+            raise McpError(error_data)
 
         try:
             # Special handling for 'notifications/message' which is how client logs/commands are sent to cloud
@@ -3353,11 +3377,19 @@ class ServiceClient:
         except socketio.exceptions.SocketIOError as e:
             # Catch specific Socket.IO errors during emit (e.g., BadNamespaceError, ConnectionError if not caught by 'is_connected')
             logger.error(f"❌ ServiceClient: Socket.IO error sending event '{event}': {str(e)}")
-            raise McpError(f"ServiceClient: Socket.IO error sending event '{event}': {str(e)}") from e
+            error_data = ErrorData(
+                code=-32000,
+                message=f"ServiceClient: Socket.IO error sending event '{event}': {str(e)}"
+            )
+            raise McpError(error_data) from e
         except Exception as e:
             # Catch any other unexpected errors during emit
             logger.error(f"❌ ServiceClient: Unexpected error sending event '{event}': {str(e)}")
-            raise McpError(f"ServiceClient: Unexpected error sending event '{event}': {str(e)}") from e
+            error_data = ErrorData(
+                code=-32000,
+                message=f"ServiceClient: Unexpected error sending event '{event}': {str(e)}"
+            )
+            raise McpError(error_data) from e
 
     async def disconnect(self):
         """Disconnect from the cloud server"""
