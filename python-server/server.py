@@ -1690,38 +1690,14 @@ class DynamicAdditionServer(Server):
 
         logger.debug(f"Actual function name to route: '{actual_function_name}'")
 
-
-        if not (actual_function_name.startswith('_function') or actual_function_name.startswith('_server') or actual_function_name.startswith('_admin')):
-            # --- BEGIN TOOL CALL LOGGING ---
-            try:
-                # Ensure datetime, json, and os are available (they are imported at the top of server.py)
-                timestamp_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
-
-                caller_identity = "unknown_caller" # Default
-                if user: # 'user' is an argument to _execute_tool
-                    caller_identity = user
-                elif client_id: # 'client_id' is an argument to _execute_tool
-                    caller_identity = f"client:{client_id}"
-
-                log_entry = {
-                    "caller": caller_identity,
-                    "tool_name": actual_function_name, # Use the parsed function name, not the full routed name
-                    "app_name": parsed_app_name if parsed_app_name else "", # Include app name for filtering
-                    "timestamp": timestamp_utc
-                }
-
-                # Ensure the log directory exists
-                os.makedirs(LOG_DIR, exist_ok=True)
-
-                with open(TOOL_CALL_LOG_PATH, "a", encoding="utf-8") as f:
-                    json.dump(log_entry, f) # Writes the JSON object
-                    f.write("\n")           # Adds a newline character for separation
-
-            except Exception as e:
-                # Log the error but don't let logging failure break the main tool execution
-                logger.error(f"Failed to write to {TOOL_CALL_LOG_PATH}: {e}") # logger is already defined
-            # --- END TOOL CALL LOGGING ---
-
+        # --- BEGIN TOOL CALL LOGGING ---
+        # Note: We now log on SUCCESS (after execution) or ERROR (in exception handler)
+        # This avoids duplicate entries for failed calls
+        # Store call start time for logging later
+        call_start_datetime = datetime.datetime.now(datetime.timezone.utc)
+        call_start_time = call_start_datetime.isoformat()
+        should_log_call = not (actual_function_name.startswith('_function') or actual_function_name.startswith('_server') or actual_function_name.startswith('_admin'))
+        # --- END TOOL CALL LOGGING ---
 
         try:
             result_raw = None # Initialize raw result variable
@@ -2502,27 +2478,61 @@ class DynamicAdditionServer(Server):
                     logger.debug(f"<--- _execute_tool RETURNING final result: {final_result!r}")
             else:
                 logger.debug(f"<--- _execute_tool RETURNING final result: {final_result!r}")
-            return final_result
 
-        except Exception as e:
-            # Error already logged with full context at source, just continue with error logging to file
-            # --- BEGIN TOOL ERROR LOGGING ---
-            if not name.startswith('_'):
+            # --- Log successful tool call ---
+            if should_log_call:
                 try:
-                    timestamp_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
                     caller_identity = "unknown_caller"
                     if user:
                         caller_identity = user
                     elif client_id:
                         caller_identity = f"client:{client_id}"
 
+                    # Calculate elapsed time in milliseconds
+                    call_end_datetime = datetime.datetime.now(datetime.timezone.utc)
+                    elapsed_ms = round((call_end_datetime - call_start_datetime).total_seconds() * 1000, 2)
+
+                    success_log_entry = {
+                        "caller": caller_identity,
+                        "tool_name": actual_function_name,
+                        "app_name": parsed_app_name if parsed_app_name else "",
+                        "timestamp": call_start_time,
+                        "status": "success",
+                        "elapsed_ms": elapsed_ms
+                    }
+
+                    os.makedirs(LOG_DIR, exist_ok=True)
+                    with open(TOOL_CALL_LOG_PATH, "a", encoding="utf-8") as f:
+                        json.dump(success_log_entry, f)
+                        f.write("\n")
+                except Exception as log_e:
+                    logger.error(f"Failed to write success log to {TOOL_CALL_LOG_PATH}: {log_e}")
+
+            return final_result
+
+        except Exception as e:
+            # Error already logged with full context at source, just continue with error logging to file
+            # --- BEGIN TOOL ERROR LOGGING ---
+            if should_log_call:
+                try:
+                    caller_identity = "unknown_caller"
+                    if user:
+                        caller_identity = user
+                    elif client_id:
+                        caller_identity = f"client:{client_id}"
+
+                    # Calculate elapsed time in milliseconds
+                    call_end_datetime = datetime.datetime.now(datetime.timezone.utc)
+                    elapsed_ms = round((call_end_datetime - call_start_datetime).total_seconds() * 1000, 2)
+
                     error_log_entry = {
                         "caller": caller_identity,
                         "tool_name": actual_function_name, # Use parsed function name
                         "app_name": parsed_app_name if parsed_app_name else "", # Include app name
-                        "timestamp": timestamp_utc,
+                        "timestamp": call_start_time,  # Use the call start time, not a new timestamp
                         "status": "error",
-                        "error_message": str(e)
+                        "error_message": str(e),
+                        "elapsed_ms": elapsed_ms
                     }
 
                     os.makedirs(LOG_DIR, exist_ok=True)
