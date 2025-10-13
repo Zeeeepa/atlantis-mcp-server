@@ -1705,7 +1705,8 @@ class DynamicAdditionServer(Server):
 
                 log_entry = {
                     "caller": caller_identity,
-                    "tool_name": name, # 'name' is an argument to _execute_tool
+                    "tool_name": actual_function_name, # Use the parsed function name, not the full routed name
+                    "app_name": parsed_app_name if parsed_app_name else "", # Include app name for filtering
                     "timestamp": timestamp_utc
                 }
 
@@ -1938,8 +1939,17 @@ class DynamicAdditionServer(Server):
                 function_name = args.get("name")  # Required function name
                 logger.debug(f"---> Calling built-in: _function_history (app: {app_name}, function: {function_name})")
 
+                # First, validate that the function exists
+                try:
+                    function_file = await self.function_manager._find_file_containing_function(function_name, app_name)
+                    if not function_file:
+                        raise ValueError(f"Function '{function_name}' not found in app '{app_name or '(root)'}'")
+                except Exception as e:
+                    raise ValueError(f"Function '{function_name}' not found in app '{app_name or '(root)'}': {e}")
+
+                # Now get the history for this function
                 if not os.path.exists(TOOL_CALL_LOG_PATH):
-                    # Return an empty history array
+                    # No log file yet means no history (but function exists)
                     result_raw = []
                 else:
                     try:
@@ -1947,20 +1957,16 @@ class DynamicAdditionServer(Server):
                             # Read each line and parse as JSON, skipping empty lines
                             log_entries = [json.loads(line) for line in f if line.strip()]
 
-                        # Filter by function name (current log format only has tool_name, not app info)
-                        # For now, filter by function name only - we'll need to add app tracking to logs later
+                        # Filter by BOTH app_name and function name
                         filtered_entries = [
                             entry for entry in log_entries
-                            if entry.get("tool_name") == function_name
+                            if (entry.get("tool_name") == function_name and
+                                entry.get("app_name") == (app_name if app_name else ""))
                         ]
-
-                        # TODO: Once logging includes app_name, also filter by app:
-                        # if entry.get("app_name") == app_name and entry.get("tool_name") == function_name
 
                         result_raw = filtered_entries
                     except (json.JSONDecodeError, IOError) as e:
                         logger.error(f"Error reading or parsing tool_call_log.json: {e}")
-                        # Return an error message inside the tool response
                         raise ValueError(f"Error accessing function history: {e}")
 
             elif actual_function_name == "_function_log":
@@ -2439,7 +2445,8 @@ class DynamicAdditionServer(Server):
                 # Support new June 2025 MCP spec: provide both serialized JSON and structuredContent
                 logger.debug(f"<--- Creating structured content result for tool '{name}' (June 2025 MCP spec).")
                 try:
-                    json_string = json.dumps(result_raw)
+                    # Use pretty JSON formatting for dict results
+                    json_string = format_json_log(result_raw, colored=True)
                     # Create TextContent with both text and structured content for backwards compatibility
                     annotations = {
                         "sourceType": "json",
@@ -2458,7 +2465,16 @@ class DynamicAdditionServer(Server):
                 # Convert any other result to string with structured content support
                 try:
                     # Try to serialize as JSON first for structured content
-                    result_str = json.dumps(result_raw)
+                    # Check if result_raw is a list of dicts (like history entries)
+                    if isinstance(result_raw, list) and result_raw and all(isinstance(item, dict) for item in result_raw):
+                        # Pretty format list of dicts
+                        result_str = json.dumps(result_raw, indent=2, default=str)
+                    elif isinstance(result_raw, dict):
+                        # Pretty format dict
+                        result_str = format_json_log(result_raw, colored=True)
+                    else:
+                        # Use standard compact formatting for other types
+                        result_str = json.dumps(result_raw)
                     annotations = {
                         "sourceType": "json",
                         "structuredContent": result_raw  # New June 2025 spec feature
@@ -2470,7 +2486,22 @@ class DynamicAdditionServer(Server):
                     final_result = [TextContent(type="text", text=result_str)]
 
             # ---> ADDED: Log final result before returning
-            logger.debug(f"<--- _execute_tool RETURNING final result: {final_result!r}") # <-- ADD THIS LINE
+            # Pretty print the actual text content for better readability in logs
+            if final_result and isinstance(final_result, list) and len(final_result) > 0:
+                first_item = final_result[0]
+                if isinstance(first_item, TextContent) and hasattr(first_item, 'text'):
+                    # Try to parse and colorize the JSON if it's valid JSON
+                    try:
+                        parsed_json = json.loads(first_item.text)
+                        colored_output = format_json_log(parsed_json, colored=True)
+                        logger.debug(f"<--- _execute_tool RETURNING final result with text:\n{colored_output}")
+                    except (json.JSONDecodeError, TypeError):
+                        # Not JSON or can't parse, just log as-is
+                        logger.debug(f"<--- _execute_tool RETURNING final result with text:\n{first_item.text}")
+                else:
+                    logger.debug(f"<--- _execute_tool RETURNING final result: {final_result!r}")
+            else:
+                logger.debug(f"<--- _execute_tool RETURNING final result: {final_result!r}")
             return final_result
 
         except Exception as e:
@@ -2487,7 +2518,8 @@ class DynamicAdditionServer(Server):
 
                     error_log_entry = {
                         "caller": caller_identity,
-                        "tool_name": name,
+                        "tool_name": actual_function_name, # Use parsed function name
+                        "app_name": parsed_app_name if parsed_app_name else "", # Include app name
                         "timestamp": timestamp_utc,
                         "status": "error",
                         "error_message": str(e)
