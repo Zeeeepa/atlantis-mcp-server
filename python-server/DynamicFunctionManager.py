@@ -1188,7 +1188,7 @@ async def {name}():
             # Extract args from the kwargs dictionary
             function_args = kwargs.get('args', {})
             logger.info(f"Calling dynamic function '{actual_function_name}' with args: {function_args}")
-            logger.info(f"📊 Args as JSON: {json.dumps(function_args, indent=2)}")
+            logger.info(f"📊 Args as JSON: {utils.format_json_log(function_args)}")
 
             if inspect.iscoroutinefunction(function_to_call):
                 result = await function_to_call(**function_args)

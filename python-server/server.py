@@ -450,7 +450,7 @@ class DynamicAdditionServer(Server):
                     "method": "notifications/message",
                     "params": cloud_notification_params
                 }
-                logger.info(f"☁️ About to send cloud payload with params: {cloud_notification_params}")
+                logger.info(f"☁️ About to send cloud payload with params:\n{format_json_log(cloud_notification_params)}")
                 await connection.send_message('mcp_notification', cloud_wrapper_payload)
                 logger.info(f"☁️ Sent awaitable command '{command}' (as flat notifications/message) to cloud client {client_id_for_routing} (correlationId: {correlation_id}) via 'mcp_notification' event")
             else:
@@ -1627,12 +1627,6 @@ class DynamicAdditionServer(Server):
                 import json
                 notification_json = json.dumps(notification)
 
-                # Enhanced logging for client log routing
-                logger.debug(f"📋 CLIENT LOG ROUTING: Sending to client_id={client_id}, request_id={request_id}")
-                logger.debug(f"📋 KNOWN CLIENTS: {list(client_connections.keys())}")
-                # Log the notification for debugging (now includes client_id if added)
-                #logger.debug(f"Sending client log notification: {notification_json}")
-                logger.debug(f"Sending client log notification")
 
                 client_info = client_connections[client_id]
                 client_type = client_info.get("type")
@@ -1648,7 +1642,7 @@ class DynamicAdditionServer(Server):
                 elif client_type == "cloud" and connection and hasattr(connection, 'is_connected') and connection.is_connected:
                     try:
                         await connection.send_message('mcp_notification', notification)
-                        logger.debug(f"☁️ Sent notification to cloud client: {client_id}")
+                        #logger.debug(f"☁️ Sent notification to cloud client: {client_id}")
                     except Exception as e:
                         logger.warning(f"Failed to send to cloud client {client_id}: {e}")
             else:
@@ -2549,7 +2543,7 @@ class DynamicAdditionServer(Server):
 
         # Log the call
         logger.info(f"🔧 Processing 'tools/call' for tool '{tool_name}' with args: {tool_args}")
-        logger.debug(f"Tool name: '{tool_name}', Arguments: {json.dumps(tool_args, default=str)}")
+        logger.debug(f"Tool name: '{tool_name}', Arguments:\n{format_json_log(tool_args)}")
         if user:
             logger.debug(f"Call made by user: {user}")
         if session_id:
@@ -2744,7 +2738,7 @@ async def get_all_tools_for_response(server: 'DynamicAdditionServer', caller_con
                 source_file = annotations.get('sourceFile', 'NOT_FOUND')
 
             if tool_dict and annotations and isinstance(annotations, dict) and annotations.get('type') == 'server':
-                logger.debug(f"🔍 SERIALIZED SERVER TOOL '{tool_dict.get('name')}' to dict: {tool_dict}")
+                logger.debug(f"🔍 SERIALIZED SERVER TOOL '{tool_dict.get('name')}' to dict:\n{format_json_log(tool_dict)}")
                 # Check if started_at is in annotations
                 if annotations and 'started_at' in annotations:
                     logger.debug(f"✅ Started_at preserved in serialized tool dict for '{tool_dict.get('name')}': {annotations['started_at']}")
@@ -3218,7 +3212,7 @@ class ServiceClient:
         @self.sio.event(namespace=self.namespace)
         async def service_message(data):
             logger.info(f"☁️ RAW RECEIVED SERVICE MESSAGE")
-            logger.debug(f"☁️ RAW RECEIVED SERVICE MESSAGE: {data}")
+            logger.debug(f"☁️ RAW RECEIVED SERVICE MESSAGE:\n{format_json_log(data) if isinstance(data, dict) else data}")
 
             # --- Handle Awaitable Command Responses from Cloud Client ---
             if isinstance(data, dict) and \
@@ -3367,7 +3361,8 @@ class ServiceClient:
                 pass # emit_event is already 'mcp_notification'
 
             if data.get('method') == 'notifications/message':
-                logger.info(f"☁️ SENDING CLIENT LOG/COMMAND via {event}: {data.get('params', {}).get('command', data.get('method'))}")
+                pass
+                #logger.info(f"☁️ SENDING CLIENT LOG/COMMAND via {event}: {data.get('params', {}).get('command', data.get('method'))}")
             else:
                 logger.debug(f"☁️ SENDING MCP MESSAGE via {event}: {data.get('method')}")
 

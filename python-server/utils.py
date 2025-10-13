@@ -124,9 +124,6 @@ async def client_log(
     # Send to client if server is available
     if _server_instance is not None:
         try:
-            # Enhanced logging for diagnostics
-            logger.debug(f"📋 CLIENT LOG DIAGNOSTICS (AWAITABLE): Routing to client_id={client_id_for_routing}, request_id={request_id}")
-            logger.debug(f"📋 SERVER INSTANCE TYPE (AWAITABLE): {type(_server_instance).__name__}")
 
             # Await the server call to send the log/command and get a response
             if logger_name is None:
@@ -149,7 +146,7 @@ async def client_log(
                         message_type,
                         stream_id
                     )
-                    logger.debug(f"📋 CLIENT LOG/COMMAND (TASK) SENT, result: {task_result}")
+
                 except Exception as task_e:
                     logger.error(f"❌ Error in send_log_task: {task_e}")
                     logger.error(f"❌ Exception details: {type(task_e).__name__}: {task_e}")
@@ -157,7 +154,7 @@ async def client_log(
                     logger.error(f"❌ Traceback: {traceback.format_exc()}")
 
             asyncio.create_task(send_log_task())
-            logger.debug(f"📋 CLIENT LOG/COMMAND TASK CREATED for client_id={client_id_for_routing}, request_id={request_id}, seq_num={seq_num}")
+            #logger.debug(f"📋 CLIENT LOG/COMMAND TASK CREATED for client_id={client_id_for_routing}, request_id={request_id}, seq_num={seq_num}")
             return None # Return immediately, indicating task creation
         except Exception as e:
             logger.error(f"❌ Error in awaitable client_log: {e}")
@@ -208,7 +205,10 @@ async def execute_client_command_awaitable(
 
     try:
         logger.info(f"🚀 Utils: Relaying dedicated awaitable command '{command}' to server for client {client_id_for_routing}, seq_num={seq_num}")
-        logger.info(f"   📦 Command data type: {type(command_data)}, data: {command_data}")
+        if isinstance(command_data, dict):
+            logger.info(f"   📦 Command data type: {type(command_data)}, data:\n{format_json_log(command_data)}")
+        else:
+            logger.info(f"   📦 Command data type: {type(command_data)}, data: {command_data}")
         # This specifically calls the method designed for awaitable command-response cycles
         result = await _server_instance.send_awaitable_client_command(
             client_id_for_routing=client_id_for_routing,
@@ -228,10 +228,49 @@ async def execute_client_command_awaitable(
 
 # --- JSON Formatting Utility --- #
 
-def format_json_log(data: dict) -> str:
-    """Formats a Python dictionary into a pretty-printed JSON string for logging."""
+def format_json_log(data: dict, colored: bool = True) -> str:
+    """
+    Formats a Python dictionary into a pretty-printed JSON string for logging.
+
+    Args:
+        data: Dictionary to format
+        colored: If True, adds ANSI color codes for terminal output (default: True)
+
+    Returns:
+        Formatted JSON string with optional colors
+    """
     try:
-        return json.dumps(data, indent=2, default=str) # Added default=str to handle non-serializable types gracefully
+        json_str = json.dumps(data, indent=2, default=str)
+
+        if not colored:
+            return json_str
+
+        # ANSI color codes
+        KEY_COLOR = "\x1b[36m"      # Cyan for keys
+        STRING_COLOR = "\x1b[33m"   # Yellow for string values
+        NUMBER_COLOR = "\x1b[35m"   # Magenta for numbers
+        BOOL_COLOR = "\x1b[32m"     # Green for booleans
+        NULL_COLOR = "\x1b[90m"     # Grey for null
+        RESET = "\x1b[0m"
+
+        import re
+
+        # Color keys (strings followed by colon)
+        json_str = re.sub(r'"([^"]+)"\s*:', rf'{KEY_COLOR}"\1"{RESET}:', json_str)
+
+        # Color string values (strings not followed by colon)
+        json_str = re.sub(r':\s*"([^"]*)"', rf': {STRING_COLOR}"\1"{RESET}', json_str)
+
+        # Color numbers
+        json_str = re.sub(r':\s*(-?\d+\.?\d*)', rf': {NUMBER_COLOR}\1{RESET}', json_str)
+
+        # Color booleans
+        json_str = re.sub(r':\s*(true|false)', rf': {BOOL_COLOR}\1{RESET}', json_str)
+
+        # Color null
+        json_str = re.sub(r':\s*(null)', rf': {NULL_COLOR}\1{RESET}', json_str)
+
+        return json_str
     except Exception as e:
         logger.error(f"❌ Error formatting JSON for logging: {e}")
         return str(data) # Fallback to string representation
