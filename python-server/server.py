@@ -1934,6 +1934,10 @@ class DynamicAdditionServer(Server):
                             log_entries = [json.loads(line) for line in f if line.strip()]
 
                         # Filter by BOTH app_name and function name
+                        # NOTE: History is tracked separately per app. If you move a function
+                        # from one app to another (e.g., from root "" to "myapp" or vice versa),
+                        # a new separate history will be created for that app. Previous history
+                        # from the old app location will remain but won't be shown in the new location.
                         filtered_entries = [
                             entry for entry in log_entries
                             if (entry.get("tool_name") == function_name and
