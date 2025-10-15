@@ -257,6 +257,14 @@ class DynamicConfigEventHandler(FileSystemEventHandler):
                     logger.error(f"❌ Failed to notify clients after file change: {e}")
             else:
                 logger.warning("⚠️ Server object lacks _notify_tool_list_changed method.")
+
+            # Report tools to cloud if connected
+            if self.mcp_server.cloud_client and self.mcp_server.cloud_client.is_connected:
+                try:
+                    logger.info("📊 Reporting updated tool list to cloud after file change...")
+                    await self.mcp_server.cloud_client._report_tools_to_console()
+                except Exception as e:
+                    logger.error(f"❌ Failed to report tools to cloud after file change: {e}")
             # --- End Tool List Cache Clearing ---
 
         # Schedule the coroutine to run in the event loop from this thread
@@ -306,6 +314,9 @@ class DynamicAdditionServer(Server):
         # Track function visibility overrides (can show/hide any function)
         self._temporarily_visible_functions: set = set()
         self._temporarily_hidden_functions: set = set()
+
+        # Store cloud client reference for tool reporting
+        self.cloud_client: Optional['ServiceClient'] = None
 
         # Initialize the dynamic function and server managers
         self.function_manager = DynamicFunctionManager(FUNCTIONS_DIR)
@@ -2781,6 +2792,197 @@ class ServiceClient:
         # Store creation time for stable client ID
         self._creation_time = int(time.time())
 
+    async def _report_tools_to_console(self):
+        """Generate and log a formatted report of all available tools"""
+        # Get the list of tools to log them
+        tools_list = await self.mcp_server._get_tools_list(caller_context="_report_tools_to_console")
+        # Create list with app names and source files for easier inspection of duplicates
+        # Import colors for formatting (at function scope to avoid shadowing module imports)
+        from ColoredFormatter import CYAN as CYAN_COLOR, YELLOW, GREY as GREY_COLOR, RESET as RESET_COLOR, BOLD as BOLD_COLOR, PINK, RED
+
+        import humanize
+
+        tool_info_list = []
+        protected_info_list = []
+        hidden_info_list = []
+        server_info_list = []
+        internal_info_list = []
+        internal_count = 0
+        for tool in tools_list:
+            app_name = getattr(tool.annotations, 'app_name', None) if hasattr(tool, 'annotations') else None
+            source_file = getattr(tool.annotations, 'sourceFile', 'unknown') if hasattr(tool, 'annotations') else 'unknown'
+            app_source = getattr(tool.annotations, 'app_source', 'unknown') if hasattr(tool, 'annotations') else 'unknown'
+            last_modified = getattr(tool.annotations, 'lastModified', None) if hasattr(tool, 'annotations') else None
+            decorators = getattr(tool.annotations, 'decorators', []) if hasattr(tool, 'annotations') else []
+            protection_name = getattr(tool.annotations, 'protection_name', None) if hasattr(tool, 'annotations') else None
+
+            # Check if tool is hidden
+            is_hidden = getattr(tool.annotations, 'temporarilyVisible', False) if hasattr(tool, 'annotations') else False
+            tool_type = getattr(tool.annotations, 'type', None) if hasattr(tool, 'annotations') else None
+            is_server = tool_type == 'server'  # Server entries are not callable tools
+
+            # Check if this is an internal tool - check the tool name regardless of app_source
+            is_internal = tool.name.startswith('_admin') or tool.name.startswith('_function') or tool.name.startswith('_server')
+
+            if is_internal:
+                internal_count += 1
+                app_source = 'internal'
+                app_display = 'internal'
+            else:
+                app_display = app_name if app_name else 'top-level'
+
+            # Replace NA with [Nyaa] for top-level functions
+            app_source_display = app_source
+            if app_source == 'NA':
+                app_source_display = 'Nyaa'
+
+            # Color code based on app source
+            if app_source == 'decorator':
+                source_color = CYAN_COLOR
+            elif app_source == 'directory':
+                source_color = YELLOW
+            elif app_source == 'internal':
+                source_color = PINK
+            else:
+                source_color = GREY_COLOR
+
+            # Format timestamp as relative time if available
+            timestamp_str = ""
+            if last_modified:
+                try:
+                    modified_dt = datetime.datetime.fromisoformat(last_modified.replace('Z', '+00:00'))
+                    relative_time = humanize.naturaltime(modified_dt)
+                    timestamp_str = f" {GREY_COLOR}[{relative_time}]{RESET_COLOR}"
+                except Exception as e:
+                    timestamp_str = f" {GREY_COLOR}[{last_modified}]{RESET_COLOR}"
+
+            # Detect if function is protected
+            is_protected = 'protected' in decorators if decorators else False
+
+            # Determine visibility indicator for non-internal functions
+            visibility_str = ""
+            if not is_internal and not is_server:
+                if 'public' in decorators:
+                    visibility_str = f" {CYAN_COLOR}[@public]{RESET_COLOR}"
+                elif 'protected' in decorators:
+                    # For protected functions, just show the group name without @protected wrapper
+                    # since it's already in the "Protected" section
+                    if protection_name:
+                        visibility_str = f" {YELLOW}[{protection_name}]{RESET_COLOR}"
+                    else:
+                        visibility_str = f" {YELLOW}[@protected]{RESET_COLOR}"
+                elif 'visible' in decorators:
+                    visibility_str = f" {GREY_COLOR}[@visible]{RESET_COLOR}"
+
+            # Format the line with colors
+            # Format differently for servers (no app name column), internal tools, hidden, protected, or regular
+            if is_server:
+                formatted_line = f"{tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR}{timestamp_str}"
+                server_info_list.append((app_display, tool.name, formatted_line))
+            elif is_internal:
+                formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{timestamp_str}"
+                internal_info_list.append((app_display, tool.name, formatted_line))
+            elif is_hidden:
+                formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
+                hidden_info_list.append((app_display, tool.name, formatted_line))
+            elif is_protected:
+                formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
+                protected_info_list.append((app_display, tool.name, formatted_line))
+            else:
+                formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
+                tool_info_list.append((app_display, tool.name, formatted_line))
+
+        # Sort by app name then tool name (case-insensitive)
+        tool_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
+        protected_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
+        hidden_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
+        server_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
+        internal_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
+
+        # Calculate counts
+        external_count = len(tools_list) - internal_count
+        logger.info(f"📊 REGISTERING {len(tools_list)} TOOLS WITH CLOUD ({external_count} external + {internal_count} internal):")
+        logger.info(f"")
+        logger.info(f"  {BOLD_COLOR}Functions: {len(tool_info_list)}{RESET_COLOR}")
+        for _, _, formatted_line in tool_info_list:
+            logger.info(f"    {formatted_line}")
+
+        if protected_info_list:
+            logger.info(f"")
+            logger.info(f"  {BOLD_COLOR}Protected: {len(protected_info_list)}{RESET_COLOR}")
+            for _, _, formatted_line in protected_info_list:
+                logger.info(f"    {formatted_line}")
+
+        if internal_info_list:
+            logger.info(f"")
+            logger.info(f"  {BOLD_COLOR}Internal: {len(internal_info_list)}{RESET_COLOR}")
+            for _, _, formatted_line in internal_info_list:
+                logger.info(f"    {formatted_line}")
+
+        if hidden_info_list:
+            logger.info(f"")
+            logger.info(f"  {BOLD_COLOR}Hidden Functions (temporarily visible): {len(hidden_info_list)}{RESET_COLOR}")
+            for _, _, formatted_line in hidden_info_list:
+                logger.info(f"    {formatted_line}")
+
+        # Report skipped hidden functions (split into Hidden and Invalid/Errors)
+        if hasattr(self.mcp_server.function_manager, '_skipped_hidden_functions') and self.mcp_server.function_manager._skipped_hidden_functions:
+            # Separate hidden functions from invalid/error functions
+            hidden_functions = []
+            invalid_functions = []
+
+            for item in self.mcp_server.function_manager._skipped_hidden_functions:
+                # Check if this is an error condition vs. intentional hiding using explicit flag
+                if item.get('is_error', False):
+                    invalid_functions.append(item)
+                else:
+                    hidden_functions.append(item)
+
+            # Report intentionally hidden functions
+            if hidden_functions:
+                logger.info(f"")
+                logger.info(f"  {BOLD_COLOR}Hidden: {len(hidden_functions)}{RESET_COLOR}")
+                for item in sorted(hidden_functions, key=lambda x: ((x['app'] or 'top-level').lower(), x['name'].lower())):
+                    app_display = item['app'] if item['app'] else 'top-level'
+                    logger.info(f"    {BOLD_COLOR}{app_display:20}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR}")
+
+            # Report invalid/error functions
+            if invalid_functions:
+                logger.info(f"")
+                logger.error(f"  {BOLD_COLOR}❌ INVALID FUNCTIONS: {len(invalid_functions)}{RESET_COLOR}")
+                for item in sorted(invalid_functions, key=lambda x: ((x['app'] or 'top-level').lower(), x['name'].lower())):
+                    app_display = item['app'] if item['app'] else 'top-level'
+                    reason = item.get('reason', 'unknown error')
+                    logger.error(f"    {BOLD_COLOR}{app_display:20}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR} {RED}[{reason}]{RESET_COLOR}")
+
+
+
+        if server_info_list:
+            logger.info(f"")
+            logger.info(f"  {BOLD_COLOR}MCP Servers: {len(server_info_list)}{RESET_COLOR}")
+            for _, _, formatted_line in server_info_list:
+                logger.info(f"    {formatted_line}")
+
+        # App summary section
+        from collections import defaultdict
+        app_counts = defaultdict(int)
+        for app_display, _, _ in tool_info_list:
+            app_counts[app_display] += 1
+        for app_display, _, _ in protected_info_list:
+            app_counts[app_display] += 1
+        for app_display, _, _ in hidden_info_list:
+            app_counts[app_display] += 1
+
+        if app_counts:
+            logger.info(f"")
+            logger.info(f"  {BOLD_COLOR}Apps Summary:{RESET_COLOR}")
+            for app_name in sorted(app_counts.keys(), key=str.lower):
+                count = app_counts[app_name]
+                logger.info(f"    {BOLD_COLOR}{app_name:20}{RESET_COLOR} {count} function(s)")
+
+        logger.info(f" ")
+        logger.info(f"- tools report done -")
+
     async def connect(self):
         """Establish a Socket.IO connection to the cloud server"""
         logger.info(f"☁️ CONNECTING TO CLOUD SERVER: {self.server_url} (namespace: {self.namespace})")
@@ -2972,194 +3174,8 @@ class ServiceClient:
             logger.info(f"✅ Registered cloud service connection: {connection_id}")
             # -------------------------------------------------------------
 
-            # Get the list of tools to log them
-            tools_list = await self.mcp_server._get_tools_list(caller_context="_handle_connect_cloud")
-            # Create list with app names and source files for easier inspection of duplicates
-            # Import colors for formatting (at function scope to avoid shadowing module imports)
-            from ColoredFormatter import CYAN as CYAN_COLOR, YELLOW, GREY as GREY_COLOR, RESET as RESET_COLOR, BOLD as BOLD_COLOR, PINK, RED
-
-            import humanize
-
-            tool_info_list = []
-            protected_info_list = []
-            hidden_info_list = []
-            server_info_list = []
-            internal_info_list = []
-            internal_count = 0
-            for tool in tools_list:
-                app_name = getattr(tool.annotations, 'app_name', None) if hasattr(tool, 'annotations') else None
-                source_file = getattr(tool.annotations, 'sourceFile', 'unknown') if hasattr(tool, 'annotations') else 'unknown'
-                app_source = getattr(tool.annotations, 'app_source', 'unknown') if hasattr(tool, 'annotations') else 'unknown'
-                last_modified = getattr(tool.annotations, 'lastModified', None) if hasattr(tool, 'annotations') else None
-                decorators = getattr(tool.annotations, 'decorators', []) if hasattr(tool, 'annotations') else []
-                protection_name = getattr(tool.annotations, 'protection_name', None) if hasattr(tool, 'annotations') else None
-
-                # Check if tool is hidden
-                is_hidden = getattr(tool.annotations, 'temporarilyVisible', False) if hasattr(tool, 'annotations') else False
-                tool_type = getattr(tool.annotations, 'type', None) if hasattr(tool, 'annotations') else None
-                is_server = tool_type == 'server'  # Server entries are not callable tools
-
-                # Check if this is an internal tool - check the tool name regardless of app_source
-                is_internal = tool.name.startswith('_admin') or tool.name.startswith('_function') or tool.name.startswith('_server')
-
-                if is_internal:
-                    internal_count += 1
-                    app_source = 'internal'
-                    app_display = 'internal'
-                else:
-                    app_display = app_name if app_name else 'top-level'
-
-                # Replace NA with [Nyaa] for top-level functions
-                app_source_display = app_source
-                if app_source == 'NA':
-                    app_source_display = 'Nyaa'
-
-                # Color code based on app source
-                if app_source == 'decorator':
-                    source_color = CYAN_COLOR
-                elif app_source == 'directory':
-                    source_color = YELLOW
-                elif app_source == 'internal':
-                    source_color = PINK
-                else:
-                    source_color = GREY_COLOR
-
-                # Format timestamp as relative time if available
-                timestamp_str = ""
-                if last_modified:
-                    try:
-                        modified_dt = datetime.datetime.fromisoformat(last_modified.replace('Z', '+00:00'))
-                        relative_time = humanize.naturaltime(modified_dt)
-                        timestamp_str = f" {GREY_COLOR}[{relative_time}]{RESET_COLOR}"
-                    except Exception as e:
-                        timestamp_str = f" {GREY_COLOR}[{last_modified}]{RESET_COLOR}"
-
-                # Detect if function is protected
-                is_protected = 'protected' in decorators if decorators else False
-
-                # Determine visibility indicator for non-internal functions
-                visibility_str = ""
-                if not is_internal and not is_server:
-                    if 'public' in decorators:
-                        visibility_str = f" {CYAN_COLOR}[@public]{RESET_COLOR}"
-                    elif 'protected' in decorators:
-                        # For protected functions, just show the group name without @protected wrapper
-                        # since it's already in the "Protected" section
-                        if protection_name:
-                            visibility_str = f" {YELLOW}[{protection_name}]{RESET_COLOR}"
-                        else:
-                            visibility_str = f" {YELLOW}[@protected]{RESET_COLOR}"
-                    elif 'visible' in decorators:
-                        visibility_str = f" {GREY_COLOR}[@visible]{RESET_COLOR}"
-
-                # Format the line with colors
-                # Format differently for servers (no app name column), internal tools, hidden, protected, or regular
-                if is_server:
-                    formatted_line = f"{tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR}{timestamp_str}"
-                    server_info_list.append((app_display, tool.name, formatted_line))
-                elif is_internal:
-                    formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{timestamp_str}"
-                    internal_info_list.append((app_display, tool.name, formatted_line))
-                elif is_hidden:
-                    formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
-                    hidden_info_list.append((app_display, tool.name, formatted_line))
-                elif is_protected:
-                    formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
-                    protected_info_list.append((app_display, tool.name, formatted_line))
-                else:
-                    formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
-                    tool_info_list.append((app_display, tool.name, formatted_line))
-
-            # Sort by app name then tool name (case-insensitive)
-            tool_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
-            protected_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
-            hidden_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
-            server_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
-            internal_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
-
-            # Calculate counts
-            external_count = len(tools_list) - internal_count
-            logger.info(f"📊 REGISTERING {len(tools_list)} TOOLS WITH CLOUD ({external_count} external + {internal_count} internal):")
-            logger.info(f"")
-            logger.info(f"  {BOLD_COLOR}Functions: {len(tool_info_list)}{RESET_COLOR}")
-            for _, _, formatted_line in tool_info_list:
-                logger.info(f"    {formatted_line}")
-
-            if protected_info_list:
-                logger.info(f"")
-                logger.info(f"  {BOLD_COLOR}Protected: {len(protected_info_list)}{RESET_COLOR}")
-                for _, _, formatted_line in protected_info_list:
-                    logger.info(f"    {formatted_line}")
-
-            if internal_info_list:
-                logger.info(f"")
-                logger.info(f"  {BOLD_COLOR}Internal: {len(internal_info_list)}{RESET_COLOR}")
-                for _, _, formatted_line in internal_info_list:
-                    logger.info(f"    {formatted_line}")
-
-            if hidden_info_list:
-                logger.info(f"")
-                logger.info(f"  {BOLD_COLOR}Hidden Functions (temporarily visible): {len(hidden_info_list)}{RESET_COLOR}")
-                for _, _, formatted_line in hidden_info_list:
-                    logger.info(f"    {formatted_line}")
-
-            # Report skipped hidden functions (split into Hidden and Invalid/Errors)
-            if hasattr(self.mcp_server.function_manager, '_skipped_hidden_functions') and self.mcp_server.function_manager._skipped_hidden_functions:
-                # Separate hidden functions from invalid/error functions
-                hidden_functions = []
-                invalid_functions = []
-
-                for item in self.mcp_server.function_manager._skipped_hidden_functions:
-                    # Check if this is an error condition vs. intentional hiding using explicit flag
-                    if item.get('is_error', False):
-                        invalid_functions.append(item)
-                    else:
-                        hidden_functions.append(item)
-
-                # Report intentionally hidden functions
-                if hidden_functions:
-                    logger.info(f"")
-                    logger.info(f"  {BOLD_COLOR}Hidden: {len(hidden_functions)}{RESET_COLOR}")
-                    for item in sorted(hidden_functions, key=lambda x: ((x['app'] or 'top-level').lower(), x['name'].lower())):
-                        app_display = item['app'] if item['app'] else 'top-level'
-                        logger.info(f"    {BOLD_COLOR}{app_display:20}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR}")
-
-                # Report invalid/error functions
-                if invalid_functions:
-                    logger.info(f"")
-                    logger.error(f"  {BOLD_COLOR}❌ INVALID FUNCTIONS: {len(invalid_functions)}{RESET_COLOR}")
-                    for item in sorted(invalid_functions, key=lambda x: ((x['app'] or 'top-level').lower(), x['name'].lower())):
-                        app_display = item['app'] if item['app'] else 'top-level'
-                        reason = item.get('reason', 'unknown error')
-                        logger.error(f"    {BOLD_COLOR}{app_display:20}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR} {RED}[{reason}]{RESET_COLOR}")
-
-
-
-            if server_info_list:
-                logger.info(f"")
-                logger.info(f"  {BOLD_COLOR}MCP Servers: {len(server_info_list)}{RESET_COLOR}")
-                for _, _, formatted_line in server_info_list:
-                    logger.info(f"    {formatted_line}")
-
-            # App summary section
-            from collections import defaultdict
-            app_counts = defaultdict(int)
-            for app_display, _, _ in tool_info_list:
-                app_counts[app_display] += 1
-            for app_display, _, _ in protected_info_list:
-                app_counts[app_display] += 1
-            for app_display, _, _ in hidden_info_list:
-                app_counts[app_display] += 1
-
-            if app_counts:
-                logger.info(f"")
-                logger.info(f"  {BOLD_COLOR}Apps Summary:{RESET_COLOR}")
-                for app_name in sorted(app_counts.keys(), key=str.lower):
-                    count = app_counts[app_name]
-                    logger.info(f"    {BOLD_COLOR}{app_name:20}{RESET_COLOR} {count} function(s)")
-
-            logger.info(f" ")
-            logger.info(f"- tools report done -")
+            # Report tools to console
+            await self._report_tools_to_console()
 
 
         # Connection error event
@@ -3897,6 +3913,8 @@ if __name__ == "__main__":
                     mcp_server=mcp_server,
                     port=PORT # Pass the listening port
                 )
+                # Store cloud client reference on server for tool reporting
+                mcp_server.cloud_client = cloud_connection
                 cloud_task = loop.create_task(cloud_connection.connect())
         else:
             logger.info("☁️ CLOUD SERVER CONNECTION DISABLED")

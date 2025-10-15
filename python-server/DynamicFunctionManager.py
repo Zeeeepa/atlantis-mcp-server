@@ -758,6 +758,7 @@ async def {name}():
             logger.info("🔍 Building function-to-file mapping...")
             self._function_file_mapping.clear()
             self._function_file_mapping_by_app.clear()
+            self._skipped_hidden_functions.clear()  # Clear skipped functions list to allow previously invalid functions to be retried
 
             # Scan all Python files in the functions directory and subdirectories
             ignore_dirs = ['OLD', '__pycache__']
