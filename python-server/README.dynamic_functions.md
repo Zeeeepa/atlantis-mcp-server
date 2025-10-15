@@ -67,6 +67,7 @@ Write for AI consumption. Be explicit about purpose and when to use.
 ### Visibility (Required)
 - **`@visible`** - Make function visible in tools list (REQUIRED for all functions except internal `_function`/`_server`/`_admin`)
 - **`@public`** - Make function publicly accessible to all users (handled in cloud, implies @visible)
+- **`@protected`** - Make function visible in tools list (acts like @visible, will be expanded with additional features in future)
 - **No decorator** - Function is hidden by default, not exposed as tool
 
 ### Optional Metadata
@@ -90,9 +91,9 @@ async def calculate(x: float, y: float):
 
 ## Decorator Behavior
 
-### @visible vs @public
+### @visible vs @public vs @protected
 
-Understanding the difference between `@visible` and `@public` is important for access control:
+Understanding the difference between these decorators is important for access control:
 
 **`@visible`** - Owner-only access:
 ```python
@@ -117,9 +118,21 @@ async def public_service(query: str):
 - Use for shared tools, public APIs, multi-user features
 - No need to combine with `@visible` - `@public` includes visibility
 
+**`@protected`** - Protected functions (expandable):
+```python
+@protected
+async def special_function(data: str):
+    """Protected function with future access control features."""
+    return f"Processing {data}"
+```
+- Function appears in tools list (currently acts like `@visible`)
+- Will be expanded with additional protection features in the future
+- Use when you want to mark functions for future access control enhancements
+
 **Access Control Summary:**
 - No decorator → Hidden, not callable
 - `@visible` → Visible, owner-only
+- `@protected` → Visible, owner-only (currently), future enhancements planned
 - `@public` → Visible, accessible to all users
 
 ## Atlantis Module

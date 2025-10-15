@@ -120,6 +120,29 @@ def visible(func):
     setattr(func, '_is_visible', True)
     return func
 
+# --- Protected Decorator Definition ---
+def protected(name: str):
+    """
+    Decorator that marks a function as 'protected' with a required protection name.
+    Makes function visible in tools list with access control.
+
+    Usage: @protected("protection_name")
+           def my_protected_function():
+               # This function will be visible in tools/list with protection
+               ...
+
+    Args:
+        name: Required protection name (must be a legal Python function name).
+              Will be validated later for proper naming conventions.
+    """
+    def decorator(func):
+        # Mark the function as protected by setting an attribute
+        setattr(func, '_is_protected', True)
+        setattr(func, '_protection_name', name)
+        return func
+
+    return decorator
+
 class DynamicFunctionManager:
     def __init__(self, functions_dir):
         # State that was previously global
@@ -556,10 +579,11 @@ class DynamicFunctionManager:
                     docstring = ast.get_docstring(func_def_node)
                     input_schema = {"type": "object"} # Default empty schema
 
-                    # Extract decorators, app_name, and location_name
+                    # Extract decorators, app_name, location_name, and protection_name
                     decorator_names = []
                     app_name_from_decorator = None # Initialize app_name
                     location_name_from_decorator = None # Initialize location_name
+                    protection_name_from_decorator = None # Initialize protection_name
                     if func_def_node.decorator_list:
                         for decorator_node in func_def_node.decorator_list:
                             if isinstance(decorator_node, ast.Name): # e.g. @public, @hidden
@@ -574,21 +598,21 @@ class DynamicFunctionManager:
                                             for kw in decorator_node.keywords:
                                                 if kw.arg == 'name' and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
                                                     if app_name_from_decorator is not None:
-                                                        logger.warning(f"⚠️ Multiple @app name specifications for {func_def_node.name}. Using first one: {app_name_from_decorator}")
+                                                        logger.error(f"❌ Multiple @app name specifications for {func_def_node.name}. Using first one: {app_name_from_decorator}")
                                                     else:
                                                         app_name_from_decorator = kw.value.value
                                         # Positional arguments like @app("foo")
                                         if not app_name_from_decorator and decorator_node.args:
                                             if len(decorator_node.args) == 1 and isinstance(decorator_node.args[0], ast.Constant) and isinstance(decorator_node.args[0].value, str):
                                                 if app_name_from_decorator is not None: # Should not happen if logic is correct, but for safety
-                                                    logger.warning(f"⚠️ Multiple @app name specifications for {func_def_node.name}. Using first one: {app_name_from_decorator}")
+                                                    logger.error(f"❌ Multiple @app name specifications for {func_def_node.name}. Using first one: {app_name_from_decorator}")
                                                 else:
                                                     app_name_from_decorator = decorator_node.args[0].value
                                             else:
-                                                logger.warning(f"⚠️ @app decorator for {func_def_node.name} has unexpected positional arguments. Expected a single string.")
+                                                logger.error(f"❌ @app decorator for {func_def_node.name} has unexpected positional arguments. Expected a single string.")
 
                                         if app_name_from_decorator is None:
-                                            logger.warning(f"⚠️ @app decorator used on {func_def_node.name} but 'name' argument was not found or not a string.")
+                                            logger.error(f"❌ @app decorator used on {func_def_node.name} but 'name' argument was not found or not a string.")
                                         # We don't add 'app' to decorator_names, as it's handled separately by app_name_from_decorator
                                     elif decorator_func_name == 'location':
                                         # Extract 'name' argument from @location(name="...") or @location("...")
@@ -596,23 +620,46 @@ class DynamicFunctionManager:
                                             for kw in decorator_node.keywords:
                                                 if kw.arg == 'name' and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
                                                     if location_name_from_decorator is not None:
-                                                        logger.warning(f"⚠️ Multiple @location name specifications for {func_def_node.name}. Using first one: {location_name_from_decorator}")
+                                                        logger.error(f"❌ Multiple @location name specifications for {func_def_node.name}. Using first one: {location_name_from_decorator}")
                                                     else:
                                                         location_name_from_decorator = kw.value.value
                                         # Positional arguments like @location("foo")
                                         if not location_name_from_decorator and decorator_node.args:
                                             if len(decorator_node.args) == 1 and isinstance(decorator_node.args[0], ast.Constant) and isinstance(decorator_node.args[0].value, str):
                                                 if location_name_from_decorator is not None: # Should not happen if logic is correct, but for safety
-                                                    logger.warning(f"⚠️ Multiple @location name specifications for {func_def_node.name}. Using first one: {location_name_from_decorator}")
+                                                    logger.error(f"❌ Multiple @location name specifications for {func_def_node.name}. Using first one: {location_name_from_decorator}")
                                                 else:
                                                     location_name_from_decorator = decorator_node.args[0].value
                                             else:
-                                                logger.warning(f"⚠️ @location decorator for {func_def_node.name} has unexpected positional arguments. Expected a single string.")
+                                                logger.error(f"❌ @location decorator for {func_def_node.name} has unexpected positional arguments. Expected a single string.")
 
                                         if location_name_from_decorator is None:
-                                            logger.warning(f"⚠️ @location decorator used on {func_def_node.name} but 'name' argument was not found or not a string.")
+                                            logger.error(f"❌ @location decorator used on {func_def_node.name} but 'name' argument was not found or not a string.")
                                         # We don't add 'location' to decorator_names, as it's handled separately by location_name_from_decorator
-                                    else: # It's a call decorator but not 'app' or 'location'
+                                    elif decorator_func_name == 'protected':
+                                        # Extract required 'name' argument from @protected(name="...") or @protected("...")
+                                        if decorator_node.keywords: # Check keyword arguments like name="foo"
+                                            for kw in decorator_node.keywords:
+                                                if kw.arg == 'name' and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                                                    if protection_name_from_decorator is not None:
+                                                        logger.error(f"❌ Multiple @protected name specifications for {func_def_node.name}. Using first one: {protection_name_from_decorator}")
+                                                    else:
+                                                        protection_name_from_decorator = kw.value.value
+                                        # Positional arguments like @protected("foo")
+                                        if not protection_name_from_decorator and decorator_node.args:
+                                            if len(decorator_node.args) == 1 and isinstance(decorator_node.args[0], ast.Constant) and isinstance(decorator_node.args[0].value, str):
+                                                if protection_name_from_decorator is not None: # Should not happen if logic is correct, but for safety
+                                                    logger.error(f"❌ Multiple @protected name specifications for {func_def_node.name}. Using first one: {protection_name_from_decorator}")
+                                                else:
+                                                    protection_name_from_decorator = decorator_node.args[0].value
+                                            else:
+                                                logger.error(f"❌ @protected decorator for {func_def_node.name} has unexpected positional arguments. Expected a single string.")
+
+                                        if protection_name_from_decorator is None:
+                                            logger.error(f"❌ @protected decorator used on {func_def_node.name} but 'name' argument was not found or not a string.")
+                                        # Add 'protected' to decorator_names so visibility check works
+                                        decorator_names.append('protected')
+                                    else: # It's a call decorator but not 'app', 'location', or 'protected'
                                         decorator_names.append(decorator_func_name)
                                 else: # Decorator call but func is not a simple Name (e.g. @obj.deco())
                                     # Try to reconstruct its name, could be complex e.g. ast.Attribute
@@ -626,7 +673,7 @@ class DynamicFunctionManager:
                          input_schema["properties"] = schema_parts.get("properties", {})
                          input_schema["required"] = schema_parts.get("required", [])
                     except Exception as schema_e:
-                         logger.warning(f"⚠️ Could not generate input schema for {func_name}: {schema_e}")
+                         logger.error(f"❌ Could not generate input schema for {func_name}: {schema_e}")
                          input_schema["description"] = f"Schema generation error: {schema_e}"
 
                     function_info = {
@@ -635,7 +682,8 @@ class DynamicFunctionManager:
                         "inputSchema": input_schema,
                         "decorators": decorator_names, # Add extracted decorators here
                         "app_name": app_name_from_decorator, # Add extracted app_name
-                        "location_name": location_name_from_decorator # Add extracted location_name
+                        "location_name": location_name_from_decorator, # Add extracted location_name
+                        "protection_name": protection_name_from_decorator # Add extracted protection_name
                     }
                     functions_info.append(function_info)
 
@@ -643,7 +691,7 @@ class DynamicFunctionManager:
                 #logger.debug(f"⚙️ Found {len(functions_info)} function(s) in file")
                 return True, None, functions_info
             else:
-                logger.warning("⚠️ Syntax valid, but no top-level function definition found.")
+                logger.error("❌ Syntax valid, but no top-level function definition found.")
                 return True, "Syntax valid, but no function definition found", None
 
         except SyntaxError as e:
@@ -655,7 +703,7 @@ class DynamicFunctionManager:
                 if e.offset:
                     # Add a pointer to the exact error position
                     error_msg += f"\n{' ' * (e.offset-1)}^"
-            logger.warning(f"⚠️ Code validation failed (AST parse): {error_msg}")
+            logger.error(f"❌ Code validation failed (AST parse): {error_msg}")
             return False, error_msg, None
         except Exception as e:
             error_msg = f"Unexpected error during validation or AST processing: {str(e)}"
@@ -748,16 +796,28 @@ async def {name}():
                             for func_info in functions_info:
                                 func_name = func_info['name']
 
-                                # NEW OPT-IN VISIBILITY: Check if function has @visible or @public decorator or is internal
+                                # NEW OPT-IN VISIBILITY: Check if function has @visible, @public, or @protected decorator or is internal
                                 decorators_from_info = func_info.get("decorators", [])
+                                protection_name = func_info.get("protection_name")
                                 is_internal = func_name.startswith('_function') or func_name.startswith('_server') or func_name.startswith('_admin')
-                                is_visible = ("visible" in decorators_from_info or "public" in decorators_from_info) if decorators_from_info else False
+                                is_visible = ("visible" in decorators_from_info or "public" in decorators_from_info or "protected" in decorators_from_info) if decorators_from_info else False
                                 is_hidden = "hidden" in decorators_from_info if decorators_from_info else False
 
-                                # Skip if explicitly hidden OR if not visible and not internal
-                                if is_hidden or (not is_visible and not is_internal):
-                                    skip_reason = "hidden by @hidden" if is_hidden else "missing @visible decorator"
-                                    logger.info(f"🙈 SKIPPING NON-VISIBLE FUNCTION: {CYAN}{func_name}{RESET} -> {rel_path} ({skip_reason})")
+                                # Check if @protected has a valid protection name (required parameter)
+                                has_invalid_protected = "protected" in decorators_from_info and not protection_name
+
+                                # Skip if explicitly hidden OR if not visible and not internal OR if protected without valid name
+                                if is_hidden or (not is_visible and not is_internal) or has_invalid_protected:
+                                    if has_invalid_protected:
+                                        skip_reason = "invalid @protected (missing required protection name)"
+                                    elif is_hidden:
+                                        skip_reason = "hidden by @hidden"
+                                    else:
+                                        skip_reason = "missing @visible decorator"
+
+                                    # Use error level for invalid @protected, info level for others
+                                    log_level = logger.error if has_invalid_protected else logger.info
+                                    log_level(f"🙈 SKIPPING NON-VISIBLE FUNCTION: {CYAN}{func_name}{RESET} -> {rel_path} ({skip_reason})")
                                     # Determine app name for tracking
                                     app_name_from_decorator = func_info.get('app_name')
                                     if app_name_from_decorator:
@@ -1127,6 +1187,8 @@ async def {name}():
                     module.__dict__['hidden'] = hidden
                     # Add visible decorator
                     module.__dict__['visible'] = visible
+                    # Add protected decorator
+                    module.__dict__['protected'] = protected
                     # Add other known decorator names here if they arise
 
                     spec.loader.exec_module(module)

@@ -549,10 +549,10 @@ class DynamicAdditionServer(Server):
                         for func_info in functions_info:
                             tool_name = func_info.get('name', func_name)
 
-                            # NEW OPT-IN VISIBILITY: Check if function has @visible or @public decorator or is internal
+                            # NEW OPT-IN VISIBILITY: Check if function has @visible, @public, or @protected decorator or is internal
                             decorators_from_info = func_info.get("decorators", [])
                             is_internal = tool_name.startswith('_function') or tool_name.startswith('_server') or tool_name.startswith('_admin')
-                            is_visible = ("visible" in decorators_from_info or "public" in decorators_from_info) if decorators_from_info else False
+                            is_visible = ("visible" in decorators_from_info or "public" in decorators_from_info or "protected" in decorators_from_info) if decorators_from_info else False
                             is_hidden = "hidden" in decorators_from_info if decorators_from_info else False
 
                             # Skip if explicitly hidden OR if not visible and not internal
@@ -890,32 +890,6 @@ class DynamicAdditionServer(Server):
                     "required": ["name"]
                 },
                 annotations=ToolAnnotations(title="_server_get_tools")
-            ),
-            Tool(
-                name="_function_show",
-                description="Makes a hidden function temporarily visible until server restart. Use 'app' parameter to target specific functions when multiple exist with the same name.",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "app": {"type": "string", "description": "Optional: The app name to target a specific function when multiple exist with the same name"},
-                        "name": {"type": "string", "description": "The name of the hidden function to make visible"}
-                    },
-                    "required": ["name"]
-                },
-                annotations=ToolAnnotations(title="_function_show")
-            ),
-            Tool(
-                name="_function_hide",
-                description="Hides a temporarily visible function again. Use 'app' parameter to target specific functions when multiple exist with the same name.",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "app": {"type": "string", "description": "Optional: The app name to target a specific function when multiple exist with the same name"},
-                        "name": {"type": "string", "description": "The name of the function to hide again"}
-                    },
-                    "required": ["name"]
-                },
-                annotations=ToolAnnotations(title="_function_hide")
             ),
             Tool( # Add definition for _admin_restart
                 name="_admin_restart",
@@ -1975,94 +1949,6 @@ class DynamicAdditionServer(Server):
                         # Return an error message inside the tool response
                         raise ValueError(f"Error accessing function history: {e}")
 
-            elif actual_function_name == "_function_show":
-                # Make any function temporarily visible
-                app_name = args.get("app")  # Optional app name for disambiguation
-                func_name = args.get("name")
-                if not func_name:
-                    raise ValueError("Missing required parameter: name")
-
-                logger.debug(f"---> Calling built-in: _function_show for '{func_name}'" + (f" (app: {app_name})" if app_name else ""))
-
-                # Check if function exists using the function mapping (supports subfolders and app-specific lookup)
-                function_file = await self.function_manager._find_file_containing_function(func_name, app_name)
-
-                if not function_file:
-                    if app_name:
-                        error_message = f"Function '{func_name}' does not exist in app '{app_name}'."
-                    else:
-                        error_message = f"Function '{func_name}' does not exist."
-                    error_annotations = {
-                        "tool_error": {"tool_name": name, "message": error_message}
-                    }
-                    result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
-                else:
-                    # Function exists, continue with showing it
-                    pass
-                    # # Remove from temporarily hidden set if it was there
-                    # if func_name in self._temporarily_hidden_functions:
-                    #     self._temporarily_hidden_functions.remove(func_name)
-                    #     logger.info(f"{PINK}👁️ Removed '{func_name}' from temporarily hidden list{RESET}")
-
-                    # # Add to temporarily visible functions set
-                    # self._temporarily_visible_functions.add(func_name)
-                    # logger.info(f"{PINK}👁️ Made function '{func_name}' temporarily visible{RESET}")
-
-                    # # Invalidate tool cache to refresh the list
-                    # #self._cached_tools = None
-
-                    # # Notify clients about the tool list change
-                    # try:
-                    #     await self._notify_tool_list_changed(change_type="updated", tool_name=func_name)
-                    # except Exception as e:
-                    #     logger.error(f"Error sending tool notification after showing {func_name}: {str(e)}")
-
-                    result_raw = [TextContent(type="text", text=f"Use decorators instead of temporary visibility overrides.")]
-
-            elif actual_function_name == "_function_hide":
-                # Hide any function temporarily
-                app_name = args.get("app")  # Optional app name for disambiguation
-                func_name = args.get("name")
-                if not func_name:
-                    raise ValueError("Missing required parameter: name")
-
-                logger.debug(f"---> Calling built-in: _function_hide for '{func_name}'" + (f" (app: {app_name})" if app_name else ""))
-
-                # Check if function exists using the function mapping (supports subfolders and app-specific lookup)
-                function_file = await self.function_manager._find_file_containing_function(func_name, app_name)
-
-                if not function_file:
-                    if app_name:
-                        error_message = f"Function '{func_name}' does not exist in app '{app_name}'."
-                    else:
-                        error_message = f"Function '{func_name}' does not exist."
-                    error_annotations = {
-                        "tool_error": {"tool_name": name, "message": error_message}
-                    }
-                    result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
-                else:
-                    # Function exists, continue with hiding it
-                    pass
-                    # # Remove from temporarily visible set if it was there
-                    # if func_name in self._temporarily_visible_functions:
-                    #     self._temporarily_visible_functions.remove(func_name)
-                    #     logger.info(f"{PINK}🙈 Removed '{func_name}' from temporarily visible list{RESET}")
-
-                    # # Add to temporarily hidden functions set
-                    # self._temporarily_hidden_functions.add(func_name)
-                    # logger.info(f"{PINK}🙈 Made function '{func_name}' temporarily hidden{RESET}")
-
-                    # # Invalidate tool cache to refresh the list
-                    # #self._cached_tools = None
-
-                    # # Notify clients about the tool list change
-                    # try:
-                    #     await self._notify_tool_list_changed(change_type="updated", tool_name=func_name)
-                    # except Exception as e:
-                    #     logger.error(f"Error sending tool notification after hiding {func_name}: {str(e)}")
-
-                    result_raw = [TextContent(type="text", text=f"Use decorators instead of temporary visibility overrides.")]
-
             elif actual_function_name == "_admin_restart":
                 # Restart the server by terminating the process (wrapper script should restart it)
                 logger.info(f"🔄 ADMIN RESTART requested by owner: {user or 'unknown'}")
@@ -3090,6 +2976,7 @@ class ServiceClient:
             import humanize
 
             tool_info_list = []
+            protected_info_list = []
             hidden_info_list = []
             server_info_list = []
             internal_info_list = []
@@ -3146,11 +3033,16 @@ class ServiceClient:
                 if not is_internal and not is_server:
                     if 'public' in decorators:
                         visibility_str = f" {CYAN_COLOR}[@public]{RESET_COLOR}"
+                    elif 'protected' in decorators:
+                        visibility_str = f" {YELLOW}[@protected]{RESET_COLOR}"
                     elif 'visible' in decorators:
                         visibility_str = f" {GREY_COLOR}[@visible]{RESET_COLOR}"
 
+                # Detect if function is protected
+                is_protected = 'protected' in decorators if decorators else False
+
                 # Format the line with colors
-                # Format differently for servers (no app name column), internal tools, hidden, or regular
+                # Format differently for servers (no app name column), internal tools, hidden, protected, or regular
                 if is_server:
                     formatted_line = f"{tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR}{timestamp_str}"
                     server_info_list.append((app_display, tool.name, formatted_line))
@@ -3160,12 +3052,16 @@ class ServiceClient:
                 elif is_hidden:
                     formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
                     hidden_info_list.append((app_display, tool.name, formatted_line))
+                elif is_protected:
+                    formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
+                    protected_info_list.append((app_display, tool.name, formatted_line))
                 else:
                     formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
                     tool_info_list.append((app_display, tool.name, formatted_line))
 
             # Sort by app name then tool name (case-insensitive)
             tool_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
+            protected_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
             hidden_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
             server_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
             internal_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
@@ -3177,6 +3073,12 @@ class ServiceClient:
             logger.info(f"  {BOLD_COLOR}Functions: {len(tool_info_list)}{RESET_COLOR}")
             for _, _, formatted_line in tool_info_list:
                 logger.info(f"    {formatted_line}")
+
+            if protected_info_list:
+                logger.info(f"")
+                logger.info(f"  {BOLD_COLOR}Protected: {len(protected_info_list)}{RESET_COLOR}")
+                for _, _, formatted_line in protected_info_list:
+                    logger.info(f"    {formatted_line}")
 
             if internal_info_list:
                 logger.info(f"")
@@ -3210,6 +3112,8 @@ class ServiceClient:
             from collections import defaultdict
             app_counts = defaultdict(int)
             for app_display, _, _ in tool_info_list:
+                app_counts[app_display] += 1
+            for app_display, _, _ in protected_info_list:
                 app_counts[app_display] += 1
             for app_display, _, _ in hidden_info_list:
                 app_counts[app_display] += 1

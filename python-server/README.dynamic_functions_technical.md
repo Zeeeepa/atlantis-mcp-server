@@ -123,23 +123,21 @@ The dynamic functions system has **one source of truth**: the **file mapping**. 
 
 ### Function Visibility (Opt-In System)
 
-**Default Behavior: Functions are HIDDEN unless decorated with `@visible` or `@public`**
+**Default Behavior: Functions are HIDDEN unless decorated with `@visible`, `@public`, or `@protected`**
 
 **Two layers of visibility control**:
 
 1. **File Mapping (Primary Security Boundary)** - DynamicFunctionManager.py:646-671
-   - Functions WITHOUT `@visible` decorator are NOT in the mapping (unless internal `_function`/`_server`/`_admin`)
+   - Functions WITHOUT `@visible`, `@public`, or `@protected` decorator are NOT in the mapping (unless internal `_function`/`_server`/`_admin`)
    - Functions not in mapping CANNOT be called
    - Functions not in mapping do NOT appear in tools list
-   - **Opt-in visibility**: Must use `@visible` or `@public` decorator to expose
+   - **Opt-in visibility**: Must use `@visible`, `@public`, or `@protected` decorator to expose
    - `@hidden` decorator is **obsolete** (everything is hidden by default)
 
 2. **Redundant Check (Defense in Depth)** - server.py:564
    - `_get_tools_list()` checks decorators again during tool list generation
    - Should never trigger (non-visible functions already excluded from mapping)
    - Defensive programming for safety
-
-**Note:** Temporary visibility overrides (`_function_show`/`_function_hide`) are currently disabled. Use decorators to control visibility.
 
 ### Visibility Check Order
 
@@ -148,7 +146,7 @@ In `_build_function_file_mapping()` (DynamicFunctionManager.py:646-671):
 ```python
 # Check decorators during file mapping build
 is_internal = func_name.startswith('_function') or func_name.startswith('_server') or func_name.startswith('_admin')
-is_visible = "visible" in decorators_from_info if decorators_from_info else False
+is_visible = ("visible" in decorators_from_info or "public" in decorators_from_info or "protected" in decorators_from_info) if decorators_from_info else False
 is_hidden = "hidden" in decorators_from_info if decorators_from_info else False
 
 # Skip if explicitly hidden OR if not visible and not internal
@@ -228,16 +226,11 @@ self._last_active_server_keys = set()     # Active MCP servers
 
 ```python
 # In MCPServer.__init__():
-self._temporarily_visible_functions = set()  # Set[str]
-self._temporarily_hidden_functions = set()   # Set[str]
+self._temporarily_visible_functions = set()  # Set[str] (legacy, unused)
+self._temporarily_hidden_functions = set()   # Set[str] (legacy, unused)
 ```
 
-**Modified by**:
-- `_function_show` tool (owner only)
-- `_function_hide` tool (owner only)
-
-**Reset by**:
-- Server restart
+**Note**: These fields are legacy and currently unused. Visibility is controlled exclusively through decorators.
 
 ## Compound Tool Names
 
@@ -407,15 +400,16 @@ result = await function_manager.function_call("test_visible", ...)
 
 A: Security by default. Functions must explicitly declare they want to be exposed as MCP tools using `@visible` or `@public`. This prevents accidentally exposing internal helper functions, debug tools, or incomplete code.
 
-**Q: What's the difference between `@visible` and `@public`?**
+**Q: What's the difference between `@visible`, `@public`, and `@protected`?**
 
 A:
 - `@visible`: Makes function visible in tools list and callable by owner
 - `@public`: Makes function visible AND accessible to all users (handled in cloud infrastructure, implies @visible)
+- `@protected`: Currently acts like @visible, reserved for future access control enhancements
 
 **Q: Is `@hidden` still needed?**
 
-A: No, `@hidden` is obsolete. Functions are hidden by default unless decorated with `@visible` or `@public`. You can simply omit the decorator instead of using `@hidden`.
+A: No, `@hidden` is obsolete. Functions are hidden by default unless decorated with `@visible`, `@public`, or `@protected`. You can simply omit the decorator instead of using `@hidden`.
 
 **Q: Can non-visible functions call each other internally?**
 
@@ -427,4 +421,4 @@ A: For debugging and introspection. It tracks all functions that were skipped du
 
 **Q: Can I change visibility at runtime?**
 
-A: No, the temporary visibility override system (`_function_show`/`_function_hide`) is currently disabled. Use decorators (`@visible` or `@public`) to control function visibility. Changes require editing the function file and rely on the file watcher for automatic reload.
+A: No. Use decorators (`@visible` or `@public`) to control function visibility. Changes require editing the function file and rely on the file watcher for automatic reload.
