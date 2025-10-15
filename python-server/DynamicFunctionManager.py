@@ -792,6 +792,29 @@ async def {name}():
                         # Validate and extract function info
                         is_valid, error_message, functions_info = self._code_validate_syntax(code)
 
+                        if not is_valid:
+                            # Track files with syntax errors
+                            logger.error(f"❌ SYNTAX ERROR in {rel_path}: {error_message}")
+                            # Determine app name from path
+                            if '/' in rel_path:
+                                track_app_name = rel_path.split('/')[0]
+                            else:
+                                track_app_name = None
+
+                            # Clean up error message - extract only the first line (before "Line content:")
+                            clean_error = error_message.split('\n')[0] if error_message else 'unknown syntax error'
+
+                            # Track this file with syntax error
+                            self._skipped_hidden_functions.append({
+                                'name': os.path.splitext(os.path.basename(rel_path))[0],  # Use filename as name
+                                'app': track_app_name,
+                                'file': rel_path,
+                                'reason': f'syntax error: {clean_error}',
+                                'is_error': True,  # Explicit flag for error conditions
+                                'decorators': []
+                            })
+                            continue
+
                         if is_valid and functions_info:
                             for func_info in functions_info:
                                 func_name = func_info['name']
@@ -832,6 +855,7 @@ async def {name}():
                                         'app': track_app_name,
                                         'file': rel_path,
                                         'reason': skip_reason,
+                                        'is_error': has_invalid_protected,  # True if error condition, False if intentional hiding
                                         'decorators': decorators_from_info
                                     })
                                     continue

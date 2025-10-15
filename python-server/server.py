@@ -2971,7 +2971,7 @@ class ServiceClient:
             tools_list = await self.mcp_server._get_tools_list(caller_context="_handle_connect_cloud")
             # Create list with app names and source files for easier inspection of duplicates
             # Import colors for formatting (at function scope to avoid shadowing module imports)
-            from ColoredFormatter import CYAN as CYAN_COLOR, YELLOW, GREY as GREY_COLOR, RESET as RESET_COLOR, BOLD as BOLD_COLOR, PINK
+            from ColoredFormatter import CYAN as CYAN_COLOR, YELLOW, GREY as GREY_COLOR, RESET as RESET_COLOR, BOLD as BOLD_COLOR, PINK, RED
 
             import humanize
 
@@ -3092,13 +3092,35 @@ class ServiceClient:
                 for _, _, formatted_line in hidden_info_list:
                     logger.info(f"    {formatted_line}")
 
-            # Report skipped hidden functions
+            # Report skipped hidden functions (split into Hidden and Invalid/Errors)
             if hasattr(self.mcp_server.function_manager, '_skipped_hidden_functions') and self.mcp_server.function_manager._skipped_hidden_functions:
-                logger.info(f"")
-                logger.info(f"  {BOLD_COLOR}Hidden: {len(self.mcp_server.function_manager._skipped_hidden_functions)}{RESET_COLOR}")
-                for item in sorted(self.mcp_server.function_manager._skipped_hidden_functions, key=lambda x: ((x['app'] or 'top-level').lower(), x['name'].lower())):
-                    app_display = item['app'] if item['app'] else 'top-level'
-                    logger.info(f"    {BOLD_COLOR}{app_display:20}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR}")
+                # Separate hidden functions from invalid/error functions
+                hidden_functions = []
+                invalid_functions = []
+
+                for item in self.mcp_server.function_manager._skipped_hidden_functions:
+                    # Check if this is an error condition vs. intentional hiding using explicit flag
+                    if item.get('is_error', False):
+                        invalid_functions.append(item)
+                    else:
+                        hidden_functions.append(item)
+
+                # Report intentionally hidden functions
+                if hidden_functions:
+                    logger.info(f"")
+                    logger.info(f"  {BOLD_COLOR}Hidden: {len(hidden_functions)}{RESET_COLOR}")
+                    for item in sorted(hidden_functions, key=lambda x: ((x['app'] or 'top-level').lower(), x['name'].lower())):
+                        app_display = item['app'] if item['app'] else 'top-level'
+                        logger.info(f"    {BOLD_COLOR}{app_display:20}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR}")
+
+                # Report invalid/error functions
+                if invalid_functions:
+                    logger.info(f"")
+                    logger.error(f"  {BOLD_COLOR}❌ INVALID FUNCTIONS: {len(invalid_functions)}{RESET_COLOR}")
+                    for item in sorted(invalid_functions, key=lambda x: ((x['app'] or 'top-level').lower(), x['name'].lower())):
+                        app_display = item['app'] if item['app'] else 'top-level'
+                        reason = item.get('reason', 'unknown error')
+                        logger.error(f"    {BOLD_COLOR}{app_display:20}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR} {RED}[{reason}]{RESET_COLOR}")
 
 
 
