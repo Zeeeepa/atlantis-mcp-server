@@ -604,6 +604,11 @@ class DynamicAdditionServer(Server):
                             if location_name_from_info is not None:
                                 tool_annotations["location_name"] = location_name_from_info
 
+                            # Add protection_name to annotations if present in function_info
+                            protection_name_from_info = func_info.get("protection_name")
+                            if protection_name_from_info is not None:
+                                tool_annotations["protection_name"] = protection_name_from_info
+
                             # Add runtime error message if present in cache
                             if tool_name in _runtime_errors:
                                 tool_annotations["runtimeError"] = _runtime_errors[tool_name]
@@ -2987,6 +2992,7 @@ class ServiceClient:
                 app_source = getattr(tool.annotations, 'app_source', 'unknown') if hasattr(tool, 'annotations') else 'unknown'
                 last_modified = getattr(tool.annotations, 'lastModified', None) if hasattr(tool, 'annotations') else None
                 decorators = getattr(tool.annotations, 'decorators', []) if hasattr(tool, 'annotations') else []
+                protection_name = getattr(tool.annotations, 'protection_name', None) if hasattr(tool, 'annotations') else None
 
                 # Check if tool is hidden
                 is_hidden = getattr(tool.annotations, 'temporarilyVisible', False) if hasattr(tool, 'annotations') else False
@@ -3028,18 +3034,23 @@ class ServiceClient:
                     except Exception as e:
                         timestamp_str = f" {GREY_COLOR}[{last_modified}]{RESET_COLOR}"
 
+                # Detect if function is protected
+                is_protected = 'protected' in decorators if decorators else False
+
                 # Determine visibility indicator for non-internal functions
                 visibility_str = ""
                 if not is_internal and not is_server:
                     if 'public' in decorators:
                         visibility_str = f" {CYAN_COLOR}[@public]{RESET_COLOR}"
                     elif 'protected' in decorators:
-                        visibility_str = f" {YELLOW}[@protected]{RESET_COLOR}"
+                        # For protected functions, just show the group name without @protected wrapper
+                        # since it's already in the "Protected" section
+                        if protection_name:
+                            visibility_str = f" {YELLOW}[{protection_name}]{RESET_COLOR}"
+                        else:
+                            visibility_str = f" {YELLOW}[@protected]{RESET_COLOR}"
                     elif 'visible' in decorators:
                         visibility_str = f" {GREY_COLOR}[@visible]{RESET_COLOR}"
-
-                # Detect if function is protected
-                is_protected = 'protected' in decorators if decorators else False
 
                 # Format the line with colors
                 # Format differently for servers (no app name column), internal tools, hidden, protected, or regular
