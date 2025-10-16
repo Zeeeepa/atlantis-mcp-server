@@ -154,6 +154,7 @@ class DynamicFunctionManager:
         # NEW: Function-to-file mapping cache
         self._function_file_mapping = {}  # function_name -> filename mapping
         self._function_file_mapping_by_app = {}  # app_name -> {function_name -> filename mapping}
+        self._function_metadata_by_app = {}  # app_name -> {function_name -> func_info dict (includes protection_name)}
         self._function_file_mapping_mtime = 0.0  # track when mapping was last built
         self._skipped_hidden_functions = []  # Track functions skipped due to @hidden decorator
 
@@ -742,6 +743,7 @@ async def {name}():
         """Invalidate the function-to-file mapping cache."""
         self._function_file_mapping.clear()
         self._function_file_mapping_by_app.clear()
+        self._function_metadata_by_app.clear()
         self._function_file_mapping_mtime = 0.0
         logger.debug("🧹 Function-to-file mapping cache invalidated")
 
@@ -758,6 +760,7 @@ async def {name}():
             logger.info("🔍 Building function-to-file mapping...")
             self._function_file_mapping.clear()
             self._function_file_mapping_by_app.clear()
+            self._function_metadata_by_app.clear()
             self._skipped_hidden_functions.clear()  # Clear skipped functions list to allow previously invalid functions to be retried
 
             # Scan all Python files in the functions directory and subdirectories
@@ -890,6 +893,11 @@ async def {name}():
                                     # Still store it so we can report all duplicates in tools list
 
                                 self._function_file_mapping_by_app[app_name][func_name] = rel_path
+
+                                # Store metadata in cache
+                                if app_name not in self._function_metadata_by_app:
+                                    self._function_metadata_by_app[app_name] = {}
+                                self._function_metadata_by_app[app_name][func_name] = func_info
 
                                 #logger.info(f"🎯 FOUND FUNCTION: {CYAN}{func_name}{RESET} -> {rel_path} (app: {app_name})")
                                 #if root != self.functions_dir:
@@ -1183,48 +1191,47 @@ async def {name}():
                 # Clear any previous runtime error for this function before attempting load
                 self._runtime_errors.pop(name, None)
 
-                # --- Load the requested module fresh ---
-                # Check sys.modules again *inside the lock* in case the watcher re-added it
-                # between the invalidate call above and acquiring this lock.
-                # Although invalidate_all should have removed it, this is belt-and-suspenders.
+                # --- Load the requested module (using cache if available) ---
+                # If the file watcher invalidated the module, it won't be in sys.modules
+                # If it IS in sys.modules, the file hasn't changed so we can use the cached version
                 if module_name in sys.modules:
-                    logger.debug(f"Module {module_name} found in cache, reloading for freshness.")
-                    del sys.modules[module_name]
+                    logger.debug(f"Module {module_name} found in cache, using cached version.")
+                    module = sys.modules[module_name]
+                else:
+                    logger.info(f"Loading module fresh: {module_name}")
+                    spec = importlib.util.spec_from_file_location(module_name, file_path)
+                    if spec is None or spec.loader is None:
+                        raise ImportError(f"Could not create module spec for {target_file}")
+                    try:
+                        module = importlib.util.module_from_spec(spec)
+                        sys.modules[module_name] = module # Add to sys.modules before exec
 
-                logger.info(f"Loading module fresh: {module_name}")
-                spec = importlib.util.spec_from_file_location(module_name, file_path)
-                if spec is None or spec.loader is None:
-                    raise ImportError(f"Could not create module spec for {target_file}")
-                try:
-                    module = importlib.util.module_from_spec(spec)
-                    sys.modules[module_name] = module # Add to sys.modules before exec
 
+                        # Inject identity decorators for known decorator names
+                        # This makes @chat, @public, etc., resolvable during module load
+                        module.__dict__['chat'] = _mcp_identity_decorator
+                        module.__dict__['public'] = _mcp_identity_decorator
+                        # Add app decorator which takes parameters
+                        module.__dict__['app'] = app
+                        # Add location decorator which takes parameters
+                        module.__dict__['location'] = location
+                        # Add hidden decorator
+                        module.__dict__['hidden'] = hidden
+                        # Add visible decorator
+                        module.__dict__['visible'] = visible
+                        # Add protected decorator
+                        module.__dict__['protected'] = protected
+                        # Add other known decorator names here if they arise
 
-                    # Inject identity decorators for known decorator names
-                    # This makes @chat, @public, etc., resolvable during module load
-                    module.__dict__['chat'] = _mcp_identity_decorator
-                    module.__dict__['public'] = _mcp_identity_decorator
-                    # Add app decorator which takes parameters
-                    module.__dict__['app'] = app
-                    # Add location decorator which takes parameters
-                    module.__dict__['location'] = location
-                    # Add hidden decorator
-                    module.__dict__['hidden'] = hidden
-                    # Add visible decorator
-                    module.__dict__['visible'] = visible
-                    # Add protected decorator
-                    module.__dict__['protected'] = protected
-                    # Add other known decorator names here if they arise
-
-                    spec.loader.exec_module(module)
-                except Exception as load_err:
-                    if module_name in sys.modules:
-                        del sys.modules[module_name]
-                    error_message = f"Error loading module '{module_name}': {load_err}"
-                    logger.error(error_message)
-                    logger.debug(traceback.format_exc())
-                    self._runtime_errors[name] = str(load_err)
-                    raise ImportError(error_message) from load_err
+                        spec.loader.exec_module(module)
+                    except Exception as load_err:
+                        if module_name in sys.modules:
+                            del sys.modules[module_name]
+                        error_message = f"Error loading module '{module_name}': {load_err}"
+                        logger.error(error_message)
+                        logger.debug(traceback.format_exc())
+                        self._runtime_errors[name] = str(load_err)
+                        raise ImportError(error_message) from load_err
                 # --- End Load ---
 
             except Exception as lock_section_err:
@@ -1239,6 +1246,56 @@ async def {name}():
         if module is None:
             # This indicates a failure during load that should have raised earlier
             raise RuntimeError(f"Module '{module_name}' failed to load successfully.")
+
+        # --- Protection Check ---
+        # Retrieve function metadata from cache to check if function is protected
+        await self._build_function_file_mapping()  # Ensure cache is built
+        func_metadata = self._function_metadata_by_app.get(app_name, {}).get(actual_function_name)
+
+        if func_metadata:
+            protection_name = func_metadata.get('protection_name')
+            if protection_name:
+                # Prevent infinite recursion: protection functions cannot be protected
+                if protection_name == actual_function_name:
+                    error_msg = f"Protection function '{protection_name}' cannot protect itself"
+                    logger.error(f"❌ {error_msg}")
+                    raise PermissionError(error_msg)
+
+                logger.info(f"🔒 Function '{actual_function_name}' is protected by '{protection_name}'")
+
+                # Call the protection function (which must be a top-level function, not in any app)
+                # The protection function takes the user as a parameter and returns True/False
+                try:
+                    logger.info(f"🔐 Calling protection function '{protection_name}' for user '{user}'")
+
+                    # Call protection function using the same function_call mechanism
+                    # Protection functions must be top-level (app_name=None)
+                    is_allowed = await self.function_call(
+                        name=protection_name,
+                        client_id=client_id,
+                        request_id=request_id,
+                        user=user,
+                        app=None,  # Protection functions must be top-level
+                        args={'user': user}  # Pass user as argument to protection function
+                    )
+
+                    # Check the result
+                    if not is_allowed:
+                        error_msg = f"Access denied: User '{user}' call to '{actual_function_name}' is not authorized by '{protection_name}'"
+                        logger.warning(f"🚫 {error_msg}")
+                        raise PermissionError(error_msg)
+
+                    logger.info(f"✅ Access granted for user '{user}' to function '{actual_function_name}'")
+
+                except PermissionError:
+                    # Re-raise permission errors
+                    raise
+                except Exception as prot_err:
+                    error_msg = f"Error executing protection function '{protection_name}': {prot_err}"
+                    logger.error(f"❌ {error_msg}")
+                    logger.debug(traceback.format_exc())
+                    raise PermissionError(error_msg) from prot_err
+        # --- End Protection Check ---
 
         try:
             # --- Context Setting ---
