@@ -143,6 +143,21 @@ def protected(name: str):
 
     return decorator
 
+# --- Index Decorator Definition ---
+def index(func):
+    """
+    Decorator that marks a function as eligible to be an app index.
+    When applied, the function will be flagged as a potential app entry point.
+
+    Usage: @index
+           def my_index_function():
+               # This function is eligible to be the app's index
+               ...
+    """
+    # Mark the function as an index by setting an attribute
+    setattr(func, '_is_index', True)
+    return func
+
 class DynamicFunctionManager:
     def __init__(self, functions_dir):
         # State that was previously global
@@ -580,16 +595,20 @@ class DynamicFunctionManager:
                     docstring = ast.get_docstring(func_def_node)
                     input_schema = {"type": "object"} # Default empty schema
 
-                    # Extract decorators, app_name, location_name, and protection_name
+                    # Extract decorators, app_name, location_name, protection_name, and is_index
                     decorator_names = []
                     app_name_from_decorator = None # Initialize app_name
                     location_name_from_decorator = None # Initialize location_name
                     protection_name_from_decorator = None # Initialize protection_name
+                    is_index_from_decorator = False # Initialize is_index
                     if func_def_node.decorator_list:
                         for decorator_node in func_def_node.decorator_list:
-                            if isinstance(decorator_node, ast.Name): # e.g. @public, @hidden
+                            if isinstance(decorator_node, ast.Name): # e.g. @public, @hidden, @index
                                 decorator_name = decorator_node.id
                                 decorator_names.append(decorator_name)
+                                # Check if it's the @index decorator
+                                if decorator_name == 'index':
+                                    is_index_from_decorator = True
                             elif isinstance(decorator_node, ast.Call): # e.g. @app(name="foo") or @app("foo"), @location(name="bar") or @location("bar")
                                 if isinstance(decorator_node.func, ast.Name):
                                     decorator_func_name = decorator_node.func.id
@@ -684,7 +703,8 @@ class DynamicFunctionManager:
                         "decorators": decorator_names, # Add extracted decorators here
                         "app_name": app_name_from_decorator, # Add extracted app_name
                         "location_name": location_name_from_decorator, # Add extracted location_name
-                        "protection_name": protection_name_from_decorator # Add extracted protection_name
+                        "protection_name": protection_name_from_decorator, # Add extracted protection_name
+                        "is_index": is_index_from_decorator # Add extracted is_index flag
                     }
                     functions_info.append(function_info)
 
@@ -1221,6 +1241,8 @@ async def {name}():
                         module.__dict__['visible'] = visible
                         # Add protected decorator
                         module.__dict__['protected'] = protected
+                        # Add index decorator
+                        module.__dict__['index'] = index
                         # Add other known decorator names here if they arise
 
                         spec.loader.exec_module(module)

@@ -620,6 +620,11 @@ class DynamicAdditionServer(Server):
                             if protection_name_from_info is not None:
                                 tool_annotations["protection_name"] = protection_name_from_info
 
+                            # Add is_index flag to annotations if present in function_info
+                            is_index_from_info = func_info.get("is_index")
+                            if is_index_from_info:
+                                tool_annotations["is_index"] = True
+
                             # Add runtime error message if present in cache
                             if tool_name in _runtime_errors:
                                 tool_annotations["runtimeError"] = _runtime_errors[tool_name]
@@ -2815,6 +2820,7 @@ class ServiceClient:
             last_modified = getattr(tool.annotations, 'lastModified', None) if hasattr(tool, 'annotations') else None
             decorators = getattr(tool.annotations, 'decorators', []) if hasattr(tool, 'annotations') else []
             protection_name = getattr(tool.annotations, 'protection_name', None) if hasattr(tool, 'annotations') else None
+            is_index = getattr(tool.annotations, 'is_index', False) if hasattr(tool, 'annotations') else False
 
             # Check if tool is hidden
             is_hidden = getattr(tool.annotations, 'temporarilyVisible', False) if hasattr(tool, 'annotations') else False
