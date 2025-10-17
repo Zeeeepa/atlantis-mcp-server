@@ -2803,7 +2803,7 @@ class ServiceClient:
         tools_list = await self.mcp_server._get_tools_list(caller_context="_report_tools_to_console")
         # Create list with app names and source files for easier inspection of duplicates
         # Import colors for formatting (at function scope to avoid shadowing module imports)
-        from ColoredFormatter import CYAN as CYAN_COLOR, YELLOW, GREY as GREY_COLOR, RESET as RESET_COLOR, BOLD as BOLD_COLOR, PINK, RED
+        from ColoredFormatter import CYAN as CYAN_COLOR, YELLOW, GREY as GREY_COLOR, RESET as RESET_COLOR, BOLD as BOLD_COLOR, PINK, RED, MAGENTA
 
         import humanize
 
@@ -2879,6 +2879,10 @@ class ServiceClient:
                         visibility_str = f" {YELLOW}[@protected]{RESET_COLOR}"
                 elif 'visible' in decorators:
                     visibility_str = f" {GREY_COLOR}[@visible]{RESET_COLOR}"
+
+            # Add index indicator if function is marked as index
+            if is_index:
+                visibility_str += f" {MAGENTA}[INDEX]{RESET_COLOR}"
 
             # Format the line with colors
             # Format differently for servers (no app name column), internal tools, hidden, protected, or regular

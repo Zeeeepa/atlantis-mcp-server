@@ -19,6 +19,7 @@ BOLD = "\x1b[1m"   # Added Bold
 CYAN = "\x1b[36m"   # Added Cyan
 BRIGHT_WHITE = "\x1b[97m" # Added Bright White
 PINK = "\x1b[95m"  # Added Pink
+MAGENTA = "\x1b[35m"  # Added Magenta
 
 class ColoredFormatter(logging.Formatter):
     """
