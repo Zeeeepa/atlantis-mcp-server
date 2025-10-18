@@ -560,10 +560,10 @@ class DynamicAdditionServer(Server):
                         for func_info in functions_info:
                             tool_name = func_info.get('name', func_name)
 
-                            # NEW OPT-IN VISIBILITY: Check if function has @visible, @public, or @protected decorator or is internal
+                            # NEW OPT-IN VISIBILITY: Check if function has @visible, @public, @protected, or @tick decorator or is internal
                             decorators_from_info = func_info.get("decorators", [])
                             is_internal = tool_name.startswith('_function') or tool_name.startswith('_server') or tool_name.startswith('_admin')
-                            is_visible = ("visible" in decorators_from_info or "public" in decorators_from_info or "protected" in decorators_from_info) if decorators_from_info else False
+                            is_visible = ("visible" in decorators_from_info or "public" in decorators_from_info or "protected" in decorators_from_info or "tick" in decorators_from_info) if decorators_from_info else False
                             is_hidden = "hidden" in decorators_from_info if decorators_from_info else False
 
                             # Skip if explicitly hidden OR if not visible and not internal
@@ -2877,6 +2877,8 @@ class ServiceClient:
                         visibility_str = f" {YELLOW}[{protection_name}]{RESET_COLOR}"
                     else:
                         visibility_str = f" {YELLOW}[@protected]{RESET_COLOR}"
+                elif 'tick' in decorators:
+                    visibility_str = f" {MAGENTA}[@tick]{RESET_COLOR}"
                 elif 'visible' in decorators:
                     visibility_str = f" {GREY_COLOR}[@visible]{RESET_COLOR}"
 
