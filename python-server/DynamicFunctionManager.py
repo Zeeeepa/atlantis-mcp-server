@@ -120,6 +120,24 @@ def visible(func):
     setattr(func, '_is_visible', True)
     return func
 
+# --- Tick Decorator Definition ---
+def tick(func):
+    """
+    Decorator that marks a function as a 'tick' function.
+    When applied, the function will be included in the tools list.
+    Acts similar to @visible decorator.
+
+    Usage: @tick
+           def my_tick_function():
+               # This function will be visible in tools/list
+               ...
+    """
+    # Mark the function as visible by setting an attribute (same as @visible)
+    setattr(func, '_is_visible', True)
+    # Also mark it as a tick function for potential future use
+    setattr(func, '_is_tick', True)
+    return func
+
 # --- Protected Decorator Definition ---
 def protected(name: str):
     """
@@ -843,11 +861,11 @@ async def {name}():
                             for func_info in functions_info:
                                 func_name = func_info['name']
 
-                                # NEW OPT-IN VISIBILITY: Check if function has @visible, @public, or @protected decorator or is internal
+                                # NEW OPT-IN VISIBILITY: Check if function has @visible, @public, @protected, or @tick decorator or is internal
                                 decorators_from_info = func_info.get("decorators", [])
                                 protection_name = func_info.get("protection_name")
                                 is_internal = func_name.startswith('_function') or func_name.startswith('_server') or func_name.startswith('_admin')
-                                is_visible = ("visible" in decorators_from_info or "public" in decorators_from_info or "protected" in decorators_from_info) if decorators_from_info else False
+                                is_visible = ("visible" in decorators_from_info or "public" in decorators_from_info or "protected" in decorators_from_info or "tick" in decorators_from_info) if decorators_from_info else False
                                 is_hidden = "hidden" in decorators_from_info if decorators_from_info else False
 
                                 # Check if @protected has a valid protection name (required parameter)
@@ -1239,6 +1257,8 @@ async def {name}():
                         module.__dict__['hidden'] = hidden
                         # Add visible decorator
                         module.__dict__['visible'] = visible
+                        # Add tick decorator
+                        module.__dict__['tick'] = tick
                         # Add protected decorator
                         module.__dict__['protected'] = protected
                         # Add index decorator
