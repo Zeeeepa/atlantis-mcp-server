@@ -590,11 +590,13 @@ class DynamicAdditionServer(Server):
                                 app_source = "decorator"
                                 #logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {actual_app_name} (from @app decorator)")
                             else:
+                                # app_name from mapping is in slash notation, keep it for internal use
                                 actual_app_name = app_name
                                 app_source = "directory" if app_name else "NA"
                                 #logger.info(f"🎯 AUTO-ASSIGNED APP: {func_name} -> {actual_app_name} (from app mapping)")
 
-                            tool_annotations["app_name"] = actual_app_name
+                            # Convert slash path to dot notation for MCP output
+                            tool_annotations["app_name"] = self.function_manager._path_to_app_name(actual_app_name) if actual_app_name else None
                             tool_annotations["app_source"] = app_source
 
                             # Check visibility overrides first (these take precedence over decorators)
@@ -654,7 +656,9 @@ class DynamicAdditionServer(Server):
                             )
 
                             # Check for duplicates - CASE SENSITIVE since function names are case-sensitive
-                            tool_key = f"{actual_app_name}.{tool_name}"
+                            # Use dot notation for comparison (matches what's in annotations)
+                            app_name_for_key = self.function_manager._path_to_app_name(actual_app_name) if actual_app_name else None
+                            tool_key = f"{app_name_for_key}.{tool_name}"
                             existing_tool_keys = {f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}" for tool in tools_list}
                             if tool_key not in existing_tool_keys:
                                 tools_list.append(tool_obj)
@@ -1778,13 +1782,15 @@ class DynamicAdditionServer(Server):
                     existing_locations = []
                     if not app_name:
                         # Find ALL apps that contain this function, with filenames
-                        for existing_app_name, app_functions in self.function_manager._function_file_mapping_by_app.items():
+                        for existing_app_path, app_functions in self.function_manager._function_file_mapping_by_app.items():
                             if func_name in app_functions:
                                 filename = app_functions[func_name]
-                                if existing_app_name == "unknown":
+                                if existing_app_path == "unknown":
                                     location = f"root {filename}"
                                 else:
-                                    location = f"{existing_app_name} {filename}"
+                                    # Convert slash path to dot notation for display to user
+                                    existing_app_display = self.function_manager._path_to_app_name(existing_app_path) if existing_app_path else "unknown"
+                                    location = f"{existing_app_display} {filename}"
                                 existing_locations.append(location)
 
                     # Create detailed error message
@@ -2955,7 +2961,8 @@ class ServiceClient:
                 logger.info(f"")
                 logger.info(f"  {BOLD_COLOR}Hidden: {len(hidden_functions)}{RESET_COLOR}")
                 for item in sorted(hidden_functions, key=lambda x: ((x['app'] or 'top-level').lower(), x['name'].lower())):
-                    app_display = item['app'] if item['app'] else 'top-level'
+                    # Convert slash path to dot notation for display
+                    app_display = self.mcp_server.function_manager._path_to_app_name(item['app']) if item['app'] else 'top-level'
                     logger.info(f"    {BOLD_COLOR}{app_display:20}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR}")
 
             # Report invalid/error functions
@@ -2963,7 +2970,8 @@ class ServiceClient:
                 logger.info(f"")
                 logger.error(f"  {BOLD_COLOR}❌ INVALID FUNCTIONS: {len(invalid_functions)}{RESET_COLOR}")
                 for item in sorted(invalid_functions, key=lambda x: ((x['app'] or 'top-level').lower(), x['name'].lower())):
-                    app_display = item['app'] if item['app'] else 'top-level'
+                    # Convert slash path to dot notation for display
+                    app_display = self.mcp_server.function_manager._path_to_app_name(item['app']) if item['app'] else 'top-level'
                     reason = item.get('reason', 'unknown error')
                     logger.error(f"    {BOLD_COLOR}{app_display:20}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR} {RED}[{reason}]{RESET_COLOR}")
 

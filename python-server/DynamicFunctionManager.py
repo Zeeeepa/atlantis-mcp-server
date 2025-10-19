@@ -196,11 +196,38 @@ class DynamicFunctionManager:
         self.old_dir = os.path.join(self.functions_dir, "OLD")
         os.makedirs(self.old_dir, exist_ok=True)
 
+    # Helper functions for app name <-> path conversion
+    @staticmethod
+    def _app_name_to_path(app_name: Optional[str]) -> Optional[str]:
+        """
+        Convert app name with dot notation to filesystem path.
+        Example: "App.SubModule.Feature" -> "App/SubModule/Feature"
+        Returns None if app_name is None.
+        """
+        if not app_name:
+            return None
+        return app_name.replace('.', os.sep)
+
+    @staticmethod
+    def _path_to_app_name(app_path: str) -> Optional[str]:
+        """
+        Convert app path (slash notation) to app name (dot notation) for output to MCP/user.
+        Example: "App/SubModule/Feature" -> "App.SubModule.Feature"
+        Returns None if app_path is None or empty.
+
+        Note: Pass the app_path directly (directory path), not the full file path.
+        If you have a file path like "App/Sub/func.py", use os.path.dirname() first.
+        """
+        if not app_path:
+            return None
+        # Convert path separators to dots
+        return app_path.replace(os.sep, '.')
+
     # File operations
     async def _fs_save_code(self, name: str, code: str, app: Optional[str] = None) -> Optional[str]:
         """
         Saves the provided code string to a file named {name}.py in the functions directory.
-        If app is provided, saves to a subdirectory named after the app.
+        If app is provided, saves to a subdirectory named after the app (supports dot notation).
         Uses clean_filename for basic safety. Returns the full path if successful, None otherwise.
         """
         if not name or not isinstance(name, str):
@@ -213,8 +240,10 @@ class DynamicFunctionManager:
 
         # Determine target directory based on app parameter
         if app:
-            target_dir = os.path.join(self.functions_dir, app)
-            os.makedirs(target_dir, exist_ok=True)  # Ensure app directory exists
+            # Convert dot notation to path (e.g., "App.SubModule" -> "App/SubModule")
+            app_path = self._app_name_to_path(app)
+            target_dir = os.path.join(self.functions_dir, app_path)
+            os.makedirs(target_dir, exist_ok=True)  # Ensure app directory exists (creates nested dirs)
             file_path = os.path.join(target_dir, safe_name)
         else:
             file_path = os.path.join(self.functions_dir, safe_name)
@@ -837,11 +866,8 @@ async def {name}():
                         if not is_valid:
                             # Track files with syntax errors
                             logger.error(f"❌ SYNTAX ERROR in {rel_path}: {error_message}")
-                            # Determine app name from path
-                            if '/' in rel_path:
-                                track_app_name = rel_path.split('/')[0]
-                            else:
-                                track_app_name = None
+                            # Determine app_path from file path (slash notation)
+                            track_app_path = os.path.dirname(rel_path) if '/' in rel_path else None
 
                             # Clean up error message - extract only the first line (before "Line content:")
                             clean_error = error_message.split('\n')[0] if error_message else 'unknown syntax error'
@@ -849,7 +875,7 @@ async def {name}():
                             # Track this file with syntax error
                             self._skipped_hidden_functions.append({
                                 'name': os.path.splitext(os.path.basename(rel_path))[0],  # Use filename as name
-                                'app': track_app_name,
+                                'app': track_app_path,  # Store slash path
                                 'file': rel_path,
                                 'reason': f'syntax error: {clean_error}',
                                 'is_error': True,  # Explicit flag for error conditions
@@ -883,18 +909,18 @@ async def {name}():
                                     # Use error level for invalid @protected, info level for others
                                     log_level = logger.error if has_invalid_protected else logger.info
                                     log_level(f"🙈 SKIPPING NON-VISIBLE FUNCTION: {CYAN}{func_name}{RESET} -> {rel_path} ({skip_reason})")
-                                    # Determine app name for tracking
+                                    # Determine app_path for tracking (slash notation)
                                     app_name_from_decorator = func_info.get('app_name')
                                     if app_name_from_decorator:
-                                        track_app_name = app_name_from_decorator
-                                    elif '/' in rel_path:
-                                        track_app_name = rel_path.split('/')[0]
+                                        # Convert decorator's dot notation to slash path immediately
+                                        track_app_path = self._app_name_to_path(app_name_from_decorator)
                                     else:
-                                        track_app_name = None
+                                        # Extract directory from file path
+                                        track_app_path = os.path.dirname(rel_path) if '/' in rel_path else None
                                     # Track this skipped function
                                     self._skipped_hidden_functions.append({
                                         'name': func_name,
-                                        'app': track_app_name,
+                                        'app': track_app_path,  # Store slash path
                                         'file': rel_path,
                                         'reason': skip_reason,
                                         'is_error': has_invalid_protected,  # True if error condition, False if intentional hiding
@@ -902,42 +928,42 @@ async def {name}():
                                     })
                                     continue
 
-                                # Determine app name: prioritize @app() decorator, then file path
+                                # Determine app_path: prioritize @app() decorator, then file path (always slash notation)
                                 app_name_from_decorator = func_info.get('app_name')
                                 if app_name_from_decorator:
-                                    app_name = app_name_from_decorator
-                                elif '/' in rel_path:
-                                    app_name = rel_path.split('/')[0]
+                                    # Convert decorator's dot notation to slash path immediately
+                                    app_path = self._app_name_to_path(app_name_from_decorator)
                                 else:
-                                    app_name = None
+                                    # Extract directory from file path
+                                    app_path = os.path.dirname(rel_path) if '/' in rel_path else None
 
                                 # Store in main mapping (prioritize top-level functions over app-specific ones)
-                                if func_name not in self._function_file_mapping or app_name is None:
+                                if func_name not in self._function_file_mapping or app_path is None:
                                     self._function_file_mapping[func_name] = rel_path
 
-                                # Store in app-specific mapping (use app_name as key, None if no app specified)
-                                if app_name not in self._function_file_mapping_by_app:
-                                    self._function_file_mapping_by_app[app_name] = {}
+                                # Store in app-specific mapping (use app_path as key, None if no app specified)
+                                if app_path not in self._function_file_mapping_by_app:
+                                    self._function_file_mapping_by_app[app_path] = {}
 
                                 # Check for duplicates in app-specific mapping
-                                if func_name in self._function_file_mapping_by_app[app_name]:
-                                    existing_path = self._function_file_mapping_by_app[app_name][func_name]
+                                if func_name in self._function_file_mapping_by_app[app_path]:
+                                    existing_path = self._function_file_mapping_by_app[app_path][func_name]
                                     logger.error(
-                                        f"❌ DUPLICATE FUNCTION DETECTED: '{func_name}' for app '{app_name}'\n"
+                                        f"❌ DUPLICATE FUNCTION DETECTED: '{func_name}' for app '{app_path}'\n"
                                         f"   📂 First occurrence:  {existing_path}\n"
                                         f"   📂 Second occurrence: {rel_path}\n"
                                         f"   ⚠️  This is an error - same function cannot exist in multiple files for the same app!"
                                     )
                                     # Still store it so we can report all duplicates in tools list
 
-                                self._function_file_mapping_by_app[app_name][func_name] = rel_path
+                                self._function_file_mapping_by_app[app_path][func_name] = rel_path
 
                                 # Store metadata in cache
-                                if app_name not in self._function_metadata_by_app:
-                                    self._function_metadata_by_app[app_name] = {}
-                                self._function_metadata_by_app[app_name][func_name] = func_info
+                                if app_path not in self._function_metadata_by_app:
+                                    self._function_metadata_by_app[app_path] = {}
+                                self._function_metadata_by_app[app_path][func_name] = func_info
 
-                                #logger.info(f"🎯 FOUND FUNCTION: {CYAN}{func_name}{RESET} -> {rel_path} (app: {app_name})")
+                                #logger.info(f"🎯 FOUND FUNCTION: {CYAN}{func_name}{RESET} -> {rel_path} (app_path: {app_path})")
                                 #if root != self.functions_dir:
                                 #    logger.info(f"   📁 IN SUBFOLDER: {CYAN}{os.path.basename(root)}{RESET}")
                         else:
@@ -957,12 +983,17 @@ async def {name}():
             logger.error(f"❌ Error building function-to-file mapping: {e}")
 
     async def _find_file_containing_function(self, function_name: str, app_name: Optional[str] = None) -> Optional[str]:
-        """Find which file contains the specified function."""
+        """
+        Find which file contains the specified function.
+        app_name can be in dot notation (e.g., "App.SubModule") and will be converted to slash path internally.
+        """
         await self._build_function_file_mapping()
 
         if app_name:
+            # Convert dot notation to slash path for internal lookup
+            app_path = self._app_name_to_path(app_name)
             # Look in specific app first
-            app_mapping = self._function_file_mapping_by_app.get(app_name, {})
+            app_mapping = self._function_file_mapping_by_app.get(app_path, {})
             if function_name in app_mapping:
                 return app_mapping[function_name]
             # If not found in specified app, return None (don't fall back to main mapping)
@@ -1008,7 +1039,7 @@ async def {name}():
         '''
         Creates a new function file.
         If code is provided, it saves it. Otherwise, generates and saves a stub.
-        If app is provided, creates the function in the app-specific subdirectory.
+        If app is provided, creates the function in the app-specific subdirectory (supports dot notation).
         Returns True on success, False if the function already exists or on error.
         '''
         secure_name = utils.clean_filename(name)
@@ -1028,8 +1059,10 @@ async def {name}():
 
         # Determine the correct file path based on app parameter
         if app:
-            target_dir = os.path.join(self.functions_dir, app)
-            os.makedirs(target_dir, exist_ok=True)  # Ensure app directory exists
+            # Convert dot notation to path (e.g., "App.SubModule" -> "App/SubModule")
+            app_path = self._app_name_to_path(app)
+            target_dir = os.path.join(self.functions_dir, app_path)
+            os.makedirs(target_dir, exist_ok=True)  # Ensure app directory exists (creates nested dirs)
             file_path = os.path.join(target_dir, f"{secure_name}.py")
         else:
             file_path = os.path.join(self.functions_dir, f"{secure_name}.py")
@@ -1055,7 +1088,7 @@ async def {name}():
     async def function_remove(self, name: str, app: Optional[str] = None) -> bool:
         '''
         Removes a function file by moving it to the OLD subdirectory (relative to self.functions_dir).
-        If app is provided, looks for the function in the app-specific subdirectory.
+        If app is provided, looks for the function in the app-specific subdirectory (supports dot notation).
         Returns True on success, False if the function doesn't exist or on error.
         '''
         secure_name = utils.clean_filename(name)
@@ -1065,7 +1098,9 @@ async def {name}():
 
         # Determine the correct file path based on app parameter
         if app:
-            target_dir = os.path.join(self.functions_dir, app)
+            # Convert dot notation to path (e.g., "App.SubModule" -> "App/SubModule")
+            app_path = self._app_name_to_path(app)
+            target_dir = os.path.join(self.functions_dir, app_path)
             file_path = os.path.join(target_dir, f"{secure_name}.py")
         else:
             file_path = os.path.join(self.functions_dir, f"{secure_name}.py")
@@ -1292,7 +1327,9 @@ async def {name}():
         # --- Protection Check ---
         # Retrieve function metadata from cache to check if function is protected
         await self._build_function_file_mapping()  # Ensure cache is built
-        func_metadata = self._function_metadata_by_app.get(app_name, {}).get(actual_function_name)
+        # Convert app_name (dot notation) to app_path (slash notation) for internal lookup
+        app_path = self._app_name_to_path(app_name) if app_name else None
+        func_metadata = self._function_metadata_by_app.get(app_path, {}).get(actual_function_name)
 
         if func_metadata:
             protection_name = func_metadata.get('protection_name')
@@ -1494,9 +1531,8 @@ async def {name}():
                 found_file = await self._find_file_containing_function(func_name, app_name)
                 if found_file:
                     existing_file = found_file
-                    # Extract app name from the file path if it's in a subdirectory
-                    if '/' in found_file:
-                        existing_app = found_file.split('/')[0]
+                    # Extract app_path from the file path if it's in a subdirectory (slash notation)
+                    existing_app = os.path.dirname(found_file) if '/' in found_file else None
                     logger.info(f"⚙️ Found existing function '{func_name}' in {found_file}")
                     break  # Use the first match we find
 
