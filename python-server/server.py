@@ -2138,22 +2138,28 @@ class DynamicAdditionServer(Server):
                     result_raw = [TextContent(type="text", text=upload_msg)]
 
             elif actual_function_name == "_admin_app_create":
-                # Create a new app directory with index.py containing empty index() function
+                # Create a new app directory with main.py containing empty index() function
                 app_name = args.get("appName")
                 if not app_name:
                     raise ValueError("Missing required parameter: appName")
 
                 logger.info(f"📁 ADMIN APP CREATE requested by owner: {user or 'unknown'} - App: {app_name}")
 
-                # Use the existing function_add method to create the app directory and index.py
-                # Pass None for code to use the standard stub generation
-                added = await self.function_manager.function_add("index", None, app_name)
+                # Create main.py with index() function stub
+                filename = "main"
+                function_name = "index"
+                main_stub = f'''@visible
+async def {function_name}():
+    """Main entry point for this app"""
+    return "Hello from {function_name}!"
+'''
+                added = await self.function_manager.function_add(filename, main_stub, app_name)
                 if added:
                     try:
-                        await self._notify_tool_list_changed(change_type="added", tool_name="index")
+                        await self._notify_tool_list_changed(change_type="added", tool_name=function_name)
                     except Exception as e:
-                        logger.error(f"Error sending tool notification after adding index: {str(e)}")
-                    result_raw = [TextContent(type="text", text=f"✅ Successfully created app '{app_name}' with index.py containing index() function")]
+                        logger.error(f"Error sending tool notification after adding {function_name}: {str(e)}")
+                    result_raw = [TextContent(type="text", text=f"✅ Successfully created app '{app_name}' with {filename}.py containing {function_name}() function")]
                 else:
                     error_msg = f"❌ Failed to create app '{app_name}' - app directory may already exist"
                     logger.error(f"📁 App creation failed: {error_msg}")
@@ -2214,14 +2220,14 @@ class DynamicAdditionServer(Server):
                 }
                 result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
 
-            # Handle MCP tool calls
-            elif '.' in name or ' ' in name: # <<< UPDATED Condition
+            # Handle MCP tool calls (check actual_function_name after asterisk parsing to avoid false positives from dots in app names)
+            elif '.' in actual_function_name or ' ' in actual_function_name:
 
                 # --- Handle MCP tool call ---
 
-                logger.info(f"🌐 MCP TOOL CALL: {name}")
+                logger.info(f"🌐 MCP TOOL CALL: {actual_function_name}")
                 # Split on the first occurrence of '.' or ' '
-                server_alias, tool_name_on_server = re.split('[. ]', name, 1) # <<< UPDATED Splitting
+                server_alias, tool_name_on_server = re.split('[. ]', actual_function_name, 1)
                 logger.debug(f"Parsed: Server Alias='{server_alias}', Remote Tool='{tool_name_on_server}'")
 
                 # Check if MCP server config exists and is running
