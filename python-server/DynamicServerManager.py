@@ -20,6 +20,7 @@ from state import (
     logger,
     SERVER_REQUEST_TIMEOUT
 )
+from utils import format_json_log
 
 # --- Tracking for Server Tasks (Moved from server_manager) ---
 SERVER_TASKS: dict[str, dict] = {}
@@ -255,7 +256,7 @@ class DynamicServerManager:
                                 tools_result = await asyncio.wait_for(task_info['session'].list_tools(), timeout=SERVER_REQUEST_TIMEOUT)
                                 logger.info(f"Successfully fetched {len(tools_result.tools)} tools from newly started server '{name}'")
                                 # Pretty print tools as JSON
-                                tools_json = json.dumps([tool.model_dump() for tool in tools_result.tools], indent=2)
+                                tools_json = format_json_log([tool.model_dump() for tool in tools_result.tools])
                                 logger.info(f"Tools:\n{tools_json}")
                                 return tools_result.tools
                             except Exception as e:
@@ -469,7 +470,7 @@ class DynamicServerManager:
                                 tools_result = await session.list_tools()
                                 logger.info(f"[{name}] Successfully fetched {len(tools_result.tools)} tools from running server")
                                 # Pretty print tools as JSON
-                                tools_json = json.dumps([tool.model_dump() for tool in tools_result.tools], indent=2)
+                                tools_json = format_json_log([tool.model_dump() for tool in tools_result.tools])
                                 logger.info(f"[{name}] Tools:\n{tools_json}")
                                 self.server_tasks[name]['tools_count'] = len(tools_result.tools)
                             except Exception as e:
