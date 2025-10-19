@@ -1893,14 +1893,70 @@ class DynamicAdditionServer(Server):
             elif actual_function_name == "_server_start":
                 logger.debug(f"---> Calling built-in: server_start with args: {args!r}")
                 result_raw = await self.server_manager.server_start(args, self)
+                # Wait for server to be ready before notifying clients
+                server_name = args.get('name')
+                if server_name:
+                    try:
+                        # Wait for the server to finish initializing (with timeout)
+                        task_info = self.server_manager.server_tasks.get(server_name)
+                        if task_info and 'ready_event' in task_info:
+                            logger.debug(f"Waiting for server '{server_name}' to be ready before sending notification...")
+                            await asyncio.wait_for(task_info['ready_event'].wait(), timeout=30.0)
+                            logger.info(f"Server '{server_name}' is ready, invalidating cache and regenerating tool list")
+                            # Invalidate cache to force regeneration with new server tools
+                            self._cached_tools = None
+                            # Regenerate tool list (this will log all tools including new ones from the server)
+                            await self._get_tools_list(caller_context=f"after_server_start:{server_name}")
+                            # Now send notification to clients
+                            logger.info(f"Sending tool list change notification for '{server_name}'")
+                            await self._notify_tool_list_changed(change_type="updated", tool_name=server_name)
+                        else:
+                            logger.warning(f"No ready_event found for server '{server_name}', skipping notification wait")
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Timeout waiting for server '{server_name}' to be ready, sending notification anyway")
+                        await self._notify_tool_list_changed(change_type="updated", tool_name=server_name)
+                    except Exception as e:
+                        logger.error(f"Error sending tool notification after starting server {server_name}: {str(e)}")
             elif actual_function_name == "_server_stop":
                 logger.debug(f"---> Calling built-in: server_stop with args: {args!r}")
                 result_raw = await self.server_manager.server_stop(args, self)
+                # Notify clients that tool list has changed (server stopped = tools removed)
+                server_name = args.get('name')
+                if server_name:
+                    try:
+                        logger.info(f"Server '{server_name}' stopped, invalidating cache and regenerating tool list")
+                        # Invalidate cache to force regeneration without stopped server tools
+                        self._cached_tools = None
+                        # Regenerate tool list (this will log tools without the stopped server)
+                        await self._get_tools_list(caller_context=f"after_server_stop:{server_name}")
+                        # Now send notification to clients
+                        logger.info(f"Sending tool list change notification for '{server_name}'")
+                        await self._notify_tool_list_changed(change_type="updated", tool_name=server_name)
+                    except Exception as e:
+                        logger.error(f"Error sending tool notification after stopping server {server_name}: {str(e)}")
             elif actual_function_name == "_server_get_tools":
                 server_name = args.get('name')
                 if not server_name or not isinstance(server_name, str):
                      raise ValueError("Missing or invalid 'name' argument for _server_get_tools")
-                result_raw = await self.server_manager.get_server_tools(server_name) # Pass only the name string
+                # Check if server was running before the call (to detect auto-start)
+                was_running = await self.server_manager.is_server_running(server_name)
+                result_raw = await self.server_manager.get_server_tools(server_name) # Pass only the name string (may auto-start)
+                # If server was auto-started, send notification
+                if not was_running:
+                    is_running_now = await self.server_manager.is_server_running(server_name)
+                    if is_running_now:
+                        logger.info(f"Server '{server_name}' was auto-started by get_server_tools")
+                        try:
+                            logger.info(f"Invalidating cache and regenerating tool list after auto-start")
+                            # Invalidate cache to force regeneration with new server tools
+                            self._cached_tools = None
+                            # Regenerate tool list (this will log all tools including new ones from the server)
+                            await self._get_tools_list(caller_context=f"after_autostart:{server_name}")
+                            # Now send notification to clients
+                            logger.info(f"Sending tool list change notification for '{server_name}'")
+                            await self._notify_tool_list_changed(change_type="updated", tool_name=server_name)
+                        except Exception as e:
+                            logger.error(f"Error sending tool notification after auto-starting server {server_name}: {str(e)}")
                 # Convert Tool objects to dictionaries for JSON serialization
                 if result_raw and isinstance(result_raw, list):
                     result_raw = [
@@ -1984,8 +2040,6 @@ class DynamicAdditionServer(Server):
                 result_raw = [TextContent(type="text", text="Server restart initiated. The process will terminate and should be restarted by wrapper script.")]
 
                 # Schedule termination after a brief delay to allow response to be sent
-                import asyncio
-
                 async def delayed_shutdown():
                     await asyncio.sleep(0.1)  # Brief delay to send response
                     logger.info("🛑 Sending SIGINT for graceful restart...")

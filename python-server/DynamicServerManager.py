@@ -254,7 +254,9 @@ class DynamicServerManager:
                             try:
                                 tools_result = await asyncio.wait_for(task_info['session'].list_tools(), timeout=SERVER_REQUEST_TIMEOUT)
                                 logger.info(f"Successfully fetched {len(tools_result.tools)} tools from newly started server '{name}'")
-                                logger.info(f"Tools: {tools_result.tools}")
+                                # Pretty print tools as JSON
+                                tools_json = json.dumps([tool.model_dump() for tool in tools_result.tools], indent=2)
+                                logger.info(f"Tools:\n{tools_json}")
                                 return tools_result.tools
                             except Exception as e:
                                 logger.warning(f"Failed to use newly ready session for '{name}': {e}")
@@ -326,10 +328,12 @@ class DynamicServerManager:
         if not name or not isinstance(name, str):
             return False
 
-        # Check if the server exists in server_tasks with a valid task
+        # Check if the server exists in server_tasks with a valid task and session
         return (name in self.server_tasks and
                 'task' in self.server_tasks[name] and
-                not self.server_tasks[name]['task'].done())
+                not self.server_tasks[name]['task'].done() and
+                'session' in self.server_tasks[name] and
+                self.server_tasks[name]['session'] is not None)
 
     async def get_running_servers(self) -> List[str]:
         # Filter the server_tasks to only include properly running servers
@@ -464,7 +468,9 @@ class DynamicServerManager:
                             try:
                                 tools_result = await session.list_tools()
                                 logger.info(f"[{name}] Successfully fetched {len(tools_result.tools)} tools from running server")
-                                logger.info(f"[{name}] Tools: {tools_result.tools}")
+                                # Pretty print tools as JSON
+                                tools_json = json.dumps([tool.model_dump() for tool in tools_result.tools], indent=2)
+                                logger.info(f"[{name}] Tools:\n{tools_json}")
                                 self.server_tasks[name]['tools_count'] = len(tools_result.tools)
                             except Exception as e:
                                 logger.warning(f"[{name}] Failed to fetch tools list: {e}")
@@ -718,8 +724,11 @@ class DynamicServerManager:
                 session = None
 
             if name in self.server_tasks:
-                logger.debug(f"[{name}] Removing start time from server_tasks.")
+                logger.debug(f"[{name}] Clearing session and start time from server_tasks.")
                 self.server_tasks[name]['started_at'] = None
+                self.server_tasks[name]['session'] = None
+                # Remove status field if it exists (only needed for error states)
+                self.server_tasks[name].pop('status', None)
 
     # --- 4. Server Start/Stop Methods ---
 
