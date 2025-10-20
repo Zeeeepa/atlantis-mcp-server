@@ -1906,7 +1906,10 @@ class DynamicAdditionServer(Server):
                             # Invalidate cache to force regeneration with new server tools
                             self._cached_tools = None
                             # Regenerate tool list (this will log all tools including new ones from the server)
-                            await self._get_tools_list(caller_context=f"after_server_start:{server_name}")
+                            updated_tools = await self._get_tools_list(caller_context=f"after_server_start:{server_name}")
+                            # Report the updated tool list to console
+                            logger.info(f"📊 Reporting updated tool list after MCP server '{server_name}' started...")
+                            await self.cloud_client._report_tools_to_console(tools_list=updated_tools)
                             # Now send notification to clients
                             logger.info(f"Sending tool list change notification for '{server_name}'")
                             await self._notify_tool_list_changed(change_type="updated", tool_name=server_name)
@@ -1928,7 +1931,10 @@ class DynamicAdditionServer(Server):
                         # Invalidate cache to force regeneration without stopped server tools
                         self._cached_tools = None
                         # Regenerate tool list (this will log tools without the stopped server)
-                        await self._get_tools_list(caller_context=f"after_server_stop:{server_name}")
+                        updated_tools = await self._get_tools_list(caller_context=f"after_server_stop:{server_name}")
+                        # Report the updated tool list to console
+                        logger.info(f"📊 Reporting updated tool list after MCP server '{server_name}' stopped...")
+                        await self.cloud_client._report_tools_to_console(tools_list=updated_tools)
                         # Now send notification to clients
                         logger.info(f"Sending tool list change notification for '{server_name}'")
                         await self._notify_tool_list_changed(change_type="updated", tool_name=server_name)
@@ -1951,7 +1957,10 @@ class DynamicAdditionServer(Server):
                             # Invalidate cache to force regeneration with new server tools
                             self._cached_tools = None
                             # Regenerate tool list (this will log all tools including new ones from the server)
-                            await self._get_tools_list(caller_context=f"after_autostart:{server_name}")
+                            updated_tools = await self._get_tools_list(caller_context=f"after_autostart:{server_name}")
+                            # Report the updated tool list to console
+                            logger.info(f"📊 Reporting updated tool list after MCP server '{server_name}' auto-started...")
+                            await self.cloud_client._report_tools_to_console(tools_list=updated_tools)
                             # Now send notification to clients
                             logger.info(f"Sending tool list change notification for '{server_name}'")
                             await self._notify_tool_list_changed(change_type="updated", tool_name=server_name)
@@ -2863,10 +2872,15 @@ class ServiceClient:
         # Store creation time for stable client ID
         self._creation_time = int(time.time())
 
-    async def _report_tools_to_console(self):
-        """Generate and log a formatted report of all available tools"""
+    async def _report_tools_to_console(self, tools_list=None):
+        """Generate and log a formatted report of all available tools
+
+        Args:
+            tools_list: Optional pre-fetched list of tools. If not provided, will fetch from mcp_server.
+        """
         # Get the list of tools to log them
-        tools_list = await self.mcp_server._get_tools_list(caller_context="_report_tools_to_console")
+        if tools_list is None:
+            tools_list = await self.mcp_server._get_tools_list(caller_context="_report_tools_to_console")
         # Create list with app names and source files for easier inspection of duplicates
         # Import colors for formatting (at function scope to avoid shadowing module imports)
         from ColoredFormatter import CYAN as CYAN_COLOR, YELLOW, GREY as GREY_COLOR, RESET as RESET_COLOR, BOLD as BOLD_COLOR, PINK, RED, MAGENTA
@@ -2877,6 +2891,7 @@ class ServiceClient:
         protected_info_list = []
         hidden_info_list = []
         server_info_list = []
+        mcp_tools_list = []
         internal_info_list = []
         internal_count = 0
         for tool in tools_list:
@@ -2892,6 +2907,7 @@ class ServiceClient:
             is_hidden = getattr(tool.annotations, 'temporarilyVisible', False) if hasattr(tool, 'annotations') else False
             tool_type = getattr(tool.annotations, 'type', None) if hasattr(tool, 'annotations') else None
             is_server = tool_type == 'server'  # Server entries are not callable tools
+            is_mcp_tool = tool_type == 'server_tool'  # MCP tools from external servers
 
             # Check if this is an internal tool - check the tool name regardless of app_source
             is_internal = tool.name.startswith('_admin') or tool.name.startswith('_function') or tool.name.startswith('_server')
@@ -2953,10 +2969,15 @@ class ServiceClient:
                 visibility_str += f" {MAGENTA}[INDEX]{RESET_COLOR}"
 
             # Format the line with colors
-            # Format differently for servers (no app name column), internal tools, hidden, protected, or regular
+            # Format differently for servers (no app name column), MCP tools, internal tools, hidden, protected, or regular
             if is_server:
                 formatted_line = f"{tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR}{timestamp_str}"
                 server_info_list.append((app_display, tool.name, formatted_line))
+            elif is_mcp_tool:
+                # MCP tools from external servers - extract server name from tool name
+                origin_server = getattr(tool.annotations, 'originServer', 'unknown') if hasattr(tool, 'annotations') else 'unknown'
+                formatted_line = f"{CYAN_COLOR}{origin_server:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR}{timestamp_str}"
+                mcp_tools_list.append((origin_server, tool.name, formatted_line))
             elif is_internal:
                 formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{timestamp_str}"
                 internal_info_list.append((app_display, tool.name, formatted_line))
@@ -2975,6 +2996,7 @@ class ServiceClient:
         protected_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
         hidden_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
         server_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
+        mcp_tools_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
         internal_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
 
         # Calculate counts
@@ -2989,6 +3011,12 @@ class ServiceClient:
             logger.info(f"")
             logger.info(f"  {BOLD_COLOR}Protected: {len(protected_info_list)}{RESET_COLOR}")
             for _, _, formatted_line in protected_info_list:
+                logger.info(f"    {formatted_line}")
+
+        if mcp_tools_list:
+            logger.info(f"")
+            logger.info(f"  {BOLD_COLOR}MCP Tools: {len(mcp_tools_list)}{RESET_COLOR}")
+            for _, _, formatted_line in mcp_tools_list:
                 logger.info(f"    {formatted_line}")
 
         if internal_info_list:
