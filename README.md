@@ -49,6 +49,10 @@ To add Atlantis to Claude Code, this should work:
 
 ```claude mcp add atlantis -- npx atlantis-mcp --port 8000```
 
+To add Atlantis Open Weather for testing:
+
+```claude mcp add --transport stdio weather_forecast --env OPENWEATHER_API_KEY=mykey123 -- uvx --from atlantis-open-weather-mcp start-weather-server```
+
 5. To connect to Atlantis, sign into https://www.projectatlantis.ai under the same email
 
 6. Your remote(s) should autoconnect using email and default api key = 'foobar' (see '\user api_key' command to change). The first server to connect will be assigned your 'default' unless you manually change it later
@@ -121,4 +125,105 @@ The weather MCP service is just an existing one I ported to uvx. See [here](http
 
 
 ## Cloud
+
+The cloud service at https://www.projectatlantis.ai provides a centralized hub for managing your remote servers and sharing tools across machines.
+
+### App Organization
+
+Dynamic functions are organized into apps using **folder structure**. Simply place your `.py` files in subdirectories:
+
+```
+dynamic_functions/
+├── Chat/                    # App: "Chat"
+│   └── chat.py
+├── Accounting/              # App: "Accounting"
+│   ├── accounting.py
+│   └── foo.py
+└── FilmFromImage/          # App: "FilmFromImage"
+    └── qwen_image_edit_local.py
+```
+
+**The folder name IS the app name.** Functions in `Chat/chat.py` are automatically assigned to the "Chat" app.
+
+#### Nested Apps (Subfolders)
+
+Create nested app structures using subfolders:
+
+```
+dynamic_functions/
+└── MyApp/
+    └── SubModule/
+        └── Feature/
+            └── my_function.py
+```
+
+This creates the app name: `MyApp/SubModule/Feature`
+
+**Best Practices:**
+- Keep it simple - one level of folders is usually enough
+- Use descriptive folder names (e.g., `Chat`, `Admin`, `Tools`)
+- Group related functions together in the same folder
+- The folder structure keeps your code organized and clear
+
+**Note:** The legacy `@app(name="...")` decorator still works but is **not recommended** as it can create confusion when the decorator doesn't match the folder location. Just use folders!
+
+### Tool Calling with Search Terms
+
+When calling tools, you can use **compound tool names** to disambiguate functions. **Only include as much of the path as needed to uniquely identify the function.**
+
+**Format:** `remote_owner*remote_name*app*location*function`
+
+**Key Principle: Use the simplest form that resolves uniquely**
+
+```python
+# If you have these functions:
+# - dynamic_functions/Chat/send_message.py
+# - dynamic_functions/Email/send_message.py
+# - dynamic_functions/SMS/send_message.py
+
+send_message              ❌ Ambiguous! Which one?
+**Chat**send_message      ✅ Clear! The one in Chat
+**Email**send_message     ✅ Clear! The one in Email
+```
+
+**Examples:**
+
+```
+update_image                          → Simple call (only works if unique)
+**MyApp**update_image                 → Specify app to disambiguate
+**MyApp/SubModule**process_data       → Nested app path
+alice*prod*Admin**restart             → Full routing: owner + remote + app + function
+***office*print                       → Just location context
+```
+
+**How it works:**
+- Fields: `remote_owner*remote_name*app*location*function`
+- Separate fields with `*` (asterisk)
+- **Omit fields you don't need** (use empty strings: `**App**func`)
+- The app field supports slash notation for nested apps (`MyApp/SubModule`)
+- The last field is always the function name
+- No asterisks = treat entire name as function name
+
+**When to use compound names:**
+- **Name conflicts**: Multiple apps have functions with the same name
+- **Remote targeting**: Call functions on specific remotes from the cloud
+- **Location routing**: Target functions at specific physical locations
+- **Multi-user setups**: Specify owner and remote in shared environments
+
+**Best practice:** Start simple (`update_image`) and add context only when needed to resolve ambiguity (`**ImageTools**update_image`).
+
+**Example:**
+```python
+# File: dynamic_functions/ImageTools/process.py
+@visible
+async def update_image(image_path: str):
+    """Update an image."""
+    return "updated"
+
+# If this is the ONLY update_image:
+update_image                          ✅ Works fine!
+
+# If Chat app ALSO has update_image:
+**ImageTools**update_image            ✅ Now we need to specify the app
+```
 

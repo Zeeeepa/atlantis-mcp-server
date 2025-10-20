@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import datetime
 
 # Version
-SERVER_VERSION = "2.3.1"
+SERVER_VERSION = "2.3.2"
 
 from mcp.server import Server
 
@@ -1014,7 +1014,7 @@ class DynamicAdditionServer(Server):
 
         # --- DEBUG: Log current server_tasks state before processing servers ---
         # Access server_tasks via module namespace
-        logger.debug(f"🔧 _get_tools_list: Current server_tasks state: {self.server_manager.server_tasks!r}")
+        logger.debug(f"🔧 _get_tools_list: Current server_tasks state:\n{format_json_log(self.server_manager.server_tasks)}")
 
         # Scan dynamic servers
         servers_found = []
@@ -1665,7 +1665,7 @@ class DynamicAdditionServer(Server):
         if session_id:
             logger.debug(f"SESSION ID: {session_id}")
         # ---> ADDED: Log entry and raw args
-        logger.debug(f"---> _execute_tool ENTERED. Name: '{name}', Raw Args: {args!r}") # <-- ADD THIS LINE
+        logger.debug(f"---> _execute_tool ENTERED. Name: '{name}', Raw Args:\n{format_json_log(args) if isinstance(args, dict) else args!r}") # <-- ADD THIS LINE
 
         # Parse compound tool names by splitting on '*'
         # Format: "remote_owner*remote_name*app*location*function" (empty fields allowed)
@@ -1857,7 +1857,7 @@ class DynamicAdditionServer(Server):
                 else:
                     result_raw = [TextContent(type="text", text=f"Failed to remove server '{svc_name}'.")]
             elif actual_function_name == "_server_set":
-                logger.debug(f"---> Calling built-in: server_set with args: {args!r}")
+                logger.debug(f"---> Calling built-in: server_set with args:\n{format_json_log(args)}")
                 # Extract the config from the args dictionary
                 config = args.get("config")
                 if not config:
@@ -1891,7 +1891,7 @@ class DynamicAdditionServer(Server):
                 logger.debug(f"---> Calling built-in: server_validate for '{svc_name}'")
                 result_raw = await self.server_manager.server_validate(svc_name)
             elif actual_function_name == "_server_start":
-                logger.debug(f"---> Calling built-in: server_start with args: {args!r}")
+                logger.debug(f"---> Calling built-in: server_start with args:\n{format_json_log(args)}")
                 result_raw = await self.server_manager.server_start(args, self)
                 # Wait for server to be ready before notifying clients
                 server_name = args.get('name')
@@ -1921,7 +1921,7 @@ class DynamicAdditionServer(Server):
                     except Exception as e:
                         logger.error(f"Error sending tool notification after starting server {server_name}: {str(e)}")
             elif actual_function_name == "_server_stop":
-                logger.debug(f"---> Calling built-in: server_stop with args: {args!r}")
+                logger.debug(f"---> Calling built-in: server_stop with args:\n{format_json_log(args)}")
                 result_raw = await self.server_manager.server_stop(args, self)
                 # Notify clients that tool list has changed (server stopped = tools removed)
                 server_name = args.get('name')
@@ -2381,7 +2381,7 @@ async def {function_name}():
                 try:
                     # Dynamic functions are directly handled by name matching
                     # Add detailed logging to show exactly what we're receiving from the cloud
-                    logger.info(f"RECEIVED FROM CLOUD: Tool: '{name}', Raw Args: {args!r}, Type: {type(args)}")
+                    logger.info(f"RECEIVED FROM CLOUD: Tool: '{name}', Type: {type(args)}, Raw Args:\n{format_json_log(args) if isinstance(args, dict) else args!r}")
                     if user:
                         logger.info(f"Call made by user: {user}")
                     logger.debug(f"---> Calling dynamic: function_call for '{actual_function_name}' with args: {args} and client_id: {client_id} and request_id: {request_id}, user: {user}") # Log args and client_id separately
@@ -2461,9 +2461,9 @@ async def {function_name}():
                         # Not JSON or can't parse, just log as-is
                         logger.debug(f"<--- _execute_tool RETURNING final result with text:\n{first_item.text}")
                 else:
-                    logger.debug(f"<--- _execute_tool RETURNING final result: {final_result!r}")
+                    logger.debug(f"<--- _execute_tool RETURNING final result:\n{format_json_log(final_result) if isinstance(final_result, dict) else final_result!r}")
             else:
-                logger.debug(f"<--- _execute_tool RETURNING final result: {final_result!r}")
+                logger.debug(f"<--- _execute_tool RETURNING final result:\n{format_json_log(final_result) if isinstance(final_result, dict) else final_result!r}")
 
             # --- Log successful tool call ---
             if should_log_call:
