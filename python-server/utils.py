@@ -21,9 +21,9 @@ Provides easy access to client-side logging and other shared functionality.
 # Empty function for filename cleaning - placeholder for future implementation
 def clean_filename(name: str) -> str:
     """
-    Cleans/sanitizes a filename for filesystem usage.
+    Validates and cleans a filename for filesystem usage.
+    For function names, enforces Python identifier rules.
     Checks for double .py extensions and throws an exception if found.
-    Also provides basic filename sanitization.
 
     Args:
         name: The filename to clean
@@ -32,7 +32,7 @@ def clean_filename(name: str) -> str:
         Cleaned filename safe for filesystem usage
 
     Raises:
-        ValueError: If the filename ends with .py.py (double extension)
+        ValueError: If the filename is invalid or contains illegal characters
     """
     if not name or not isinstance(name, str):
         raise ValueError("Invalid filename: must be a non-empty string")
@@ -41,23 +41,23 @@ def clean_filename(name: str) -> str:
     if name.endswith('.py.py'):
         raise ValueError(f"Invalid filename '{name}': ends with double .py extension. Please provide a name without the .py suffix.")
 
-    # Basic sanitization - remove or replace problematic characters
-    # Replace spaces with underscores
-    cleaned = name.replace(' ', '_')
-
-    # Remove or replace other problematic characters
+    # Validate as a Python identifier (function names must be valid Python identifiers)
     import re
-    # Remove characters that are problematic in filenames, but preserve forward slashes for directory paths
-    cleaned = re.sub(r'[<>:"\\|?*]', '', cleaned)
 
-    # Remove leading/trailing dots and spaces
-    cleaned = cleaned.strip('. ')
+    # Python identifier rules: must start with letter or underscore, followed by letters, digits, or underscores
+    # This rejects dots, asterisks, hyphens, and other special characters
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name):
+        # Provide helpful error message about what's wrong
+        invalid_chars = re.findall(r'[^a-zA-Z0-9_]', name)
+        if invalid_chars:
+            invalid_chars_str = ', '.join(f"'{c}'" for c in sorted(set(invalid_chars)))
+            raise ValueError(f"Invalid function name '{name}': contains illegal characters: {invalid_chars_str}. Function names must contain only letters, digits, and underscores, and must start with a letter or underscore.")
+        elif name[0].isdigit():
+            raise ValueError(f"Invalid function name '{name}': cannot start with a digit. Function names must start with a letter or underscore.")
+        else:
+            raise ValueError(f"Invalid function name '{name}': must be a valid Python identifier.")
 
-    # Ensure the result is not empty
-    if not cleaned:
-        raise ValueError("Invalid filename: results in empty string after cleaning")
-
-    return cleaned
+    return name
 
 # Global server reference to be set at startup
 _server_instance = None

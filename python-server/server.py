@@ -1754,25 +1754,21 @@ class DynamicAdditionServer(Server):
                     result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
                 else:
                     # Function exists, continue with removing it
-                    removed = await self.function_manager.function_remove(func_name, app_name)
-                    if removed:
-                        try:
-                            await self._notify_tool_list_changed(change_type="removed", tool_name=func_name) # Pass params
-                        except Exception as e:
-                            logger.error(f"Error sending tool notification after removing {func_name}: {str(e)}")
-                        result_raw = [TextContent(type="text", text=f"Function '{func_name}' removed successfully.")] # <-- Success message
-                    else:
-                        # Raise error to be caught by the main handler
-                        raise RuntimeError(f"Function '{func_name}' could not be removed (function_remove returned False). Check logs.")
+                    await self.function_manager.function_remove(func_name, app_name)
+                    try:
+                        await self._notify_tool_list_changed(change_type="removed", tool_name=func_name) # Pass params
+                    except Exception as e:
+                        logger.error(f"Error sending tool notification after removing {func_name}: {str(e)}")
+                    result_raw = [TextContent(type="text", text=f"Function '{func_name}' removed successfully.")] # <-- Success message
 
             elif actual_function_name == "_function_add":
                 # Add empty function
+                logger.debug(f"---> Calling built-in: function_add with args:\n{format_json_log(args)}")
+
                 func_name = args.get("name")
                 app_name = args.get("app")  # Optional app name for disambiguation
                 if not func_name:
                     raise ValueError("Missing required parameter: name")
-
-                logger.debug(f"---> Calling built-in: function_add for '{func_name}'" + (f" (app: {app_name})" if app_name else ""))
 
                 # Check if function already exists using the function mapping (supports subfolders and app-specific lookup)
                 function_file = await self.function_manager._find_file_containing_function(func_name, app_name)
@@ -1810,16 +1806,12 @@ class DynamicAdditionServer(Server):
                     result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
                 else:
                     # Function doesn't exist, create it
-                    added = await self.function_manager.function_add(func_name, None, app_name)
-                    if added:
-                        try:
-                            await self._notify_tool_list_changed(change_type="added", tool_name=func_name) # Pass params
-                        except Exception as e:
-                            logger.error(f"Error sending tool notification after adding {func_name}: {str(e)}")
-                        result_raw = [TextContent(type="text", text=f"Empty function '{func_name}' created successfully.")] # <-- Success message
-                    else:
-                        # Raise error to be caught by the main handler
-                        raise RuntimeError(f"Function '{func_name}' could not be added (function_add returned False). Check logs.")
+                    await self.function_manager.function_add(func_name, None, app_name)
+                    try:
+                        await self._notify_tool_list_changed(change_type="added", tool_name=func_name) # Pass params
+                    except Exception as e:
+                        logger.error(f"Error sending tool notification after adding {func_name}: {str(e)}")
+                    result_raw = [TextContent(type="text", text=f"Empty function '{func_name}' created successfully.")] # <-- Success message
 
             elif actual_function_name == "_server_get":
                 svc_name = args.get("name")
@@ -2216,17 +2208,12 @@ async def {function_name}():
     """Main entry point for this app"""
     return "Hello from {function_name}!"
 '''
-                added = await self.function_manager.function_add(filename, main_stub, app_name)
-                if added:
-                    try:
-                        await self._notify_tool_list_changed(change_type="added", tool_name=function_name)
-                    except Exception as e:
-                        logger.error(f"Error sending tool notification after adding {function_name}: {str(e)}")
-                    result_raw = [TextContent(type="text", text=f"✅ Successfully created app '{app_name}' with {filename}.py containing {function_name}() function")]
-                else:
-                    error_msg = f"❌ Failed to create app '{app_name}' - app directory may already exist"
-                    logger.error(f"📁 App creation failed: {error_msg}")
-                    result_raw = [TextContent(type="text", text=error_msg)]
+                await self.function_manager.function_add(filename, main_stub, app_name)
+                try:
+                    await self._notify_tool_list_changed(change_type="added", tool_name=function_name)
+                except Exception as e:
+                    logger.error(f"Error sending tool notification after adding {function_name}: {str(e)}")
+                result_raw = [TextContent(type="text", text=f"✅ Successfully created app '{app_name}' with {filename}.py containing {function_name}() function")]
 
             elif actual_function_name == "_admin_git_update":
                 # Update server code by running git fetch and git merge
@@ -2777,7 +2764,9 @@ async def get_all_tools_for_response(server: 'DynamicAdditionServer', caller_con
                         logger.debug(f"🔎 Adding started_at to TOP LEVEL for '{tool_dict.get('name')}': {started_at_val}")
                         tool_dict['started_at'] = started_at_val
                 else:
-                    logger.debug(f"❌ Started_at MISSING in serialized tool dict for '{tool_dict.get('name')}'!")
+                    # This is normal for stopped servers
+                    running_status = annotations.get('runningStatus', 'unknown')
+                    logger.debug(f"ℹ️ MCP server '{tool_dict.get('name')}' not started (status: {running_status})")
 
             tools_dict_list.append(tool_dict)
         except Exception as e:

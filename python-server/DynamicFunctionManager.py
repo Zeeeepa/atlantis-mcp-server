@@ -788,13 +788,17 @@ class DynamicFunctionManager:
 
         stub = f"""\
 import atlantis
+import logging
+
+logger = logging.getLogger("mcp_server")
+
 
 @visible
 async def {name}():
     \"\"\"
     This is a placeholder function for '{name}'
     \"\"\"
-    print(f"Executing placeholder function: {name}...")
+    logger.info(f"Executing placeholder function: {name}...")
 
     await atlantis.client_log("{name} running")
 
@@ -1040,12 +1044,13 @@ async def {name}():
         Creates a new function file.
         If code is provided, it saves it. Otherwise, generates and saves a stub.
         If app is provided, creates the function in the app-specific subdirectory (supports dot notation).
-        Returns True on success, False if the function already exists or on error.
+        Returns True on success, raises ValueError/IOError/RuntimeError on failure.
         '''
         secure_name = utils.clean_filename(name)
         if not secure_name:
-            logger.error(f"Create failed: Invalid function name '{name}'")
-            return False
+            error_msg = f"Invalid function name '{name}'"
+            logger.error(f"Create failed: {error_msg}")
+            raise ValueError(error_msg)
 
         # Check for reserved function name prefixes
         if name.startswith('_admin') or name.startswith('_function') or name.startswith('_server'):
@@ -1068,8 +1073,9 @@ async def {name}():
             file_path = os.path.join(self.functions_dir, f"{secure_name}.py")
 
         if os.path.exists(file_path):
-            logger.warning(f"Create failed: Function '{secure_name}' already exists.")
-            return False
+            error_msg = f"Function '{secure_name}' already exists"
+            logger.warning(f"Create failed: {error_msg}")
+            raise ValueError(error_msg)
 
         try:
             code_to_save = code if code is not None else self._code_generate_stub(secure_name)
@@ -1077,24 +1083,29 @@ async def {name}():
                 logger.info(f"Function '{secure_name}' created successfully.")
                 return True
             else:
-                logger.error(f"Create failed: Could not save code for '{secure_name}'.")
-                return False
+                error_msg = f"Could not save code for '{secure_name}'"
+                logger.error(f"Create failed: {error_msg}")
+                raise IOError(error_msg)
+        except (ValueError, IOError):
+            raise
         except Exception as e:
-            logger.error(f"Error during function creation for '{secure_name}': {e}")
+            error_msg = f"Error during function creation for '{secure_name}': {e}"
+            logger.error(error_msg)
             logger.debug(traceback.format_exc())
-            return False
+            raise RuntimeError(error_msg) from e
 
 
     async def function_remove(self, name: str, app: Optional[str] = None) -> bool:
         '''
         Removes a function file by moving it to the OLD subdirectory (relative to self.functions_dir).
         If app is provided, looks for the function in the app-specific subdirectory (supports dot notation).
-        Returns True on success, False if the function doesn't exist or on error.
+        Returns True on success, raises ValueError/FileNotFoundError/RuntimeError on failure.
         '''
         secure_name = utils.clean_filename(name)
         if not secure_name:
-            logger.error(f"Remove failed: Invalid function name '{name}'")
-            return False
+            error_msg = f"Invalid function name '{name}'"
+            logger.error(f"Remove failed: {error_msg}")
+            raise ValueError(error_msg)
 
         # Determine the correct file path based on app parameter
         if app:
@@ -1109,8 +1120,9 @@ async def {name}():
 
 
         if not os.path.exists(file_path):
-            logger.warning(f"⚠️ function_remove: File not found for '{secure_name}' at {file_path}")
-            return False
+            error_msg = f"Function '{secure_name}' not found at {file_path}"
+            logger.warning(f"⚠️ function_remove: {error_msg}")
+            raise FileNotFoundError(error_msg)
         try:
             # Ensure the OLD directory exists (it should be created by __init__)
             os.makedirs(self.old_dir, exist_ok=True)
@@ -1128,10 +1140,11 @@ async def {name}():
                     logger.warning(f"⚠️ Could not remove log file {log_file_path}: {e}")
             return True
         except Exception as e:
-            logger.error(f"❌ function_remove: Failed to remove function '{secure_name}': {e}")
+            error_msg = f"Failed to remove function '{secure_name}': {e}"
+            logger.error(f"❌ function_remove: {error_msg}")
             logger.debug(traceback.format_exc())
             await self._write_error_log(secure_name, f"Failed to remove: {e}") # Use self._write_error_log
-            return False
+            raise RuntimeError(error_msg) from e
 
     async def _write_error_log(self, name: str, error_message: str) -> None: # Made it async to match caller, added self
         '''
