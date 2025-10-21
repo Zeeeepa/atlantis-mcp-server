@@ -284,6 +284,10 @@ class DynamicConfigEventHandler(FileSystemEventHandler):
     def on_deleted(self, event):
         if not event.is_directory:
             self._trigger_reload(event.src_path)
+        # Also trigger on directory deletion (removed app directories)
+        elif event.src_path.startswith(FUNCTIONS_DIR + os.sep):
+            logger.info(f"📁 Directory deleted: {event.src_path}. Triggering reload...")
+            self._trigger_reload(event.src_path)
 
     def on_moved(self, event):
         if not event.is_directory:

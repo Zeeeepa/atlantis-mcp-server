@@ -226,32 +226,34 @@ class DynamicFunctionManager:
     # File operations
     async def _fs_save_code(self, name: str, code: str, app: Optional[str] = None) -> Optional[str]:
         """
-        Saves the provided code string to a file named {name}.py in the functions directory.
-        If app is provided, saves to a subdirectory named after the app (supports dot notation).
-        Uses clean_filename for basic safety. Returns the full path if successful, None otherwise.
+        Saves the provided code string to a file named main.py in the app directory.
+        The directory path is determined by converting the app name's dots to slashes.
+        For example, app="Examples.Markdown" saves to dynamic_functions/Examples/Markdown/main.py
+
+        Args:
+            name: Function name (unused, kept for API compatibility)
+            code: The code to save
+            app: App name in dot notation (e.g., "Examples.Markdown")
+
+        Returns:
+            Full path if successful, None otherwise.
         """
-        if not name or not isinstance(name, str):
-            logger.error("❌ _fs_save_code: Invalid name provided.")
+        if not app:
+            logger.error("❌ _fs_save_code: app parameter is required")
             return None
 
-        safe_name = utils.clean_filename(f"{name}.py")
-        if not safe_name.endswith(".py"): # Ensure it's still a python file after securing
-             safe_name = f"{name}.py" # Fallback if clean_filename removes extension (less likely)
+        # Convert dot notation to path (e.g., "Examples.Markdown" -> "Examples/Markdown")
+        app_path = self._app_name_to_path(app)
+        target_dir = os.path.join(self.functions_dir, app_path)
+        os.makedirs(target_dir, exist_ok=True)  # Ensure app directory exists (creates nested dirs)
 
-        # Determine target directory based on app parameter
-        if app:
-            # Convert dot notation to path (e.g., "App.SubModule" -> "App/SubModule")
-            app_path = self._app_name_to_path(app)
-            target_dir = os.path.join(self.functions_dir, app_path)
-            os.makedirs(target_dir, exist_ok=True)  # Ensure app directory exists (creates nested dirs)
-            file_path = os.path.join(target_dir, safe_name)
-        else:
-            file_path = os.path.join(self.functions_dir, safe_name)
+        # Filename is always main.py
+        file_path = os.path.join(target_dir, "main.py")
 
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(code)
-            logger.debug(f"💾 Saved code for '{name}' to {file_path}")
+            logger.debug(f"💾 Saved code to {file_path}")
             return file_path
         except IOError as e:
             logger.error(f"❌ _fs_save_code: Failed to write file {file_path}: {e}")
