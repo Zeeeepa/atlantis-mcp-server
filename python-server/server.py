@@ -631,6 +631,13 @@ class DynamicAdditionServer(Server):
                             if is_index_from_info:
                                 tool_annotations["is_index"] = True
 
+                            # Add pricing information to annotations if present in function_info
+                            price_per_call = func_info.get("price_per_call")
+                            price_per_sec = func_info.get("price_per_sec")
+                            if price_per_call is not None and price_per_sec is not None:
+                                tool_annotations["price_per_call"] = price_per_call
+                                tool_annotations["price_per_sec"] = price_per_sec
+
                             # Add runtime error message if present in cache
                             if tool_name in _runtime_errors:
                                 tool_annotations["runtimeError"] = _runtime_errors[tool_name]
@@ -2204,14 +2211,11 @@ class DynamicAdditionServer(Server):
 
                 logger.info(f"📁 ADMIN APP CREATE requested by owner: {user or 'unknown'} - App: {app_name}")
 
-                # Create main.py with index() function stub
+                # Create main.py with index() function stub using the proper stub generator
                 filename = "main"
                 function_name = "index"
-                main_stub = f'''@visible
-async def {function_name}():
-    """Main entry point for this app"""
-    return "Hello from {function_name}!"
-'''
+                # Use the DynamicFunctionManager's stub generator for consistency
+                main_stub = self.function_manager._code_generate_stub(function_name)
                 await self.function_manager.function_add(filename, main_stub, app_name)
                 try:
                     await self._notify_tool_list_changed(change_type="added", tool_name=function_name)

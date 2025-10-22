@@ -176,6 +176,30 @@ def index(func):
     setattr(func, '_is_index', True)
     return func
 
+# --- Price Decorator Definition ---
+def price(pricePerCall: float, pricePerSec: float):
+    """
+    Decorator that associates pricing information with a function.
+    When applied, the function will have pricing metadata for billing purposes.
+
+    Usage: @price(pricePerCall=0.01, pricePerSec=0.001)
+           def my_paid_function():
+               # This function has associated pricing
+               ...
+
+    Args:
+        pricePerCall: Price charged per function call (float)
+        pricePerSec: Price charged per second of execution (float)
+    """
+    def decorator(func):
+        # Mark the function with pricing information
+        setattr(func, '_has_price', True)
+        setattr(func, '_price_per_call', pricePerCall)
+        setattr(func, '_price_per_sec', pricePerSec)
+        return func
+
+    return decorator
+
 class DynamicFunctionManager:
     def __init__(self, functions_dir):
         # State that was previously global
@@ -644,12 +668,14 @@ class DynamicFunctionManager:
                     docstring = ast.get_docstring(func_def_node)
                     input_schema = {"type": "object"} # Default empty schema
 
-                    # Extract decorators, app_name, location_name, protection_name, and is_index
+                    # Extract decorators, app_name, location_name, protection_name, is_index, and price
                     decorator_names = []
                     app_name_from_decorator = None # Initialize app_name
                     location_name_from_decorator = None # Initialize location_name
                     protection_name_from_decorator = None # Initialize protection_name
                     is_index_from_decorator = False # Initialize is_index
+                    price_per_call_from_decorator = None # Initialize price_per_call
+                    price_per_sec_from_decorator = None # Initialize price_per_sec
                     if func_def_node.decorator_list:
                         for decorator_node in func_def_node.decorator_list:
                             if isinstance(decorator_node, ast.Name): # e.g. @public, @hidden, @index
@@ -728,7 +754,28 @@ class DynamicFunctionManager:
                                             logger.error(f"❌ @protected decorator used on {func_def_node.name} but 'name' argument was not found or not a string.")
                                         # Add 'protected' to decorator_names so visibility check works
                                         decorator_names.append('protected')
-                                    else: # It's a call decorator but not 'app', 'location', or 'protected'
+                                    elif decorator_func_name == 'price':
+                                        # Extract pricePerCall and pricePerSec arguments from @price(pricePerCall=..., pricePerSec=...)
+                                        # or positional @price(0.01, 0.001)
+                                        if decorator_node.keywords: # Check keyword arguments
+                                            for kw in decorator_node.keywords:
+                                                if kw.arg == 'pricePerCall' and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, (int, float)):
+                                                    price_per_call_from_decorator = float(kw.value.value)
+                                                elif kw.arg == 'pricePerSec' and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, (int, float)):
+                                                    price_per_sec_from_decorator = float(kw.value.value)
+                                        # Positional arguments like @price(0.01, 0.001)
+                                        if decorator_node.args:
+                                            if len(decorator_node.args) >= 1 and isinstance(decorator_node.args[0], ast.Constant) and isinstance(decorator_node.args[0].value, (int, float)):
+                                                price_per_call_from_decorator = float(decorator_node.args[0].value)
+                                            if len(decorator_node.args) >= 2 and isinstance(decorator_node.args[1], ast.Constant) and isinstance(decorator_node.args[1].value, (int, float)):
+                                                price_per_sec_from_decorator = float(decorator_node.args[1].value)
+
+                                        # Validate that both parameters were provided
+                                        if price_per_call_from_decorator is None or price_per_sec_from_decorator is None:
+                                            logger.error(f"❌ @price decorator used on {func_def_node.name} but both 'pricePerCall' and 'pricePerSec' arguments are required.")
+                                        # Add 'price' to decorator_names
+                                        decorator_names.append('price')
+                                    else: # It's a call decorator but not 'app', 'location', 'protected', or 'price'
                                         decorator_names.append(decorator_func_name)
                                 else: # Decorator call but func is not a simple Name (e.g. @obj.deco())
                                     # Try to reconstruct its name, could be complex e.g. ast.Attribute
@@ -753,7 +800,9 @@ class DynamicFunctionManager:
                         "app_name": app_name_from_decorator, # Add extracted app_name
                         "location_name": location_name_from_decorator, # Add extracted location_name
                         "protection_name": protection_name_from_decorator, # Add extracted protection_name
-                        "is_index": is_index_from_decorator # Add extracted is_index flag
+                        "is_index": is_index_from_decorator, # Add extracted is_index flag
+                        "price_per_call": price_per_call_from_decorator, # Add extracted price_per_call
+                        "price_per_sec": price_per_sec_from_decorator # Add extracted price_per_sec
                     }
                     functions_info.append(function_info)
 
@@ -1313,6 +1362,8 @@ async def {name}():
                         module.__dict__['protected'] = protected
                         # Add index decorator
                         module.__dict__['index'] = index
+                        # Add price decorator
+                        module.__dict__['price'] = price
                         # Add other known decorator names here if they arise
 
                         spec.loader.exec_module(module)
