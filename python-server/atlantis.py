@@ -3,10 +3,13 @@ import inspect # Ensure inspect is imported
 import asyncio # Added for Lock
 from typing import Callable, Optional, Any, List # Added List
 from utils import client_log as util_client_log # For client_log, client_image, client_html
-from utils import execute_client_command_awaitable # For client_command
+from utils import execute_client_command_awaitable, format_json_log # For client_command
 import uuid
 import os
+import os.path
 import json
+import base64
+import logging
 from datetime import datetime, timezone
 
 # --- Context Variables ---
@@ -338,9 +341,6 @@ def image_to_base64(image_path: str) -> str:
         FileNotFoundError: If the image file doesn't exist
         IOError: If there's an error reading the file
     """
-    import base64
-    import os.path
-
     # Verify file exists to provide a helpful error
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"Image file not found: {image_path}")
@@ -525,7 +525,6 @@ async def client_command(command: str, data: Any = None) -> Any:
 
         print(f"INFO: Atlantis: Sending awaitable command '{command}' for client {client_id}, request {request_id}, seq {current_seq_to_send}")
         if isinstance(data, dict):
-            from utils import format_json_log
             print(f"INFO: Atlantis: Command data type: {type(data)}, data:\n{format_json_log(data)}")
         else:
             print(f"INFO: Atlantis: Command data type: {type(data)}, data: {data}")
@@ -748,7 +747,6 @@ async def invoke_click_callback(key: str) -> Any:
     Returns:
         The result of the callback function, or None if key not found
     """
-    import logging
     logger = logging.getLogger("mcp_server")
     logger.info(f"DEBUG: Looking up callback for key '{key}', available keys: {list(_click_callbacks.keys())}")
 
@@ -779,7 +777,6 @@ async def invoke_click_callback_with_context(key: str, bound_client_log) -> Any:
     Returns:
         The result of the callback function, or None if key not found
     """
-    import logging
     logger = logging.getLogger("mcp_server")
     logger.info(f"DEBUG: Looking up callback for key '{key}' with context")
 

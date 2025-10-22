@@ -4,6 +4,8 @@ import psutil
 import logging
 import json
 import asyncio
+import re
+import traceback
 from state import logger
 from typing import Any, Optional
 
@@ -42,8 +44,6 @@ def clean_filename(name: str) -> str:
         raise ValueError(f"Invalid filename '{name}': ends with double .py extension. Please provide a name without the .py suffix.")
 
     # Validate as a Python identifier (function names must be valid Python identifiers)
-    import re
-
     # Python identifier rules: must start with letter or underscore, followed by letters, digits, or underscores
     # This rejects dots, asterisks, hyphens, and other special characters
     if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name):
@@ -150,7 +150,6 @@ async def client_log(
                 except Exception as task_e:
                     logger.error(f"❌ Error in send_log_task: {task_e}")
                     logger.error(f"❌ Exception details: {type(task_e).__name__}: {task_e}")
-                    import traceback
                     logger.error(f"❌ Traceback: {traceback.format_exc()}")
 
             asyncio.create_task(send_log_task())
@@ -159,7 +158,6 @@ async def client_log(
         except Exception as e:
             logger.error(f"❌ Error in awaitable client_log: {e}")
             logger.error(f"❌ Exception details: {type(e).__name__}: {e}")
-            import traceback
             logger.error(f"❌ Traceback: {traceback.format_exc()}")
             raise # Re-raise the exception so the caller (atlantis.py) can handle it
     else:
@@ -252,8 +250,6 @@ def format_json_log(data: dict, colored: bool = True) -> str:
         BOOL_COLOR = "\x1b[32m"     # Green for booleans
         NULL_COLOR = "\x1b[90m"     # Grey for null
         RESET = "\x1b[0m"
-
-        import re
 
         # Color keys (strings followed by colon)
         json_str = re.sub(r'"([^"]+)"\s*:', rf'{KEY_COLOR}"\1"{RESET}:', json_str)

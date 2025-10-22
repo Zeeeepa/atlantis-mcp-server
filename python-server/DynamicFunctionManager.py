@@ -1549,9 +1549,6 @@ async def {name}():
             # Return the detailed error message
             return {'valid': False, 'error': error_message, 'function_info': None}
 
-    import inspect # Add import
-    import atlantis
-
     async def function_set(self, args: Dict[str, Any], server: Any) -> Tuple[Optional[str], List[TextContent]]:
         """
         Handles the _function_set tool call.

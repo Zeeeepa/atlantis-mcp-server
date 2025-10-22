@@ -10,6 +10,7 @@ import logging
 import pathlib
 import shutil
 import datetime
+import traceback
 from typing import Any, Dict, Optional, List, Tuple, Union
 
 from mcp import ClientSession, StdioServerParameters, stdio_client
@@ -584,7 +585,6 @@ class DynamicServerManager:
 
                         # Try to look at process stdout/stderr that might be in logs but not in buffer yet
                         # This is a direct debug log of the timeout error
-                        import traceback
                         tb_str = traceback.format_exc()
                         logger.debug(f"[{name}] Timeout full traceback: {tb_str}")
 

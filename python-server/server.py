@@ -19,6 +19,10 @@ from utils import clean_filename, format_json_log
 from PIDManager import PIDManager
 from typing import Any, Callable, Dict, List, Optional, Union
 import datetime
+import humanize
+import subprocess
+import traceback
+from collections import defaultdict
 
 # Version
 SERVER_VERSION = "2.3.2"
@@ -126,7 +130,11 @@ CLOUD_CONNECTION_MAX_BACKOFF_SECONDS = 15  # Maximum delay for exponential backo
 
 
 # Import color constants directly from ColoredFormatter
-from ColoredFormatter import BOLD, RESET, CYAN, BRIGHT_WHITE, PINK
+from ColoredFormatter import (
+    BOLD, RESET, CYAN, BRIGHT_WHITE, PINK,
+    CYAN as CYAN_COLOR, YELLOW, GREY as GREY_COLOR,
+    RESET as RESET_COLOR, BOLD as BOLD_COLOR, RED, MAGENTA
+)
 
 # Import dynamic management classes
 from DynamicFunctionManager import DynamicFunctionManager
@@ -1634,7 +1642,6 @@ class DynamicAdditionServer(Server):
             # ONLY send to the specific client that made the request - NO broadcasting
             if client_id and client_id in client_connections:
                 # Convert to JSON string
-                import json
                 notification_json = json.dumps(notification)
 
 
@@ -1663,7 +1670,6 @@ class DynamicAdditionServer(Server):
         except Exception as e:
             # Don't let logging errors affect the main operation
             logger.error(f"❌ Error sending direct client log notification: {str(e)}")
-            import traceback
             logger.debug(f"Log notification error details: {traceback.format_exc()}")
             # We intentionally don't re-raise here
 
@@ -2077,7 +2083,6 @@ class DynamicAdditionServer(Server):
 
                 try:
                     # Run pip install command
-                    import subprocess
                     result = subprocess.run(
                         pip_cmd,
                         capture_output=True,
@@ -2231,8 +2236,6 @@ class DynamicAdditionServer(Server):
                 logger.info(f"🔄 ADMIN GIT UPDATE requested by owner: {user or 'unknown'} - Remote: {remote}, Branch: {branch}")
 
                 try:
-                    import subprocess
-
                     # Run git fetch
                     fetch_result = subprocess.run(
                         ["git", "fetch", remote],
@@ -2879,10 +2882,6 @@ class ServiceClient:
         if tools_list is None:
             tools_list = await self.mcp_server._get_tools_list(caller_context="_report_tools_to_console")
         # Create list with app names and source files for easier inspection of duplicates
-        # Import colors for formatting (at function scope to avoid shadowing module imports)
-        from ColoredFormatter import CYAN as CYAN_COLOR, YELLOW, GREY as GREY_COLOR, RESET as RESET_COLOR, BOLD as BOLD_COLOR, PINK, RED, MAGENTA
-
-        import humanize
 
         tool_info_list = []
         protected_info_list = []
@@ -2899,6 +2898,8 @@ class ServiceClient:
             decorators = getattr(tool.annotations, 'decorators', []) if hasattr(tool, 'annotations') else []
             protection_name = getattr(tool.annotations, 'protection_name', None) if hasattr(tool, 'annotations') else None
             is_index = getattr(tool.annotations, 'is_index', False) if hasattr(tool, 'annotations') else False
+            price_per_call = getattr(tool.annotations, 'price_per_call', None) if hasattr(tool, 'annotations') else None
+            price_per_sec = getattr(tool.annotations, 'price_per_sec', None) if hasattr(tool, 'annotations') else None
 
             # Check if tool is hidden
             is_hidden = getattr(tool.annotations, 'temporarilyVisible', False) if hasattr(tool, 'annotations') else False
@@ -2963,7 +2964,11 @@ class ServiceClient:
 
             # Add index indicator if function is marked as index
             if is_index:
-                visibility_str += f" {MAGENTA}[INDEX]{RESET_COLOR}"
+                visibility_str += f" {BRIGHT_WHITE}[@index]{RESET_COLOR}"
+
+            # Add pricing information if available
+            if price_per_call is not None and price_per_sec is not None:
+                visibility_str += f" {CYAN_COLOR}[${price_per_call:.4f}/call ${price_per_sec:.4f}/sec]{RESET_COLOR}"
 
             # Format the line with colors
             # Format differently for servers (no app name column), MCP tools, internal tools, hidden, protected, or regular
@@ -3069,7 +3074,6 @@ class ServiceClient:
                 logger.info(f"    {formatted_line}")
 
         # App summary section
-        from collections import defaultdict
         app_counts = defaultdict(int)
         for app_display, _, _ in tool_info_list:
             app_counts[app_display] += 1
@@ -3185,7 +3189,6 @@ class ServiceClient:
                 logger.error(f"❌ EGAD!! ATLANTIS CLOUD SERVER CONNECTION ERROR (attempt {self.retry_count}): {specific_error_log}")
 
                 # Print a more detailed stack trace for debugging
-                import traceback
                 logger.debug(f"Traceback: {traceback.format_exc()}")
 
                 # Calculate exponential backoff delay with jitter
@@ -3225,7 +3228,6 @@ class ServiceClient:
         async def catch_all_events(event, *args):
             """Log all incoming Socket.IO events before they reach specific handlers"""
             try:
-                import sys
                 # Calculate total size of all args
                 total_size = sum(sys.getsizeof(arg) for arg in args)
                 logger.info(f"☁️ SOCKETIO EVENT RECEIVED: '{event}' - Args count: {len(args)}, Total size: {total_size:,} bytes ({total_size/1024/1024:.2f} MB)")
@@ -3437,7 +3439,6 @@ class ServiceClient:
 
         except Exception as e:
             logger.error(f"❌ ERROR PROCESSING MCP REQUEST: {str(e)}")
-            import traceback
             logger.debug(f"Traceback: {traceback.format_exc()}")
             response["error"] = {"code": -32000, "message": str(e)}
             return response
@@ -3725,7 +3726,6 @@ async def process_mcp_request(server, request, client_id=None):
             return {"jsonrpc": "2.0", "id": req_id, "error": f"Unknown method: {method}"}
     except Exception as e:
 
-        import traceback
         logger.error(f"🚫 Error processing request '{method}': {e}")
         logger.debug(f"Traceback: {traceback.format_exc()}")
         return {"jsonrpc": "2.0", "id": req_id, "error": f"Error processing request: {e}"}
