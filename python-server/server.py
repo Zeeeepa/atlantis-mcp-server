@@ -25,7 +25,7 @@ import traceback
 from collections import defaultdict
 
 # Version
-SERVER_VERSION = "2.3.2"
+SERVER_VERSION = "2.3.3"
 
 from mcp.server import Server
 
