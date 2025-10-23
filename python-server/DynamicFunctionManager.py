@@ -250,29 +250,30 @@ class DynamicFunctionManager:
     # File operations
     async def _fs_save_code(self, name: str, code: str, app: Optional[str] = None) -> Optional[str]:
         """
-        Saves the provided code string to a file named main.py in the app directory.
+        Saves the provided code string to a file.
+        If app is provided, saves to app directory as main.py.
+        If app is None, saves to top-level as {name}.py.
         The directory path is determined by converting the app name's dots to slashes.
         For example, app="Examples.Markdown" saves to dynamic_functions/Examples/Markdown/main.py
 
         Args:
-            name: Function name (unused, kept for API compatibility)
+            name: Function/file name (used for filename when app is None)
             code: The code to save
-            app: App name in dot notation (e.g., "Examples.Markdown")
+            app: App name in dot notation (e.g., "Examples.Markdown"), or None for top-level
 
         Returns:
             Full path if successful, None otherwise.
         """
-        if not app:
-            logger.error("❌ _fs_save_code: app parameter is required")
-            return None
-
-        # Convert dot notation to path (e.g., "Examples.Markdown" -> "Examples/Markdown")
-        app_path = self._app_name_to_path(app)
-        target_dir = os.path.join(self.functions_dir, app_path)
-        os.makedirs(target_dir, exist_ok=True)  # Ensure app directory exists (creates nested dirs)
-
-        # Filename is always main.py
-        file_path = os.path.join(target_dir, "main.py")
+        if app:
+            # Convert dot notation to path (e.g., "Examples.Markdown" -> "Examples/Markdown")
+            app_path = self._app_name_to_path(app)
+            target_dir = os.path.join(self.functions_dir, app_path)
+            os.makedirs(target_dir, exist_ok=True)  # Ensure app directory exists (creates nested dirs)
+            # Filename is always main.py for app-based functions
+            file_path = os.path.join(target_dir, "main.py")
+        else:
+            # Top-level function - save as {name}.py
+            file_path = os.path.join(self.functions_dir, f"{name}.py")
 
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
@@ -1600,20 +1601,31 @@ async def {name}():
                     break  # Use the first match we find
 
         # 3. Determine filename and app to save to
+        # First check if any function has an @app() decorator
+        decorator_app_name = None
+        for func_info in functions_info:
+            if func_info.get('app_name'):
+                decorator_app_name = func_info['app_name']
+                logger.info(f"⚙️ Found @app decorator with app name: {decorator_app_name}")
+                break
+
         if target_filename:
             # Use specified filename
             filename_to_use = target_filename
-            app_to_use = app_name  # Use provided app or None
+            # Prefer decorator app, then provided app parameter, then None
+            app_to_use = decorator_app_name or app_name
             logger.info(f"⚙️ Using specified filename: {filename_to_use}")
         elif existing_file:
             # Update existing file - extract filename from existing location
             filename_to_use = os.path.splitext(os.path.basename(existing_file))[0]
-            app_to_use = existing_app  # Use the app from existing location
+            # Prefer decorator app, then existing app, then provided app parameter
+            app_to_use = decorator_app_name or existing_app or app_name
             logger.info(f"⚙️ Updating existing file: {existing_file}")
         else:
             # Create new file using first function name (backward compatibility)
             filename_to_use = function_names[0]
-            app_to_use = app_name  # Use provided app or None
+            # Prefer decorator app, then provided app parameter, then None
+            app_to_use = decorator_app_name or app_name
             logger.info(f"⚙️ Creating new file using first function name: {filename_to_use}")
 
         # 4. Save the code using existing _fs_save_code method (validation will happen later when tools are listed/called)
