@@ -535,6 +535,11 @@ class DynamicAdditionServer(Server):
         total_functions = sum(len(app_mapping) for app_mapping in function_mapping_by_app.values())
         logger.info(f"📝 FOUND {total_functions} FUNCTIONS FROM APP MAPPINGS")
 
+        # DEBUG: Show what's in the mapping
+        logger.debug(f"🔍 DEBUG: Mapping contents:")
+        for app_name, app_mapping in function_mapping_by_app.items():
+            logger.debug(f"  App '{app_name}': {list(app_mapping.keys())}")
+
         # Track processed files to avoid redundant validation
         processed_files = {}  # file_path -> functions_info cache
 
@@ -678,15 +683,23 @@ class DynamicAdditionServer(Server):
                             # Use dot notation for comparison (matches what's in annotations)
                             app_name_for_key = self.function_manager._path_to_app_name(actual_app_name) if actual_app_name else None
                             tool_key = f"{app_name_for_key}.{tool_name}"
-                            existing_tool_keys = {f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}" for tool in tools_list}
-                            if tool_key not in existing_tool_keys:
+                            # Build a mapping of tool_key -> (source file, app) for better error reporting
+                            existing_tool_map = {
+                                f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}":
+                                (getattr(tool.annotations, 'sourceFile', 'unknown'), getattr(tool.annotations, 'app_name', 'unknown'))
+                                for tool in tools_list
+                            }
+                            if tool_key not in existing_tool_map:
                                 tools_list.append(tool_obj)
                                 #logger.debug(f"📝 Added dynamic tool: {tool_name} (app: {actual_app_name}), valid: {is_valid}")
                             else:
                                 # This is an ERROR - same function appearing twice for the same app
                                 # DO NOT add it to the tools list - just log the error
-                                logger.error(f"❌ DUPLICATE TOOL DETECTED: {tool_name} from {file_path} (app: {actual_app_name}) - already exists in tools list! SKIPPING.")
-                                # The duplicate detection in DynamicFunctionManager already reported the file paths
+                                existing_file, existing_app = existing_tool_map[tool_key]
+                                logger.error(f"❌ DUPLICATE TOOL DETECTED: {tool_name}\n"
+                                           f"   📂 First occurrence:  {existing_file} (app: {existing_app})\n"
+                                           f"   📂 Second occurrence: {file_path} (app: {app_name_for_key})\n"
+                                           f"   ⚠️  SKIPPING second occurrence!")
 
                 except Exception as e:
                     logger.warning(f"⚠️ Error processing function {func_name} from {file_path}: {str(e)}")
@@ -2872,6 +2885,7 @@ class ServiceClient:
         # Store creation time for stable client ID
         self._creation_time = int(time.time())
 
+    # THIS IS THE BIG REPORT
     async def _report_tools_to_console(self, tools_list=None):
         """Generate and log a formatted report of all available tools
 

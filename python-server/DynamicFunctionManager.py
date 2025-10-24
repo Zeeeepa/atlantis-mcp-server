@@ -251,29 +251,40 @@ class DynamicFunctionManager:
     async def _fs_save_code(self, name: str, code: str, app: Optional[str] = None) -> Optional[str]:
         """
         Saves the provided code string to a file.
-        If app is provided, saves to app directory as main.py.
-        If app is None, saves to top-level as {name}.py.
+        First attempts to find an existing file containing the function.
+        If found, updates that file.
+        If not found and app is provided, saves to app directory as main.py.
+        If not found and app is None, saves to top-level as {name}.py.
         The directory path is determined by converting the app name's dots to slashes.
         For example, app="Examples.Markdown" saves to dynamic_functions/Examples/Markdown/main.py
 
         Args:
-            name: Function/file name (used for filename when app is None)
+            name: Function/file name (used for filename when app is None, or to find existing file)
             code: The code to save
             app: App name in dot notation (e.g., "Examples.Markdown"), or None for top-level
 
         Returns:
             Full path if successful, None otherwise.
         """
-        if app:
-            # Convert dot notation to path (e.g., "Examples.Markdown" -> "Examples/Markdown")
+        # First, try to find an existing file containing this function
+        existing_file = await self._find_file_containing_function(name, app)
+
+        if existing_file:
+            # Update the existing file
+            file_path = os.path.join(self.functions_dir, existing_file)
+            logger.debug(f"📝 Updating existing file: {existing_file}")
+        elif app:
+            # New file with app - Convert dot notation to path (e.g., "Examples.Markdown" -> "Examples/Markdown")
             app_path = self._app_name_to_path(app)
             target_dir = os.path.join(self.functions_dir, app_path)
             os.makedirs(target_dir, exist_ok=True)  # Ensure app directory exists (creates nested dirs)
             # Filename is always main.py for app-based functions
             file_path = os.path.join(target_dir, "main.py")
+            logger.debug(f"📝 Creating new app file: {app_path}/main.py")
         else:
-            # Top-level function - save as {name}.py
+            # New top-level function - save as {name}.py
             file_path = os.path.join(self.functions_dir, f"{name}.py")
+            logger.debug(f"📝 Creating new top-level file: {name}.py")
 
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
@@ -886,6 +897,10 @@ async def {name}():
             self._function_metadata_by_app.clear()
             self._skipped_hidden_functions.clear()  # Clear skipped functions list to allow previously invalid functions to be retried
 
+            # Track ALL occurrences to detect duplicates at the end
+            # Key: (app_path, func_name), Value: list of (rel_path, func_info)
+            all_occurrences = {}
+
             # Scan all Python files in the functions directory and subdirectories
             ignore_dirs = ['OLD', '__pycache__']
             for root, dirs, files in os.walk(self.functions_dir, followlinks=True):
@@ -993,35 +1008,11 @@ async def {name}():
                                     # Extract directory from file path
                                     app_path = os.path.dirname(rel_path) if '/' in rel_path else None
 
-                                # Store in main mapping (prioritize top-level functions over app-specific ones)
-                                if func_name not in self._function_file_mapping or app_path is None:
-                                    self._function_file_mapping[func_name] = rel_path
-
-                                # Store in app-specific mapping (use app_path as key, None if no app specified)
-                                if app_path not in self._function_file_mapping_by_app:
-                                    self._function_file_mapping_by_app[app_path] = {}
-
-                                # Check for duplicates in app-specific mapping
-                                if func_name in self._function_file_mapping_by_app[app_path]:
-                                    existing_path = self._function_file_mapping_by_app[app_path][func_name]
-                                    logger.error(
-                                        f"❌ DUPLICATE FUNCTION DETECTED: '{func_name}' for app '{app_path}'\n"
-                                        f"   📂 First occurrence:  {existing_path}\n"
-                                        f"   📂 Second occurrence: {rel_path}\n"
-                                        f"   ⚠️  This is an error - same function cannot exist in multiple files for the same app!"
-                                    )
-                                    # Still store it so we can report all duplicates in tools list
-
-                                self._function_file_mapping_by_app[app_path][func_name] = rel_path
-
-                                # Store metadata in cache
-                                if app_path not in self._function_metadata_by_app:
-                                    self._function_metadata_by_app[app_path] = {}
-                                self._function_metadata_by_app[app_path][func_name] = func_info
-
-                                #logger.info(f"🎯 FOUND FUNCTION: {CYAN}{func_name}{RESET} -> {rel_path} (app_path: {app_path})")
-                                #if root != self.functions_dir:
-                                #    logger.info(f"   📁 IN SUBFOLDER: {CYAN}{os.path.basename(root)}{RESET}")
+                                # PHASE 1: Collect ALL occurrences for later duplicate detection
+                                key = (app_path, func_name)
+                                if key not in all_occurrences:
+                                    all_occurrences[key] = []
+                                all_occurrences[key].append((rel_path, func_info))
                         else:
                             if root != self.functions_dir:
                                 logger.warning(f"⚠️ NO FUNCTIONS FOUND in {rel_path} (subfolder: {os.path.basename(root)})")
@@ -1032,8 +1023,49 @@ async def {name}():
                         logger.warning(f"⚠️ Error processing {rel_path} for function mapping: {e}")
                         continue
 
+            # PHASE 2-5: Process all collected occurrences to detect duplicates and store non-duplicates
+            duplicate_count = 0
+            dropped_function_count = 0
+
+            for (app_path, func_name), occurrences in all_occurrences.items():
+                # PHASE 2: Detect duplicates (count > 1)
+                if len(occurrences) > 1:
+                    # PHASE 3: Report ALL occurrences of the duplicate
+                    occurrence_list = "\n".join([f"   📂 Occurrence {i+1}: {path}" for i, (path, _) in enumerate(occurrences)])
+                    logger.error(
+                        f"❌ DUPLICATE FUNCTION DETECTED: '{func_name}' for app '{app_path}'\n"
+                        f"{occurrence_list}\n"
+                        f"   ⚠️  This is an error - same function cannot exist in multiple files for the same app!\n"
+                        f"   ⚠️  REMOVING ALL {len(occurrences)} occurrences from tool list!"
+                    )
+                    duplicate_count += 1
+                    dropped_function_count += len(occurrences)
+                    # Skip storing duplicates - they won't be in any mapping
+                else:
+                    # PHASE 4: Store non-duplicates in app-specific mapping and metadata
+                    rel_path, func_info = occurrences[0]
+
+                    # Store in app-specific mapping
+                    if app_path not in self._function_file_mapping_by_app:
+                        self._function_file_mapping_by_app[app_path] = {}
+                    self._function_file_mapping_by_app[app_path][func_name] = rel_path
+
+                    # Store metadata
+                    if app_path not in self._function_metadata_by_app:
+                        self._function_metadata_by_app[app_path] = {}
+                    self._function_metadata_by_app[app_path][func_name] = func_info
+
+                    # PHASE 5: Update main mapping for backward compatibility (prioritize top-level)
+                    if func_name not in self._function_file_mapping or app_path is None:
+                        self._function_file_mapping[func_name] = rel_path
+
             self._function_file_mapping_mtime = current_mtime
-            logger.info(f"✅ Built function-to-file mapping with {len(self._function_file_mapping)} functions")
+
+            # Final summary
+            if duplicate_count > 0:
+                logger.info(f"✅ Built function-to-file mapping with {len(self._function_file_mapping)} functions ({duplicate_count} duplicates found, {dropped_function_count} occurrences dropped)")
+            else:
+                logger.info(f"✅ Built function-to-file mapping with {len(self._function_file_mapping)} functions")
 
         except Exception as e:
             logger.error(f"❌ Error building function-to-file mapping: {e}")
