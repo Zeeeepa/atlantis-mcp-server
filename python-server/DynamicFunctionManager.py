@@ -1662,11 +1662,14 @@ async def {name}():
         # 6. Prepare success message, including validation status
         #save_status = f"Functions saved to '{filename_to_use}.py': {', '.join(function_names)}"
         #save_status = f"Function saved"
+        # Calculate relative path for display
+        rel_path = os.path.relpath(saved_path, self.functions_dir)
+
         annotations = None # Default to no annotations
         if syntax_error:
             # If validation failed, add structured error to annotations
             #validation_status = f"WARNING: Validation failed."
-            response_message = f"Function saved but validation failed" # Keep text informative
+            response_message = f"Function saved to {rel_path}" # Keep text informative
             annotations = {
                 "validationStatus": "ERROR",
                 "validationMessage": syntax_error
@@ -1674,7 +1677,7 @@ async def {name}():
             logger.warning(f"⚠️ {response_message}")
         else:
             # If validation succeeded
-            response_message = f"Function saved"
+            response_message = f"Function saved to {rel_path}"
             logger.info(f"✅ {response_message}")
 
         # Return TextContent with text and potentially annotations
