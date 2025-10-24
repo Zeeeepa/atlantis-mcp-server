@@ -535,11 +535,6 @@ class DynamicAdditionServer(Server):
         total_functions = sum(len(app_mapping) for app_mapping in function_mapping_by_app.values())
         logger.info(f"📝 FOUND {total_functions} FUNCTIONS FROM APP MAPPINGS")
 
-        # DEBUG: Show what's in the mapping
-        logger.debug(f"🔍 DEBUG: Mapping contents:")
-        for app_name, app_mapping in function_mapping_by_app.items():
-            logger.debug(f"  App '{app_name}': {list(app_mapping.keys())}")
-
         # Track processed files to avoid redundant validation
         processed_files = {}  # file_path -> functions_info cache
 
@@ -576,6 +571,12 @@ class DynamicAdditionServer(Server):
                         # Create one tool per function in the file
                         for func_info in functions_info:
                             tool_name = func_info.get('name', func_name)
+
+                            # CRITICAL: Only process functions that are in the mapping for this app
+                            # This prevents duplicates that were already removed by DynamicFunctionManager
+                            if tool_name not in app_mapping:
+                                logger.debug(f"🙈 Skipping function not in mapping for app '{app_name}': {tool_name} from {file_path}")
+                                continue
 
                             # NEW OPT-IN VISIBILITY: Check if function has @visible, @public, @protected, or @tick decorator or is internal
                             decorators_from_info = func_info.get("decorators", [])
@@ -679,27 +680,10 @@ class DynamicAdditionServer(Server):
                                 annotations=custom_annotations
                             )
 
-                            # Check for duplicates - CASE SENSITIVE since function names are case-sensitive
-                            # Use dot notation for comparison (matches what's in annotations)
-                            app_name_for_key = self.function_manager._path_to_app_name(actual_app_name) if actual_app_name else None
-                            tool_key = f"{app_name_for_key}.{tool_name}"
-                            # Build a mapping of tool_key -> (source file, app) for better error reporting
-                            existing_tool_map = {
-                                f"{getattr(tool.annotations, 'app_name', 'unknown')}.{tool.name}":
-                                (getattr(tool.annotations, 'sourceFile', 'unknown'), getattr(tool.annotations, 'app_name', 'unknown'))
-                                for tool in tools_list
-                            }
-                            if tool_key not in existing_tool_map:
-                                tools_list.append(tool_obj)
-                                #logger.debug(f"📝 Added dynamic tool: {tool_name} (app: {actual_app_name}), valid: {is_valid}")
-                            else:
-                                # This is an ERROR - same function appearing twice for the same app
-                                # DO NOT add it to the tools list - just log the error
-                                existing_file, existing_app = existing_tool_map[tool_key]
-                                logger.error(f"❌ DUPLICATE TOOL DETECTED: {tool_name}\n"
-                                           f"   📂 First occurrence:  {existing_file} (app: {existing_app})\n"
-                                           f"   📂 Second occurrence: {file_path} (app: {app_name_for_key})\n"
-                                           f"   ⚠️  SKIPPING second occurrence!")
+                            # No need for duplicate detection here - only processing functions in the mapping
+                            # Duplicates were already detected and removed by DynamicFunctionManager
+                            tools_list.append(tool_obj)
+                            #logger.debug(f"📝 Added dynamic tool: {tool_name} (app: {actual_app_name}), valid: {is_valid}")
 
                 except Exception as e:
                     logger.warning(f"⚠️ Error processing function {func_name} from {file_path}: {str(e)}")
@@ -3079,7 +3063,17 @@ class ServiceClient:
                     reason = item.get('reason', 'unknown error')
                     logger.error(f"    {BOLD_COLOR}{app_display:20}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR} {RED}[{reason}]{RESET_COLOR}")
 
-
+            # Report duplicate functions
+            duplicate_functions = self.mcp_server.function_manager._duplicate_functions
+            if duplicate_functions:
+                logger.info(f"")
+                logger.error(f"  {BOLD_COLOR}❌ DUPLICATE FUNCTIONS (REMOVED): {len(duplicate_functions)}{RESET_COLOR}")
+                for app_path, func_name, file_paths in sorted(duplicate_functions, key=lambda x: ((x[0] or 'top-level').lower(), x[1].lower())):
+                    # Convert slash path to dot notation for display
+                    app_display = self.mcp_server.function_manager._path_to_app_name(app_path) if app_path else 'top-level'
+                    logger.error(f"    {BOLD_COLOR}{app_display:20}{RESET_COLOR} {func_name:40}")
+                    for i, file_path in enumerate(file_paths, 1):
+                        logger.error(f"      {GREY_COLOR}Occurrence {i}: {file_path}{RESET_COLOR}")
 
         if server_info_list:
             logger.info(f"")

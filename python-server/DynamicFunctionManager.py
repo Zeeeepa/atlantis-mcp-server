@@ -214,6 +214,7 @@ class DynamicFunctionManager:
         self._function_metadata_by_app = {}  # app_name -> {function_name -> func_info dict (includes protection_name)}
         self._function_file_mapping_mtime = 0.0  # track when mapping was last built
         self._skipped_hidden_functions = []  # Track functions skipped due to @hidden decorator
+        self._duplicate_functions = []  # Track duplicates: [(app_path, func_name, [file_paths])]
 
         # Create directories if they don't exist
         os.makedirs(self.functions_dir, exist_ok=True)
@@ -896,6 +897,7 @@ async def {name}():
             self._function_file_mapping_by_app.clear()
             self._function_metadata_by_app.clear()
             self._skipped_hidden_functions.clear()  # Clear skipped functions list to allow previously invalid functions to be retried
+            self._duplicate_functions.clear()  # Clear duplicate tracking
 
             # Track ALL occurrences to detect duplicates at the end
             # Key: (app_path, func_name), Value: list of (rel_path, func_info)
@@ -1040,6 +1042,11 @@ async def {name}():
                     )
                     duplicate_count += 1
                     dropped_function_count += len(occurrences)
+
+                    # Store duplicate info for console report
+                    file_paths = [path for path, _ in occurrences]
+                    self._duplicate_functions.append((app_path, func_name, file_paths))
+
                     # Skip storing duplicates - they won't be in any mapping
                 else:
                     # PHASE 4: Store non-duplicates in app-specific mapping and metadata
