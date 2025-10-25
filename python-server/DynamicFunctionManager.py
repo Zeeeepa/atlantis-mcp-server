@@ -1081,21 +1081,20 @@ async def {name}():
         """
         Find which file contains the specified function.
         app_name can be in dot notation (e.g., "App.SubModule") and will be converted to slash path internally.
+        When app_name is None, checks top-level functions (app_path=None) first.
         """
         await self._build_function_file_mapping()
 
-        if app_name:
-            # Convert dot notation to slash path for internal lookup
-            app_path = self._app_name_to_path(app_name)
-            # Look in specific app first
-            app_mapping = self._function_file_mapping_by_app.get(app_path, {})
-            if function_name in app_mapping:
-                return app_mapping[function_name]
-            # If not found in specified app, return None (don't fall back to main mapping)
-            return None
-        else:
-            # Fall back to main mapping (backward compatibility)
-            return self._function_file_mapping.get(function_name)
+        # Convert app_name to app_path (None stays None for top-level)
+        app_path = self._app_name_to_path(app_name) if app_name else None
+
+        # Always check app-specific mapping first
+        app_mapping = self._function_file_mapping_by_app.get(app_path, {})
+        if function_name in app_mapping:
+            return app_mapping[function_name]
+
+        # Fall back to main mapping only if not found (backward compatibility)
+        return self._function_file_mapping.get(function_name)
 
     async def invalidate_all_dynamic_module_cache(self):
         """Safely removes ALL dynamic function modules AND the parent package from sys.modules cache."""
@@ -1657,8 +1656,8 @@ async def {name}():
         elif existing_file:
             # Update existing file - extract filename from existing location
             filename_to_use = os.path.splitext(os.path.basename(existing_file))[0]
-            # Prefer decorator app, then existing app, then provided app parameter
-            app_to_use = decorator_app_name or existing_app or app_name
+            # Use existing file's app location to preserve file location
+            app_to_use = existing_app
             logger.info(f"⚙️ Updating existing file: {existing_file}")
         else:
             # Create new file using first function name (backward compatibility)
