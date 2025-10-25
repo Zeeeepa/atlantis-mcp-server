@@ -279,6 +279,8 @@ def set_context(
 
     return (client_log_token, request_id_token, client_id_token, log_seq_num_token, entry_point_token, user_token, session_id_token, command_seq_token)
 
+# use sendChatter to send commands directly from browser
+
 def reset_context(tokens: tuple):
     """Resets the context variables using the provided tuple of tokens."""
     # Expected order: client_log, request_id, client_id, log_seq_num, entry_point, user, session_id, command_seq
