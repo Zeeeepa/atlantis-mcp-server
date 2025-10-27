@@ -188,19 +188,25 @@ from watchdog.events import FileSystemEventHandler
 
 class DynamicConfigEventHandler(FileSystemEventHandler):
     """Handles file system events in dynamic_functions and dynamic_servers directories."""
-    def __init__(self, mcp_server, loop):
+    def __init__(self, mcp_server, loop, watched_function_dirs=None, watched_server_dirs=None):
         self.mcp_server = mcp_server
         self.loop = loop
         self._debounce_timer = None
         self._debounce_interval = 1.0 # seconds
         self._last_triggered_path = None # Store path for _do_reload
+        self.watched_function_dirs = watched_function_dirs or []
+        self.watched_server_dirs = watched_server_dirs or []
 
     def _trigger_reload(self, event_path):
-        # Check if the change is relevant (Python file in functions dir or JSON file in servers dir)
-        is_function_change = event_path.endswith(".py") and (os.path.dirname(event_path) == FUNCTIONS_DIR or
-                                                             event_path.startswith(FUNCTIONS_DIR + os.sep))
-        is_server_change = event_path.endswith(".json") and (os.path.dirname(event_path) == SERVERS_DIR or
-                                                             event_path.startswith(SERVERS_DIR + os.sep))
+        # Check if the change is relevant (Python file in any watched function dir or JSON file in any watched server dir)
+        is_function_change = event_path.endswith(".py") and any(
+            event_path.startswith(watched_dir + os.sep) or os.path.dirname(event_path) == watched_dir
+            for watched_dir in self.watched_function_dirs
+        )
+        is_server_change = event_path.endswith(".json") and any(
+            event_path.startswith(watched_dir + os.sep) or os.path.dirname(event_path) == watched_dir
+            for watched_dir in self.watched_server_dirs
+        )
 
         if not is_function_change and not is_server_change:
             # logger.debug(f"Ignoring irrelevant change: {event_path}")
@@ -3968,21 +3974,33 @@ if __name__ == "__main__":
     os.makedirs(SERVERS_DIR, exist_ok=True)
     logger.info(f"📁 Dynamic servers directory: {SERVERS_DIR}")
 
-    # Start the file watcher
-    event_handler = DynamicConfigEventHandler(mcp_server, loop)
-    observer = Observer()
-    observer.schedule(event_handler, FUNCTIONS_DIR, recursive=True) # Watch subdirs for dynamic functions
+    # Start the file watcher - collect all watched directories first
+    watched_function_dirs = [FUNCTIONS_DIR]
+    watched_server_dirs = [SERVERS_DIR]
 
-    # Also watch symlinked directories within FUNCTIONS_DIR
+    # Find all symlinked directories within FUNCTIONS_DIR (recursively search for all symlinks)
     try:
-        for item in os.listdir(FUNCTIONS_DIR):
-            item_path = os.path.join(FUNCTIONS_DIR, item)
-            if os.path.islink(item_path) and os.path.isdir(item_path):
-                resolved_path = os.path.realpath(item_path)
-                observer.schedule(event_handler, resolved_path, recursive=True)
-                logger.info(f"👁️ Also watching symlinked directory: {item} -> {resolved_path}")
+        for root, dirs, files in os.walk(FUNCTIONS_DIR):
+            for dir_name in dirs:
+                dir_path = os.path.join(root, dir_name)
+                if os.path.islink(dir_path):
+                    resolved_path = os.path.realpath(dir_path)
+                    if os.path.isdir(resolved_path):
+                        watched_function_dirs.append(resolved_path)
+                        relative_path = os.path.relpath(dir_path, FUNCTIONS_DIR)
+                        logger.info(f"👁️ Found symlinked directory: {relative_path} -> {resolved_path}")
     except Exception as e:
-        logger.warning(f"⚠️ Error setting up symlink watchers: {e}")
+        logger.warning(f"⚠️ Error finding symlink directories: {e}")
+
+    # Create event handler with all watched directories
+    event_handler = DynamicConfigEventHandler(mcp_server, loop, watched_function_dirs, watched_server_dirs)
+    observer = Observer()
+
+    # Schedule watchers for all directories
+    observer.schedule(event_handler, FUNCTIONS_DIR, recursive=True)
+    for resolved_path in watched_function_dirs[1:]:  # Skip FUNCTIONS_DIR since already scheduled
+        observer.schedule(event_handler, resolved_path, recursive=True)
+        logger.info(f"👁️ Watching symlinked directory: {resolved_path}")
 
     observer.schedule(event_handler, SERVERS_DIR, recursive=False)
     observer.start()
