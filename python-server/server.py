@@ -2982,19 +2982,19 @@ class ServiceClient:
             elif is_mcp_tool:
                 # MCP tools from external servers - extract server name from tool name
                 origin_server = getattr(tool.annotations, 'originServer', 'unknown') if hasattr(tool, 'annotations') else 'unknown'
-                formatted_line = f"{CYAN_COLOR}{origin_server:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR}{timestamp_str}"
+                formatted_line = f"{CYAN_COLOR}{origin_server:30}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR}{timestamp_str}"
                 mcp_tools_list.append((origin_server, tool.name, formatted_line))
             elif is_internal:
-                formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{timestamp_str}"
+                formatted_line = f"{BOLD_COLOR}{app_display:30}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{timestamp_str}"
                 internal_info_list.append((app_display, tool.name, formatted_line))
             elif is_hidden:
-                formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
+                formatted_line = f"{BOLD_COLOR}{app_display:30}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
                 hidden_info_list.append((app_display, tool.name, formatted_line))
             elif is_protected:
-                formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
+                formatted_line = f"{BOLD_COLOR}{app_display:30}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
                 protected_info_list.append((app_display, tool.name, formatted_line))
             else:
-                formatted_line = f"{BOLD_COLOR}{app_display:20}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
+                formatted_line = f"{BOLD_COLOR}{app_display:30}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
                 tool_info_list.append((app_display, tool.name, formatted_line))
 
         # Sort by app name then tool name (case-insensitive)
@@ -3057,7 +3057,7 @@ class ServiceClient:
                 for item in sorted(hidden_functions, key=lambda x: ((x['app'] or 'top-level').lower(), x['name'].lower())):
                     # Convert slash path to dot notation for display
                     app_display = self.mcp_server.function_manager._path_to_app_name(item['app']) if item['app'] else 'top-level'
-                    logger.info(f"    {BOLD_COLOR}{app_display:20}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR}")
+                    logger.info(f"    {BOLD_COLOR}{app_display:30}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR}")
 
             # Report invalid/error functions
             if invalid_functions:
@@ -3067,7 +3067,7 @@ class ServiceClient:
                     # Convert slash path to dot notation for display
                     app_display = self.mcp_server.function_manager._path_to_app_name(item['app']) if item['app'] else 'top-level'
                     reason = item.get('reason', 'unknown error')
-                    logger.error(f"    {BOLD_COLOR}{app_display:20}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR} {RED}[{reason}]{RESET_COLOR}")
+                    logger.error(f"    {BOLD_COLOR}{app_display:30}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR} {RED}[{reason}]{RESET_COLOR}")
 
             # Report duplicate functions
             duplicate_functions = self.mcp_server.function_manager._duplicate_functions
@@ -3077,7 +3077,7 @@ class ServiceClient:
                 for app_path, func_name, file_paths in sorted(duplicate_functions, key=lambda x: ((x[0] or 'top-level').lower(), x[1].lower())):
                     # Convert slash path to dot notation for display
                     app_display = self.mcp_server.function_manager._path_to_app_name(app_path) if app_path else 'top-level'
-                    logger.error(f"    {BOLD_COLOR}{app_display:20}{RESET_COLOR} {func_name:40}")
+                    logger.error(f"    {BOLD_COLOR}{app_display:30}{RESET_COLOR} {func_name:40}")
                     for i, file_path in enumerate(file_paths, 1):
                         logger.error(f"      {GREY_COLOR}Occurrence {i}: {file_path}{RESET_COLOR}")
 
@@ -3101,7 +3101,7 @@ class ServiceClient:
             logger.info(f"  {BOLD_COLOR}Apps Summary:{RESET_COLOR}")
             for app_name in sorted(app_counts.keys(), key=str.lower):
                 count = app_counts[app_name]
-                logger.info(f"    {BOLD_COLOR}{app_name:20}{RESET_COLOR} {count} function(s)")
+                logger.info(f"    {BOLD_COLOR}{app_name:30}{RESET_COLOR} {count} function(s)")
 
         logger.info(f" ")
         logger.info(f"- tools report done -")

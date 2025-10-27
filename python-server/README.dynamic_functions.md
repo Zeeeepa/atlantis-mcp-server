@@ -72,7 +72,7 @@ Write for AI consumption. Be explicit about purpose and when to use.
 
 ### Optional Metadata
 - **`@chat`** - Chat functions that get transcript/tools and call LLM
-- **`@app(name="app_name")`** - Associate with specific app
+- **`@app(name="app_name")`** - Associate with specific app (DEPRECATED, use folders instead)
 - **`@location(name="location_name")`** - Associate with location
 - **`@shared`** - Persist across reloads
 

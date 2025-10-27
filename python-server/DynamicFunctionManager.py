@@ -49,7 +49,7 @@ def _mcp_identity_decorator(f):
 
 # --- App Decorator Definition ---
 def app(name: str):
-    """Decorator to associate a dynamic function with an application name.
+    """Decorator to associate a dynamic function with an application name. DEPRECATED: Use directories instead
     Usage: @app(name="your_app_name")
     """
     def decorator(func_to_decorate):
