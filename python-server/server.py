@@ -1095,7 +1095,7 @@ class DynamicAdditionServer(Server):
                         mtime = os.path.getmtime(server_file)
                         annotations["lastModified"] = datetime.datetime.fromtimestamp(mtime, tz=datetime.timezone.utc).isoformat()
                         # Store relative path for display
-                        annotations["sourceFile"] = f"dynamic_servers/{server_name}.json"
+                        annotations["sourceFile"] = f"{server_name}.json"
                     except Exception as me:
                         logger.warning(f"⚠️ Could not get mtime for server '{server_name}': {me}")
 
