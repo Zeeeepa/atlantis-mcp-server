@@ -226,12 +226,12 @@ async def execute_client_command_awaitable(
 
 # --- JSON Formatting Utility --- #
 
-def format_json_log(data: dict, colored: bool = True) -> str:
+def format_json_log(data: dict | list, colored: bool = True) -> str:
     """
-    Formats a Python dictionary into a pretty-printed JSON string for logging.
+    Formats a Python dictionary or list into a pretty-printed JSON string for logging.
 
     Args:
-        data: Dictionary to format
+        data: Dictionary or list to format
         colored: If True, adds ANSI color codes for terminal output (default: True)
 
     Returns:
