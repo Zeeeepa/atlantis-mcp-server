@@ -1,8 +1,0 @@
-  python server.py  \
-  --email=rein.dapp@gmail.com  \
-  --api-key=foobar \
-  --host=localhost \
-  --port=8001  \
-  --cloud-host=ws://localhost  \
-  --cloud-port=3010  \
-  --service-name=global
