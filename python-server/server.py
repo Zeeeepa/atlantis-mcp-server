@@ -3338,7 +3338,7 @@ class ServiceClient:
         @self.sio.event(namespace=self.namespace)
         async def service_message(data):
             logger.info(f"☁️ RAW RECEIVED SERVICE MESSAGE")
-            logger.debug(f"☁️ RAW RECEIVED SERVICE MESSAGE:\n{format_json_log(data) if isinstance(data, dict) else data}")
+            #logger.debug(f"☁️ RAW RECEIVED SERVICE MESSAGE:\n{format_json_log(data) if isinstance(data, dict) else data}")
 
             # --- Handle Awaitable Command Responses from Cloud Client ---
             if isinstance(data, dict) and \
