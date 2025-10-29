@@ -789,7 +789,8 @@ class DynamicAdditionServer(Server):
                     "type": "object",
                     "properties": {
                         "app": {"type": "string", "description": "Optional: The app name to create the function in a specific app directory"},
-                        "name": {"type": "string", "description": "The name to register the new placeholder function under."}
+                        "name": {"type": "string", "description": "The name to register the new placeholder function under."},
+                        "location": {"type": "string", "description": "Optional: Adds @location() decorator with the specified location value to the generated function."}
                     },
                     "required": ["name"]
                 },
@@ -1793,6 +1794,7 @@ class DynamicAdditionServer(Server):
 
                 func_name = args.get("name")
                 app_name = args.get("app")  # Optional app name for disambiguation
+                location_value = args.get("location")  # Optional location decorator value
                 if not func_name:
                     raise ValueError("Missing required parameter: name")
 
@@ -1832,7 +1834,7 @@ class DynamicAdditionServer(Server):
                     result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
                 else:
                     # Function doesn't exist, create it
-                    await self.function_manager.function_add(func_name, None, app_name)
+                    await self.function_manager.function_add(func_name, None, app_name, location_value)
                     try:
                         await self._notify_tool_list_changed(change_type="added", tool_name=func_name) # Pass params
                     except Exception as e:

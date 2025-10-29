@@ -843,12 +843,15 @@ class DynamicFunctionManager:
             return False, error_msg, None
 
 
-    def _code_generate_stub(self, name: str) -> str:
+    def _code_generate_stub(self, name: str, location: Optional[str] = None) -> str:
         """
         Generates a string containing a basic Python function stub with the given name.
         """
         if not name or not isinstance(name, str):
             name = "unnamed_function" # Default name if invalid
+
+        # Add location decorator if provided
+        location_decorator = f"@location('{location}')\n" if location else ""
 
         stub = f"""\
 import atlantis
@@ -857,7 +860,7 @@ import logging
 logger = logging.getLogger("mcp_server")
 
 
-@visible
+{location_decorator}@visible
 async def {name}():
     \"\"\"
     This is a placeholder function for '{name}'
@@ -1129,11 +1132,12 @@ async def {name}():
         # NEW: Also invalidate function mapping cache
         await self.invalidate_function_mapping_cache()
 
-    async def function_add(self, name: str, code: Optional[str] = None, app: Optional[str] = None) -> bool:
+    async def function_add(self, name: str, code: Optional[str] = None, app: Optional[str] = None, location: Optional[str] = None) -> bool:
         '''
         Creates a new function file.
         If code is provided, it saves it. Otherwise, generates and saves a stub.
         If app is provided, creates the function in the app-specific subdirectory (supports dot notation).
+        If location is provided, adds @location() decorator to the generated stub.
         Returns True on success, raises ValueError/IOError/RuntimeError on failure.
         '''
         secure_name = utils.clean_filename(name)
@@ -1168,7 +1172,7 @@ async def {name}():
             raise ValueError(error_msg)
 
         try:
-            code_to_save = code if code is not None else self._code_generate_stub(secure_name)
+            code_to_save = code if code is not None else self._code_generate_stub(secure_name, location)
             if await self._fs_save_code(secure_name, code_to_save, app):
                 logger.info(f"Function '{secure_name}' created successfully.")
                 return True
