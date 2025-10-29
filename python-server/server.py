@@ -1239,9 +1239,10 @@ class DynamicAdditionServer(Server):
                         annotations=custom_annotations # Use annotations object that contains started_at if applicable
                     )
 
-                    # Check for duplicates before adding (server names are unique)
-                    existing_tool_names = {tool.name.lower() for tool in tools_list}
-                    if server_name.lower() not in existing_tool_names:
+                    # Check for duplicates before adding (only check against other servers, not functions)
+                    existing_server_names = {tool.name.lower() for tool in tools_list
+                                            if hasattr(tool, 'annotations') and getattr(tool.annotations, 'type', None) == 'server'}
+                    if server_name.lower() not in existing_server_names:
                         tools_list.append(server_tool)
                         logger.debug(f"📝 Added dynamic server config entry: {server_name} (Status: {status})")
                     else:
@@ -1253,9 +1254,10 @@ class DynamicAdditionServer(Server):
                         validationStatus="ERROR_LOADING_SERVER",
                         runningStatus=status # Still show status even if config load failed
                     )
-                    # Check for duplicates before adding (server names are unique)
-                    existing_tool_names = {tool.name.lower() for tool in tools_list}
-                    if server_name.lower() not in existing_tool_names:
+                    # Check for duplicates before adding (only check against other servers, not functions)
+                    existing_server_names = {tool.name.lower() for tool in tools_list
+                                            if hasattr(tool, 'annotations') and getattr(tool.annotations, 'type', None) == 'server'}
+                    if server_name.lower() not in existing_server_names:
                         tools_list.append(Tool(
                             name=server_name,
                             description=f"Error loading MCP server config: {se}",
