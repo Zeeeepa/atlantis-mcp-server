@@ -249,54 +249,110 @@ class DynamicFunctionManager:
         return app_path.replace(os.sep, '.')
 
     # File operations
-    async def _fs_save_code(self, name: str, code: str, app: Optional[str] = None) -> Optional[str]:
+    async def _fs_add_code(self, name: str, code: str, app: Optional[str] = None) -> Optional[str]:
         """
-        Saves the provided code string to a file.
-        First attempts to find an existing file containing the function.
-        If found, updates that file.
-        If not found and app is provided, saves to app directory as main.py.
-        If not found and app is None, saves to top-level as {name}.py.
-        The directory path is determined by converting the app name's dots to slashes.
-        For example, app="Examples.Markdown" saves to dynamic_functions/Examples/Markdown/main.py
+        Adds a NEW function to a file (used by function_add).
+        The function should NOT already exist (caller must check first).
+        All functions go to main.py (either in app subdirectory or at root).
+        If app is provided, uses app subdirectory's main.py.
+        If app is None, uses root-level main.py.
 
         Args:
-            name: Function/file name (used for filename when app is None, or to find existing file)
-            code: The code to save
-            app: App name in dot notation (e.g., "Examples.Markdown"), or None for top-level
+            name: Function name
+            code: The function code to add
+            app: App name in dot notation (e.g., "Examples.Markdown"), or None for root-level
 
         Returns:
             Full path if successful, None otherwise.
         """
-        # First, try to find an existing file containing this function
-        existing_file = await self._find_file_containing_function(name, app)
-
-        if existing_file:
-            # Update the existing file
-            file_path = os.path.join(self.functions_dir, existing_file)
-            logger.debug(f"📝 Updating existing file: {existing_file}")
-        elif app:
-            # New file with app - Convert dot notation to path (e.g., "Examples.Markdown" -> "Examples/Markdown")
+        # Determine target directory based on app
+        if app:
             app_path = self._app_name_to_path(app)
             target_dir = os.path.join(self.functions_dir, app_path)
-            os.makedirs(target_dir, exist_ok=True)  # Ensure app directory exists (creates nested dirs)
-            # Filename is always main.py for app-based functions
-            file_path = os.path.join(target_dir, "main.py")
-            logger.debug(f"📝 Creating new app file: {app_path}/main.py")
+            location_display = f"{app_path}/main.py"
         else:
-            # New top-level function - save as {name}.py
-            file_path = os.path.join(self.functions_dir, f"{name}.py")
-            logger.debug(f"📝 Creating new top-level file: {name}.py")
+            target_dir = self.functions_dir
+            location_display = "main.py"
+
+        # Ensure directory exists
+        os.makedirs(target_dir, exist_ok=True)
+        file_path = os.path.join(target_dir, "main.py")
+
+        # Simple rule: if main.py exists, append; otherwise create
+        if os.path.exists(file_path):
+            logger.debug(f"📝 Appending to existing {location_display}")
+            mode = 'a'
+        else:
+            logger.debug(f"📝 Creating new {location_display}")
+            mode = 'w'
+
+        try:
+            if mode == 'a':
+                # When appending, ensure there's a newline separator
+                # First check if file ends with newline
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    existing_content = f.read()
+
+                with open(file_path, 'a', encoding='utf-8') as f:
+                    # Add newline separator if file doesn't end with one
+                    if existing_content and not existing_content.endswith('\n'):
+                        f.write('\n\n')
+                    elif existing_content:
+                        f.write('\n')  # Just one newline if already has one
+                    f.write(code)
+            else:
+                # mode='w', just write
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(code)
+
+            logger.debug(f"💾 Added function to {file_path}")
+            return file_path
+        except IOError as e:
+            logger.error(f"❌ _fs_add_code: Failed to write file {file_path}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"❌ _fs_add_code: Unexpected error saving {file_path}: {e}")
+            return None
+
+    async def _fs_update_code(self, name: str, code: str, app: Optional[str] = None) -> Optional[str]:
+        """
+        Updates an existing function's file with complete code (used by function_set).
+        Overwrites the entire file with the provided code.
+        The code should contain ALL functions for that file, not just one.
+        The function MUST already exist in the mapping.
+
+        Args:
+            name: Function name (used to find the file in the mapping)
+            code: Complete file code
+            app: App name in dot notation for app-specific lookup, None for root-level
+
+        Returns:
+            Full path if successful, None otherwise.
+        """
+        # Find the file containing this function - MUST exist
+        existing_file = await self._find_file_containing_function(name, app)
+
+        if not existing_file:
+            error_msg = f"Cannot update function '{name}' - not found in mapping"
+            if app:
+                error_msg += f" for app '{app}'"
+            logger.error(f"❌ _fs_update_code: {error_msg}")
+            return None
+
+        # Use the file from the mapping (could be main.py or user-created file)
+        file_path = os.path.join(self.functions_dir, existing_file)
+        logger.debug(f"📝 Updating entire file: {existing_file}")
 
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(code)
-            logger.debug(f"💾 Saved code to {file_path}")
+            logger.debug(f"💾 Updated file {file_path}")
             return file_path
         except IOError as e:
-            logger.error(f"❌ _fs_save_code: Failed to write file {file_path}: {e}")
+            logger.error(f"❌ _fs_update_code: Failed to write file {file_path}: {e}")
             return None
         except Exception as e:
-            logger.error(f"❌ _fs_save_code: Unexpected error saving {file_path}: {e}")
+            logger.error(f"❌ _fs_update_code: Unexpected error saving {file_path}: {e}")
             return None
 
     async def _fs_load_code(self, name, app_name=None):
@@ -1156,24 +1212,16 @@ async def {name}():
             logger.error(f"Create failed: 'Internal' is a reserved app name")
             raise ValueError("'Internal' is a reserved app name and cannot be used for creating functions")
 
-        # Determine the correct file path based on app parameter
-        if app:
-            # Convert dot notation to path (e.g., "App.SubModule" -> "App/SubModule")
-            app_path = self._app_name_to_path(app)
-            target_dir = os.path.join(self.functions_dir, app_path)
-            os.makedirs(target_dir, exist_ok=True)  # Ensure app directory exists (creates nested dirs)
-            file_path = os.path.join(target_dir, f"{secure_name}.py")
-        else:
-            file_path = os.path.join(self.functions_dir, f"{secure_name}.py")
-
-        if os.path.exists(file_path):
-            error_msg = f"Function '{secure_name}' already exists"
+        # Check if function already exists using the function file mapping (not file existence)
+        existing_file = await self._find_file_containing_function(secure_name, app)
+        if existing_file:
+            error_msg = f"Function '{secure_name}' already exists in {existing_file}"
             logger.warning(f"Create failed: {error_msg}")
             raise ValueError(error_msg)
 
         try:
             code_to_save = code if code is not None else self._code_generate_stub(secure_name, location)
-            if await self._fs_save_code(secure_name, code_to_save, app):
+            if await self._fs_add_code(secure_name, code_to_save, app):
                 logger.info(f"Function '{secure_name}' created successfully.")
                 return True
             else:
@@ -1191,54 +1239,10 @@ async def {name}():
 
     async def function_remove(self, name: str, app: Optional[str] = None) -> bool:
         '''
-        Removes a function file by moving it to the OLD subdirectory (relative to self.functions_dir).
-        If app is provided, looks for the function in the app-specific subdirectory (supports dot notation).
-        Returns True on success, raises ValueError/FileNotFoundError/RuntimeError on failure.
+        Removes a function from a file.
+        NOTE: Not yet implemented for main.py-based functions.
         '''
-        secure_name = utils.clean_filename(name)
-        if not secure_name:
-            error_msg = f"Invalid function name '{name}'"
-            logger.error(f"Remove failed: {error_msg}")
-            raise ValueError(error_msg)
-
-        # Determine the correct file path based on app parameter
-        if app:
-            # Convert dot notation to path (e.g., "App.SubModule" -> "App/SubModule")
-            app_path = self._app_name_to_path(app)
-            target_dir = os.path.join(self.functions_dir, app_path)
-            file_path = os.path.join(target_dir, f"{secure_name}.py")
-        else:
-            file_path = os.path.join(self.functions_dir, f"{secure_name}.py")
-        # self.old_dir is already correctly initialized in __init__ based on self.functions_dir
-        old_file_path = os.path.join(self.old_dir, f"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}_{secure_name}.py")
-
-
-        if not os.path.exists(file_path):
-            error_msg = f"Function '{secure_name}' not found at {file_path}"
-            logger.warning(f"⚠️ function_remove: {error_msg}")
-            raise FileNotFoundError(error_msg)
-        try:
-            # Ensure the OLD directory exists (it should be created by __init__)
-            os.makedirs(self.old_dir, exist_ok=True)
-
-            shutil.move(file_path, old_file_path)
-            logger.info(f"🗑️ Function '{secure_name}' removed. Moved from {file_path} to {old_file_path}")
-            await self.invalidate_all_dynamic_module_cache() # Invalidate cache
-
-            log_file_path = os.path.join(self.functions_dir, f"{secure_name}.log") # Use self.functions_dir for log
-            if os.path.exists(log_file_path):
-                try:
-                    os.remove(log_file_path)
-                    logger.debug(f"🗑️ Removed log file {log_file_path}")
-                except OSError as e:
-                    logger.warning(f"⚠️ Could not remove log file {log_file_path}: {e}")
-            return True
-        except Exception as e:
-            error_msg = f"Failed to remove function '{secure_name}': {e}"
-            logger.error(f"❌ function_remove: {error_msg}")
-            logger.debug(traceback.format_exc())
-            await self._write_error_log(secure_name, f"Failed to remove: {e}") # Use self._write_error_log
-            raise RuntimeError(error_msg) from e
+        raise NotImplementedError("function_remove is not yet implemented. Functions now live in main.py files and require selective removal logic.")
 
     async def _write_error_log(self, name: str, error_message: str) -> None: # Made it async to match caller, added self
         '''
@@ -1595,15 +1599,15 @@ async def {name}():
     async def function_set(self, args: Dict[str, Any], server: Any) -> Tuple[Optional[str], List[TextContent]]:
         """
         Handles the _function_set tool call.
-        Extracts all function names using AST parsing, saves the provided code.
-        Supports optional filename parameter for multi-function files.
+        Updates an EXISTING function's file with complete code.
+        The function must already exist in the mapping.
+        Extracts all function names using AST parsing, uses the first one to find the file.
         Supports optional app parameter for app-specific function targeting.
-        Returns the filename used (if successful) and a status message.
+        Returns the function name (if successful) and a status message.
         Does *not* perform full syntax validation before saving.
         """
         logger.info("⚙️ Handling _function_set call (using AST parsing for all functions)")
         code_buffer = args.get("code")
-        target_filename = args.get("filename")  # Optional filename parameter
         app_name = args.get("app")  # Optional app name for disambiguation
 
         if not code_buffer or not isinstance(code_buffer, str):
@@ -1628,56 +1632,26 @@ async def {name}():
         function_names = [func_info['name'] for func_info in functions_info]
         logger.info(f"⚙️ Extracted {len(function_names)} function(s) via AST: {', '.join(function_names)}")
 
-        # 2. Check if any functions already exist and determine where to save
-        existing_file = None
-        existing_app = None
-        if not target_filename:  # Only check existing files if no explicit filename was provided
-            # Check if any of the functions already exist
-            for func_name in function_names:
-                found_file = await self._find_file_containing_function(func_name, app_name)
-                if found_file:
-                    existing_file = found_file
-                    # Extract app_path from the file path if it's in a subdirectory (slash notation)
-                    existing_app = os.path.dirname(found_file) if '/' in found_file else None
-                    logger.info(f"⚙️ Found existing function '{func_name}' in {found_file}")
-                    break  # Use the first match we find
+        # 2. Check if at least one function exists in the mapping (required for update)
+        # Use the first function name to find the file to update
+        first_func_name = function_names[0]
+        existing_file = await self._find_file_containing_function(first_func_name, app_name)
 
-        # 3. Determine filename and app to save to
-        # First check if any function has an @app() decorator
-        decorator_app_name = None
-        for func_info in functions_info:
-            if func_info.get('app_name'):
-                decorator_app_name = func_info['app_name']
-                logger.info(f"⚙️ Found @app decorator with app name: {decorator_app_name}")
-                break
+        if not existing_file:
+            error_response = f"Cannot update function '{first_func_name}' - function not found in mapping. Use function_add to create new functions."
+            logger.error(f"❌ function_set: {error_response}")
+            return None, [TextContent(type="text", text=error_response)]
 
-        if target_filename:
-            # Use specified filename
-            filename_to_use = target_filename
-            # Prefer decorator app, then provided app parameter, then None
-            app_to_use = decorator_app_name or app_name
-            logger.info(f"⚙️ Using specified filename: {filename_to_use}")
-        elif existing_file:
-            # Update existing file - extract filename from existing location
-            filename_to_use = os.path.splitext(os.path.basename(existing_file))[0]
-            # Use existing file's app location to preserve file location
-            app_to_use = existing_app
-            logger.info(f"⚙️ Updating existing file: {existing_file}")
-        else:
-            # Create new file using first function name (backward compatibility)
-            filename_to_use = function_names[0]
-            # Prefer decorator app, then provided app parameter, then None
-            app_to_use = decorator_app_name or app_name
-            logger.info(f"⚙️ Creating new file using first function name: {filename_to_use}")
+        logger.info(f"⚙️ Updating existing file: {existing_file}")
 
-        # 4. Save the code using existing _fs_save_code method (validation will happen later when tools are listed/called)
-        saved_path = await self._fs_save_code(filename_to_use, code_buffer, app_to_use)
+        # 3. Save the code using _fs_update_code (overwrites entire file with complete code)
+        saved_path = await self._fs_update_code(first_func_name, code_buffer, app_name)
 
         if not saved_path:
-            error_response = f"Error saving functions to file '{filename_to_use}'."
+            error_response = f"Error saving functions to file '{existing_file}'."
             logger.error(f"❌ function_set: {error_response}")
-            # Return filename (as we got this far), but with error message
-            return filename_to_use, [TextContent(type="text", text=error_response)]
+            # Return first function name, but with error message
+            return first_func_name, [TextContent(type="text", text=error_response)]
 
         logger.info(f"💾 Functions saved successfully to {saved_path}")
 
@@ -1689,15 +1663,13 @@ async def {name}():
         syntax_error = None
         try:
             ast.parse(code_buffer)
-            logger.info(f"✅ Basic syntax validation (AST parse) successful for '{filename_to_use}'.")
+            logger.info(f"✅ Basic syntax validation (AST parse) successful for '{existing_file}'.")
         except SyntaxError as e:
             syntax_error = str(e)
-            logger.warning(f"⚠️ Basic syntax validation (AST parse) failed for '{filename_to_use}': {syntax_error}")
+            logger.warning(f"⚠️ Basic syntax validation (AST parse) failed for '{existing_file}': {syntax_error}")
 
         # 5. Clear cache (server needs to reload tools)
-        #logger.info(f"🧹 Clearing tool cache on server due to function_set for '{filename_to_use}'.")
-        #server._cached_tools = None
-        logger.info(f"🧹 Clearing tool cache timestamp on server due to function_set for '{filename_to_use}'.")
+        logger.info(f"🧹 Clearing tool cache timestamp on server due to function_set for '{existing_file}'.")
         server._last_functions_dir_mtime = None # Reset mtime to force reload
         server._last_servers_dir_mtime = None # Reset mtime to force reload
 
@@ -1723,7 +1695,7 @@ async def {name}():
             logger.info(f"✅ {response_message}")
 
         # Return TextContent with text and potentially annotations
-        return filename_to_use, [TextContent(type="text", text=response_message, annotations=annotations)]
+        return first_func_name, [TextContent(type="text", text=response_message, annotations=annotations)]
 
     # Function to get code for a dynamic function
     async def get_function_code(self, args, mcp_server) -> list[TextContent]:
