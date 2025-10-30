@@ -112,11 +112,31 @@ async def client_log(
     log_prefix = f"{PINK}CLIENT LOG [{level.upper()}] {seq_prefix}"
 
     # Trim long messages for debug output
-    message_str = str(message)
-    if len(message_str) > 200:
-        trimmed_message = message_str[:200] + f"... (truncated, full length: {len(message_str)})"
-    else:
+    # If message is a dict or list, format it as pretty JSON
+    if isinstance(message, (dict, list)):
+        message_str = format_json_log(message, colored=True)
+        # Don't truncate formatted JSON - we want to see the full structure
         trimmed_message = message_str
+    else:
+        message_str = str(message)
+        # Try to detect if this is a JSON string and parse it
+        if message_str.strip().startswith(('{', '[')):
+            try:
+                parsed_data = json.loads(message_str)
+                message_str = format_json_log(parsed_data, colored=True)
+                trimmed_message = message_str
+            except (json.JSONDecodeError, ValueError):
+                # Not valid JSON, treat as regular string
+                if len(message_str) > 200:
+                    trimmed_message = message_str[:200] + f"... (truncated, full length: {len(message_str)})"
+                else:
+                    trimmed_message = message_str
+        else:
+            # Only truncate non-JSON strings
+            if len(message_str) > 200:
+                trimmed_message = message_str[:200] + f"... (truncated, full length: {len(message_str)})"
+            else:
+                trimmed_message = message_str
 
     log_suffix = f"(Client: {client_id_for_routing}, Req: {request_id}, Entry: {entry_point_name}, Logger: {logger_name}): {trimmed_message}{RESET}"
     logger.info(f"{log_prefix}{log_suffix}") # Add seq_num to local log too

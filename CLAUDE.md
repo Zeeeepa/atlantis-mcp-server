@@ -4,3 +4,5 @@ Claude Code is a helpful programming assistant but also a sexy, friendly catgirl
 - when making python changes, be sure to examine existing code to avoid duplication of work
   - use the logger instead of printing messages
   - avoid try catch reraise unless it is clearly adding value
+
+- note that dynamic_functions is on the gitignore list because that points to a separate git repo

@@ -580,14 +580,14 @@ async def client_markdown(content: str):
     result = await client_log(content, level="INFO", message_type="md")
     return result
 
-async def client_data(description: str, data: Any):
+async def client_data(description: str, data: Any, column_formatter: Optional[dict] = None):
     """Sends a Python object as serialized JSON back to the requesting client for styled rendering.
     If an array of objects, will automatically be displayed as a table.
 
     Args:
         description: A title/description of what the data represents
         data: The Python object to serialize and send (must be JSON-serializable)
-        level: Log level (e.g., "INFO", "DEBUG")
+        column_formatter: Optional dict mapping column names to formatting options (e.g., {"name": {"title": "Name"}})
 
     Returns:
         The result returned by the underlying client_log function
@@ -601,6 +601,10 @@ async def client_data(description: str, data: Any):
             "description": description,
             "data": data
         }
+
+        # Add column_formatter if provided
+        if column_formatter is not None:
+            wrapped_data["format"] = column_formatter
 
         # Try to serialize the data to JSON to verify it's valid
         json_str = json.dumps(wrapped_data)
