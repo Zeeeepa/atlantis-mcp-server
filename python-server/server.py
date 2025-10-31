@@ -240,8 +240,9 @@ class DynamicConfigEventHandler(FileSystemEventHandler):
         async def _process_file_change(file_path: str):
             # --- Invalidate ALL Dynamic Function Runtime Caches ---
             # Check if the change was in the functions or servers directory
-            is_function_change = file_path.endswith(".py") and (os.path.dirname(file_path) == FUNCTIONS_DIR or
-                                                                file_path.startswith(FUNCTIONS_DIR + os.sep))
+            # Also handle directory changes (not just .py files) for directory deletions/additions
+            is_function_change = (file_path.endswith(".py") or file_path.startswith(FUNCTIONS_DIR + os.sep)) and \
+                                 (os.path.dirname(file_path) == FUNCTIONS_DIR or file_path.startswith(FUNCTIONS_DIR + os.sep))
             is_server_change = file_path.endswith(".json") and (os.path.dirname(file_path) == SERVERS_DIR or
                                                                 file_path.startswith(SERVERS_DIR + os.sep))
 
