@@ -2777,7 +2777,7 @@ async def get_all_tools_for_response(server: 'DynamicAdditionServer', caller_con
                 source_file = annotations.get('sourceFile', 'NOT_FOUND')
 
             if tool_dict and annotations and isinstance(annotations, dict) and annotations.get('type') == 'server':
-                logger.debug(f"🔍 SERIALIZED SERVER TOOL '{tool_dict.get('name')}' to dict:\n{format_json_log(tool_dict)}")
+                #logger.debug(f"🔍 SERIALIZED SERVER TOOL '{tool_dict.get('name')}' to dict:\n{format_json_log(tool_dict)}")
                 # Check if started_at is in annotations
                 if annotations and 'started_at' in annotations:
                     logger.debug(f"✅ Started_at preserved in serialized tool dict for '{tool_dict.get('name')}': {annotations['started_at']}")
