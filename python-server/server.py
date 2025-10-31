@@ -2229,6 +2229,16 @@ class DynamicAdditionServer(Server):
 
                 logger.info(f"📁 ADMIN APP CREATE requested by owner: {user or 'unknown'} - App: {app_name}")
 
+                # Check if app directory already exists
+                app_path = self.function_manager._app_name_to_path(app_name)
+                target_dir = os.path.join(self.function_manager.functions_dir, app_path)
+                main_py_path = os.path.join(target_dir, "main.py")
+
+                if os.path.exists(main_py_path):
+                    error_msg = f"App '{app_name}' already exists at {app_path}/main.py"
+                    logger.warning(f"❌ App create failed: {error_msg}")
+                    raise ValueError(error_msg)
+
                 # Create app directory with main.py containing empty index() function
                 # Use the same logic as _function_add for consistency
                 function_name = "index"
