@@ -2229,17 +2229,15 @@ class DynamicAdditionServer(Server):
 
                 logger.info(f"📁 ADMIN APP CREATE requested by owner: {user or 'unknown'} - App: {app_name}")
 
-                # Create main.py with index() function stub using the proper stub generator
-                filename = "main"
+                # Create app directory with main.py containing empty index() function
+                # Use the same logic as _function_add for consistency
                 function_name = "index"
-                # Use the DynamicFunctionManager's stub generator for consistency
-                main_stub = self.function_manager._code_generate_stub(function_name)
-                await self.function_manager.function_add(filename, main_stub, app_name)
+                await self.function_manager.function_add(function_name, None, app_name)
                 try:
                     await self._notify_tool_list_changed(change_type="added", tool_name=function_name)
                 except Exception as e:
                     logger.error(f"Error sending tool notification after adding {function_name}: {str(e)}")
-                result_raw = [TextContent(type="text", text=f"✅ Successfully created app '{app_name}' with {filename}.py containing {function_name}() function")]
+                result_raw = [TextContent(type="text", text=f"✅ Successfully created app '{app_name}' with main.py containing {function_name}() function")]
 
             elif actual_function_name == "_admin_git_update":
                 # Update server code by running git fetch and git merge

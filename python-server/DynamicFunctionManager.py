@@ -1152,8 +1152,13 @@ async def {name}():
         if function_name in app_mapping:
             return app_mapping[function_name]
 
-        # Fall back to main mapping only if not found (backward compatibility)
-        return self._function_file_mapping.get(function_name)
+        # Only fall back to main mapping if no app was specified
+        # When app_name is specified, we only check that specific app to allow
+        # creating functions with the same name in different apps (e.g., index() in multiple apps)
+        if app_name is None:
+            return self._function_file_mapping.get(function_name)
+
+        return None
 
     async def invalidate_all_dynamic_module_cache(self):
         """Safely removes ALL dynamic function modules AND the parent package from sys.modules cache."""
