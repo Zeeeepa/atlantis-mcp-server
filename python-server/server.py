@@ -2240,9 +2240,30 @@ class DynamicAdditionServer(Server):
                     raise ValueError(error_msg)
 
                 # Create app directory with main.py containing empty index() function
-                # Use the same logic as _function_add for consistency
+                # Generate custom stub with @index decorator
                 function_name = "index"
-                await self.function_manager.function_add(function_name, None, app_name)
+                index_stub = """\
+import atlantis
+import logging
+
+logger = logging.getLogger("mcp_server")
+
+
+@visible
+@index
+async def index():
+    \"\"\"
+    This is the entry point for the app
+    \"\"\"
+    logger.info("Executing app index function...")
+
+    await atlantis.client_log("index running")
+
+    # Replace this return statement with your function's result
+    return "App index executed successfully."
+
+"""
+                await self.function_manager.function_add(function_name, index_stub, app_name)
                 try:
                     await self._notify_tool_list_changed(change_type="added", tool_name=function_name)
                 except Exception as e:
