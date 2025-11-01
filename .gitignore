@@ -50,6 +50,8 @@ python-server/dynamic_functions/*
 python-server/dynamic_servers/*
 python-server/dynamic_functions/.gitignore
 python-server/dynamic_servers/OLD/
+python-server/runServerProd
+python-server/runServerFoo
 
 
 python-server2/
@@ -60,6 +62,3 @@ log/
 
 server.log
 
-
-python-server/runServerProd
-python-server/runServerFoo
