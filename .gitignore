@@ -59,3 +59,7 @@ log/
 *.db
 
 server.log
+
+
+python-server/runServerProd
+python-server/runServerFoo
