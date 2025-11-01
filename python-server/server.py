@@ -136,7 +136,7 @@ CLOUD_CONNECTION_MAX_BACKOFF_SECONDS = 15  # Maximum delay for exponential backo
 
 # Import color constants directly from ColoredFormatter
 from ColoredFormatter import (
-    BOLD, RESET, CYAN, BRIGHT_WHITE, PINK, GREEN, ORANGE,
+    BOLD, RESET, CYAN, BRIGHT_WHITE, PINK, GREEN, ORANGE, CORAL_PINK, SPRING_GREEN,
     CYAN as CYAN_COLOR, YELLOW, GREY as GREY_COLOR,
     RESET as RESET_COLOR, BOLD as BOLD_COLOR, RED, MAGENTA
 )
@@ -2974,7 +2974,6 @@ class ServiceClient:
         # Create list with app names and source files for easier inspection of duplicates
 
         tool_info_list = []
-        protected_info_list = []
         hidden_info_list = []
         server_info_list = []
         mcp_tools_list = []
@@ -3049,9 +3048,9 @@ class ServiceClient:
                 if 'visible' in decorators:
                     visibility_str += f" {GREY_COLOR}[@visible]{RESET_COLOR}"
                 if 'tick' in decorators:
-                    visibility_str += f" {MAGENTA}[@tick]{RESET_COLOR}"
+                    visibility_str += f" {BRIGHT_WHITE}[@tick]{RESET_COLOR}"
                 if 'chat' in decorators:
-                    visibility_str += f" {MAGENTA}[@chat]{RESET_COLOR}"
+                    visibility_str += f" {CORAL_PINK}[@chat]{RESET_COLOR}"
                 if 'session' in decorators:
                     visibility_str += f" {MAGENTA}[@session]{RESET_COLOR}"
                 if 'app' in decorators:
@@ -3061,7 +3060,7 @@ class ServiceClient:
 
             # Add index indicator if function is marked as index
             if is_index:
-                visibility_str += f" {MAGENTA}[@index]{RESET_COLOR}"
+                visibility_str += f" {SPRING_GREEN}[@index]{RESET_COLOR}"
 
             # Add pricing information if available
             if price_per_call is not None and price_per_sec is not None:
@@ -3083,16 +3082,13 @@ class ServiceClient:
             elif is_hidden:
                 formatted_line = f"{BOLD_COLOR}{app_display:{COL_WIDTH_APP}}{RESET_COLOR} {tool.name:{COL_WIDTH_FUNCTION}} {GREY_COLOR}{source_file:{COL_WIDTH_FILEPATH}}{RESET_COLOR}{visibility_str}{timestamp_str}"
                 hidden_info_list.append((app_display, tool.name, formatted_line))
-            elif is_protected:
-                formatted_line = f"{BOLD_COLOR}{app_display:{COL_WIDTH_APP}}{RESET_COLOR} {tool.name:{COL_WIDTH_FUNCTION}} {GREY_COLOR}{source_file:{COL_WIDTH_FILEPATH}}{RESET_COLOR}{visibility_str}{timestamp_str}"
-                protected_info_list.append((app_display, tool.name, formatted_line))
             else:
+                # Regular tools (including protected)
                 formatted_line = f"{BOLD_COLOR}{app_display:{COL_WIDTH_APP}}{RESET_COLOR} {tool.name:{COL_WIDTH_FUNCTION}} {GREY_COLOR}{source_file:{COL_WIDTH_FILEPATH}}{RESET_COLOR}{visibility_str}{timestamp_str}"
                 tool_info_list.append((app_display, tool.name, formatted_line))
 
         # Sort by app name then tool name (case-insensitive)
         tool_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
-        protected_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
         hidden_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
         server_info_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
         mcp_tools_list.sort(key=lambda x: (x[0].lower(), x[1].lower()))
@@ -3105,12 +3101,6 @@ class ServiceClient:
         logger.info(f"  {BOLD_COLOR}Functions: {len(tool_info_list)}{RESET_COLOR}")
         for _, _, formatted_line in tool_info_list:
             logger.info(f"    {formatted_line}")
-
-        if protected_info_list:
-            logger.info(f"")
-            logger.info(f"  {BOLD_COLOR}Protected: {len(protected_info_list)}{RESET_COLOR}")
-            for _, _, formatted_line in protected_info_list:
-                logger.info(f"    {formatted_line}")
 
         if mcp_tools_list:
             logger.info(f"")
@@ -3183,8 +3173,6 @@ class ServiceClient:
         # App summary section
         app_counts = defaultdict(int)
         for app_display, _, _ in tool_info_list:
-            app_counts[app_display] += 1
-        for app_display, _, _ in protected_info_list:
             app_counts[app_display] += 1
         for app_display, _, _ in hidden_info_list:
             app_counts[app_display] += 1

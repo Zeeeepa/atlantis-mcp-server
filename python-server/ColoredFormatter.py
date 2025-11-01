@@ -21,6 +21,8 @@ CYAN = "\x1b[36m"   # Added Cyan
 BRIGHT_WHITE = "\x1b[97m" # Added Bright White
 PINK = "\x1b[95m"  # Added Pink
 MAGENTA = "\x1b[35m"  # Added Magenta
+CORAL_PINK = "\x1b[38;5;204m"  # Coral pink
+SPRING_GREEN = "\x1b[38;2;0;250;154m"  # #00fa9a - vibrant spring green
 
 class ColoredFormatter(logging.Formatter):
     """
