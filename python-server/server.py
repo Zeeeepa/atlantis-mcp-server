@@ -27,6 +27,11 @@ from collections import defaultdict
 # Version
 SERVER_VERSION = "2.3.6"
 
+# Tool list display column widths
+COL_WIDTH_APP = 30
+COL_WIDTH_FUNCTION = 40
+COL_WIDTH_FILEPATH = 70
+
 from mcp.server import Server
 
 from mcp.client.websocket import websocket_client
@@ -131,13 +136,13 @@ CLOUD_CONNECTION_MAX_BACKOFF_SECONDS = 15  # Maximum delay for exponential backo
 
 # Import color constants directly from ColoredFormatter
 from ColoredFormatter import (
-    BOLD, RESET, CYAN, BRIGHT_WHITE, PINK,
+    BOLD, RESET, CYAN, BRIGHT_WHITE, PINK, GREEN, ORANGE,
     CYAN as CYAN_COLOR, YELLOW, GREY as GREY_COLOR,
     RESET as RESET_COLOR, BOLD as BOLD_COLOR, RED, MAGENTA
 )
 
 # Import dynamic management classes
-from DynamicFunctionManager import DynamicFunctionManager
+from DynamicFunctionManager import DynamicFunctionManager, VISIBILITY_DECORATORS
 from DynamicServerManager import DynamicServerManager
 
 # Import our utility module for dynamic functions
@@ -585,14 +590,13 @@ class DynamicAdditionServer(Server):
                                 logger.debug(f"🙈 Skipping function not in mapping for app '{app_name}': {tool_name} from {file_path}")
                                 continue
 
-                            # NEW OPT-IN VISIBILITY: Check if function has @visible, @public, @protected, or @tick decorator or is internal
+                            # NEW OPT-IN VISIBILITY: Check if function has a visibility decorator or is internal
                             decorators_from_info = func_info.get("decorators", [])
                             is_internal = tool_name.startswith('_function') or tool_name.startswith('_server') or tool_name.startswith('_admin')
-                            is_visible = ("visible" in decorators_from_info or "public" in decorators_from_info or "protected" in decorators_from_info or "tick" in decorators_from_info) if decorators_from_info else False
-                            is_hidden = "hidden" in decorators_from_info if decorators_from_info else False
+                            is_visible = any(dec in decorators_from_info for dec in VISIBILITY_DECORATORS) if decorators_from_info else False
 
-                            # Skip if explicitly hidden OR if not visible and not internal
-                            if is_hidden or (not is_visible and not is_internal):
+                            # Skip if not visible and not internal
+                            if not is_visible and not is_internal:
                                 logger.debug(f"🙈 Skipping non-visible function in tool creation: {tool_name} from {file_path}")
                                 continue
 
@@ -631,11 +635,6 @@ class DynamicAdditionServer(Server):
                             elif tool_name in self._temporarily_visible_functions:
                                 logger.info(f"{PINK}👁️ Showing temporarily visible function: {tool_name} (app: {actual_app_name}){RESET}")
                                 tool_annotations["temporarilyVisible"] = True
-                            elif decorators_from_info and "hidden" in decorators_from_info:
-                                # Skip this function if it has the @hidden decorator (and no override)
-                                # Note: This should never happen as hidden functions are filtered earlier
-                                logger.info(f"{PINK}🙈 Skipping hidden function: {tool_name} (app: {actual_app_name}){RESET}")
-                                continue
 
                             # Add location_name to annotations if present in function_info
                             location_name_from_info = func_info.get("location_name")
@@ -1748,6 +1747,53 @@ class DynamicAdditionServer(Server):
                     raise ValueError(f"Access denied: Internal functions can only be accessed by owner")
 
                 logger.debug(f"✅ Internal function '{actual_function_name}' authorized for owner: {caller}")
+            else:
+                # Non-internal function: validate it has a required decorator and check access
+                # Get function metadata from cache to check decorators
+                await self.function_manager._build_function_file_mapping()
+                app_path = self.function_manager._app_name_to_path(parsed_app_name) if parsed_app_name else None
+                func_metadata = self.function_manager._function_metadata_by_app.get(app_path, {}).get(actual_function_name)
+
+                if func_metadata:
+                    decorators_list = func_metadata.get('decorators', [])
+                    has_required_decorator = any(dec in decorators_list for dec in VISIBILITY_DECORATORS)
+
+                    if not has_required_decorator:
+                        error_msg = f"Access denied: Function '{actual_function_name}' cannot be called remotely without a visibility decorator"
+                        logger.warning(f"🚨 SECURITY: {error_msg}")
+                        raise PermissionError(error_msg)
+
+                    # Check access based on decorator type
+                    is_public = 'public' in decorators_list
+                    is_index = 'index' in decorators_list
+                    is_protected = 'protected' in decorators_list
+
+                    if is_public or is_index:
+                        # @public or @index - anyone can call
+                        decorator_type = '@index' if is_index else '@public'
+                        logger.debug(f"✅ Public function '{actual_function_name}' ({decorator_type}) accessible to caller: {user or client_id or 'unknown'}")
+                    elif is_protected:
+                        # @protected - delegated access control via protection function (checked later in function_call)
+                        logger.debug(f"🔒 Protected function '{actual_function_name}' - access will be validated by protection function")
+                    else:
+                        # @visible, @tick, @chat, @session, @price, @location, or @app - owner-only access
+                        caller = user or client_id or "unknown"
+                        owner = atlantis.get_owner()
+
+                        # Treat localhost websocket connections as the owner
+                        if caller.startswith("ws_127.0.0.1_") and owner:
+                            caller = owner
+
+                        if owner and caller != owner:
+                            logger.warning(f"🚨 SECURITY: Owner-only function '{actual_function_name}' called by '{caller}' but owner is '{owner}' - ACCESS DENIED")
+                            raise PermissionError(f"Access denied: Function '{actual_function_name}' can only be accessed by owner")
+
+                        logger.debug(f"✅ Function '{actual_function_name}' authorized for owner: {caller}")
+
+                    logger.debug(f"✅ Function '{actual_function_name}' has valid decorator(s): {decorators_list}")
+                else:
+                    # Function not found in metadata - this shouldn't happen for valid functions
+                    logger.warning(f"⚠️ Function '{actual_function_name}' not found in metadata cache")
 
             # Handle built-in tool calls
             if actual_function_name == "_function_set":
@@ -2989,26 +3035,33 @@ class ServiceClient:
             # Detect if function is protected
             is_protected = 'protected' in decorators if decorators else False
 
-            # Determine visibility indicator for non-internal functions
+            # Determine visibility indicator for non-internal functions - show ALL decorators
             visibility_str = ""
             if not is_internal and not is_server:
                 if 'public' in decorators:
-                    visibility_str = f" {CYAN_COLOR}[@public]{RESET_COLOR}"
-                elif 'protected' in decorators:
-                    # For protected functions, just show the group name without @protected wrapper
-                    # since it's already in the "Protected" section
+                    visibility_str += f" {GREEN}[@public]{RESET_COLOR}"
+                if 'protected' in decorators:
+                    # For protected functions, show the group name
                     if protection_name:
-                        visibility_str = f" {YELLOW}[{protection_name}]{RESET_COLOR}"
+                        visibility_str += f" {ORANGE}[{protection_name}]{RESET_COLOR}"
                     else:
-                        visibility_str = f" {YELLOW}[@protected]{RESET_COLOR}"
-                elif 'tick' in decorators:
-                    visibility_str = f" {MAGENTA}[@tick]{RESET_COLOR}"
-                elif 'visible' in decorators:
-                    visibility_str = f" {GREY_COLOR}[@visible]{RESET_COLOR}"
+                        visibility_str += f" {ORANGE}[@protected]{RESET_COLOR}"
+                if 'visible' in decorators:
+                    visibility_str += f" {GREY_COLOR}[@visible]{RESET_COLOR}"
+                if 'tick' in decorators:
+                    visibility_str += f" {MAGENTA}[@tick]{RESET_COLOR}"
+                if 'chat' in decorators:
+                    visibility_str += f" {MAGENTA}[@chat]{RESET_COLOR}"
+                if 'session' in decorators:
+                    visibility_str += f" {MAGENTA}[@session]{RESET_COLOR}"
+                if 'app' in decorators:
+                    visibility_str += f" {CYAN_COLOR}[@app]{RESET_COLOR}"
+                if 'location' in decorators:
+                    visibility_str += f" {GREY_COLOR}[@location]{RESET_COLOR}"
 
             # Add index indicator if function is marked as index
             if is_index:
-                visibility_str += f" {BRIGHT_WHITE}[@index]{RESET_COLOR}"
+                visibility_str += f" {MAGENTA}[@index]{RESET_COLOR}"
 
             # Add pricing information if available
             if price_per_call is not None and price_per_sec is not None:
@@ -3017,24 +3070,24 @@ class ServiceClient:
             # Format the line with colors
             # Format differently for servers (no app name column), MCP tools, internal tools, hidden, protected, or regular
             if is_server:
-                formatted_line = f"{tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR}{timestamp_str}"
+                formatted_line = f"{tool.name:{COL_WIDTH_FUNCTION}} {GREY_COLOR}{source_file:{COL_WIDTH_FILEPATH}}{RESET_COLOR}{timestamp_str}"
                 server_info_list.append((app_display, tool.name, formatted_line))
             elif is_mcp_tool:
                 # MCP tools from external servers - extract server name from tool name
                 origin_server = getattr(tool.annotations, 'originServer', 'unknown') if hasattr(tool, 'annotations') else 'unknown'
-                formatted_line = f"{CYAN_COLOR}{origin_server:30}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR}{timestamp_str}"
+                formatted_line = f"{CYAN_COLOR}{origin_server:{COL_WIDTH_APP}}{RESET_COLOR} {tool.name:{COL_WIDTH_FUNCTION}} {GREY_COLOR}{source_file:{COL_WIDTH_FILEPATH}}{RESET_COLOR}{timestamp_str}"
                 mcp_tools_list.append((origin_server, tool.name, formatted_line))
             elif is_internal:
-                formatted_line = f"{BOLD_COLOR}{app_display:30}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{timestamp_str}"
+                formatted_line = f"{BOLD_COLOR}{app_display:{COL_WIDTH_APP}}{RESET_COLOR} {tool.name:{COL_WIDTH_FUNCTION}} {GREY_COLOR}{source_file:{COL_WIDTH_FILEPATH}}{RESET_COLOR}{timestamp_str}"
                 internal_info_list.append((app_display, tool.name, formatted_line))
             elif is_hidden:
-                formatted_line = f"{BOLD_COLOR}{app_display:30}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
+                formatted_line = f"{BOLD_COLOR}{app_display:{COL_WIDTH_APP}}{RESET_COLOR} {tool.name:{COL_WIDTH_FUNCTION}} {GREY_COLOR}{source_file:{COL_WIDTH_FILEPATH}}{RESET_COLOR}{visibility_str}{timestamp_str}"
                 hidden_info_list.append((app_display, tool.name, formatted_line))
             elif is_protected:
-                formatted_line = f"{BOLD_COLOR}{app_display:30}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
+                formatted_line = f"{BOLD_COLOR}{app_display:{COL_WIDTH_APP}}{RESET_COLOR} {tool.name:{COL_WIDTH_FUNCTION}} {GREY_COLOR}{source_file:{COL_WIDTH_FILEPATH}}{RESET_COLOR}{visibility_str}{timestamp_str}"
                 protected_info_list.append((app_display, tool.name, formatted_line))
             else:
-                formatted_line = f"{BOLD_COLOR}{app_display:30}{RESET_COLOR} {tool.name:40} {GREY_COLOR}{source_file:50}{RESET_COLOR} {source_color}[{app_source_display}]{RESET_COLOR}{visibility_str}{timestamp_str}"
+                formatted_line = f"{BOLD_COLOR}{app_display:{COL_WIDTH_APP}}{RESET_COLOR} {tool.name:{COL_WIDTH_FUNCTION}} {GREY_COLOR}{source_file:{COL_WIDTH_FILEPATH}}{RESET_COLOR}{visibility_str}{timestamp_str}"
                 tool_info_list.append((app_display, tool.name, formatted_line))
 
         # Sort by app name then tool name (case-insensitive)
@@ -3077,13 +3130,13 @@ class ServiceClient:
             for _, _, formatted_line in hidden_info_list:
                 logger.info(f"    {formatted_line}")
 
-        # Report skipped hidden functions (split into Hidden and Invalid/Errors)
-        if hasattr(self.mcp_server.function_manager, '_skipped_hidden_functions') and self.mcp_server.function_manager._skipped_hidden_functions:
+        # Report skipped functions (split into Hidden and Invalid/Errors)
+        if hasattr(self.mcp_server.function_manager, '_skipped_functions') and self.mcp_server.function_manager._skipped_functions:
             # Separate hidden functions from invalid/error functions
             hidden_functions = []
             invalid_functions = []
 
-            for item in self.mcp_server.function_manager._skipped_hidden_functions:
+            for item in self.mcp_server.function_manager._skipped_functions:
                 # Check if this is an error condition vs. intentional hiding using explicit flag
                 if item.get('is_error', False):
                     invalid_functions.append(item)
@@ -3097,7 +3150,7 @@ class ServiceClient:
                 for item in sorted(hidden_functions, key=lambda x: ((x['app'] or 'top-level').lower(), x['name'].lower())):
                     # Convert slash path to dot notation for display
                     app_display = self.mcp_server.function_manager._path_to_app_name(item['app']) if item['app'] else 'top-level'
-                    logger.info(f"    {BOLD_COLOR}{app_display:30}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR}")
+                    logger.info(f"    {BOLD_COLOR}{app_display:{COL_WIDTH_APP}}{RESET_COLOR} {item['name']:{COL_WIDTH_FUNCTION}} {GREY_COLOR}{item['file']:{COL_WIDTH_FILEPATH}}{RESET_COLOR}")
 
             # Report invalid/error functions
             if invalid_functions:
@@ -3107,7 +3160,7 @@ class ServiceClient:
                     # Convert slash path to dot notation for display
                     app_display = self.mcp_server.function_manager._path_to_app_name(item['app']) if item['app'] else 'top-level'
                     reason = item.get('reason', 'unknown error')
-                    logger.error(f"    {BOLD_COLOR}{app_display:30}{RESET_COLOR} {item['name']:40} {GREY_COLOR}{item['file']:50}{RESET_COLOR} {RED}[{reason}]{RESET_COLOR}")
+                    logger.error(f"    {BOLD_COLOR}{app_display:{COL_WIDTH_APP}}{RESET_COLOR} {item['name']:{COL_WIDTH_FUNCTION}} {GREY_COLOR}{item['file']:{COL_WIDTH_FILEPATH}}{RESET_COLOR} {RED}[{reason}]{RESET_COLOR}")
 
             # Report duplicate functions
             duplicate_functions = self.mcp_server.function_manager._duplicate_functions
@@ -3117,7 +3170,7 @@ class ServiceClient:
                 for app_path, func_name, file_paths in sorted(duplicate_functions, key=lambda x: ((x[0] or 'top-level').lower(), x[1].lower())):
                     # Convert slash path to dot notation for display
                     app_display = self.mcp_server.function_manager._path_to_app_name(app_path) if app_path else 'top-level'
-                    logger.error(f"    {BOLD_COLOR}{app_display:30}{RESET_COLOR} {func_name:40}")
+                    logger.error(f"    {BOLD_COLOR}{app_display:{COL_WIDTH_APP}}{RESET_COLOR} {func_name:{COL_WIDTH_FUNCTION}}")
                     for i, file_path in enumerate(file_paths, 1):
                         logger.error(f"      {GREY_COLOR}Occurrence {i}: {file_path}{RESET_COLOR}")
 

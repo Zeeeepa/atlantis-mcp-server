@@ -42,21 +42,29 @@ import utils  # Utility module for dynamic functions
 # Directory to store dynamic function files
 PARENT_PACKAGE_NAME = "dynamic_functions"
 
+# Visibility decorators that allow remote function calls
+VISIBILITY_DECORATORS = ['visible', 'public', 'protected', 'tick', 'chat', 'session', 'index', 'price', 'location', 'app']
+
 # --- Identity Decorator Definition ---
 def _mcp_identity_decorator(f):
     """A simple identity decorator that returns the function unchanged. Used as a placeholder for @chat, @public, etc."""
     return f
 
 # --- App Decorator Definition ---
-def app(name: str):
-    """Decorator to associate a dynamic function with an application name. DEPRECATED: Use directories instead
-    Usage: @app(name="your_app_name")
+def app(func):
     """
-    def decorator(func_to_decorate):
-        setattr(func_to_decorate, '_app_name', name)
-        # functools.update_wrapper(decorator, func_to_decorate) # Not strictly needed for AST parsing but good practice
-        return func_to_decorate
-    return decorator
+    Decorator that marks a function as an 'app' function.
+    Grants visibility and owner-only access (for now - will use session-based logic later).
+
+    Usage: @app
+           def my_app_function():
+               # This function will be visible and callable by owner
+               ...
+    """
+    # Mark the function as visible by setting an attribute
+    setattr(func, '_is_visible', True)
+    setattr(func, '_is_app', True)
+    return func
 
 # --- Location Decorator Definition ---
 def location(name: str):
@@ -88,21 +96,6 @@ def shared(func_or_module):
     # Mark the function/module as shared by setting an attribute
     setattr(func_or_module, '_is_shared', True)
     return func_or_module
-
-# --- Hidden Decorator Definition ---
-def hidden(func):
-    """
-    Decorator that marks a function as 'hidden'.
-    When applied, the function will not be included in the tools list.
-
-    Usage: @hidden
-           def my_hidden_function():
-               # This function will not be visible in tools/list
-               ...
-    """
-    # Mark the function as hidden by setting an attribute
-    setattr(func, '_is_hidden', True)
-    return func
 
 # --- Visible Decorator Definition ---
 def visible(func):
@@ -213,7 +206,7 @@ class DynamicFunctionManager:
         self._function_file_mapping_by_app = {}  # app_name -> {function_name -> filename mapping}
         self._function_metadata_by_app = {}  # app_name -> {function_name -> func_info dict (includes protection_name)}
         self._function_file_mapping_mtime = 0.0  # track when mapping was last built
-        self._skipped_hidden_functions = []  # Track functions skipped due to @hidden decorator
+        self._skipped_functions = []  # Track functions skipped (syntax errors, missing decorators, etc.)
         self._duplicate_functions = []  # Track duplicates: [(app_path, func_name, [file_paths])]
 
         # Create directories if they don't exist
@@ -955,7 +948,7 @@ async def {name}():
             self._function_file_mapping.clear()
             self._function_file_mapping_by_app.clear()
             self._function_metadata_by_app.clear()
-            self._skipped_hidden_functions.clear()  # Clear skipped functions list to allow previously invalid functions to be retried
+            self._skipped_functions.clear()  # Clear skipped functions list to allow previously invalid functions to be retried
             self._duplicate_functions.clear()  # Clear duplicate tracking
 
             # Track ALL occurrences to detect duplicates at the end
@@ -1005,7 +998,7 @@ async def {name}():
                             clean_error = error_message.split('\n')[0] if error_message else 'unknown syntax error'
 
                             # Track this file with syntax error
-                            self._skipped_hidden_functions.append({
+                            self._skipped_functions.append({
                                 'name': os.path.splitext(os.path.basename(rel_path))[0],  # Use filename as name
                                 'app': track_app_path,  # Store slash path
                                 'file': rel_path,
@@ -1019,22 +1012,19 @@ async def {name}():
                             for func_info in functions_info:
                                 func_name = func_info['name']
 
-                                # NEW OPT-IN VISIBILITY: Check if function has @visible, @public, @protected, or @tick decorator or is internal
+                                # NEW OPT-IN VISIBILITY: Check if function has a visibility decorator or is internal
                                 decorators_from_info = func_info.get("decorators", [])
                                 protection_name = func_info.get("protection_name")
                                 is_internal = func_name.startswith('_function') or func_name.startswith('_server') or func_name.startswith('_admin')
-                                is_visible = ("visible" in decorators_from_info or "public" in decorators_from_info or "protected" in decorators_from_info or "tick" in decorators_from_info) if decorators_from_info else False
-                                is_hidden = "hidden" in decorators_from_info if decorators_from_info else False
+                                is_visible = any(dec in decorators_from_info for dec in VISIBILITY_DECORATORS) if decorators_from_info else False
 
                                 # Check if @protected has a valid protection name (required parameter)
                                 has_invalid_protected = "protected" in decorators_from_info and not protection_name
 
-                                # Skip if explicitly hidden OR if not visible and not internal OR if protected without valid name
-                                if is_hidden or (not is_visible and not is_internal) or has_invalid_protected:
+                                # Skip if not visible and not internal OR if protected without valid name
+                                if (not is_visible and not is_internal) or has_invalid_protected:
                                     if has_invalid_protected:
                                         skip_reason = "invalid @protected (missing required protection name)"
-                                    elif is_hidden:
-                                        skip_reason = "hidden by @hidden"
                                     else:
                                         skip_reason = "missing @visible decorator"
 
@@ -1050,7 +1040,7 @@ async def {name}():
                                         # Extract directory from file path
                                         track_app_path = os.path.dirname(rel_path) if '/' in rel_path else None
                                     # Track this skipped function
-                                    self._skipped_hidden_functions.append({
+                                    self._skipped_functions.append({
                                         'name': func_name,
                                         'app': track_app_path,  # Store slash path
                                         'file': rel_path,
@@ -1397,15 +1387,14 @@ async def {name}():
 
 
                         # Inject identity decorators for known decorator names
-                        # This makes @chat, @public, etc., resolvable during module load
+                        # This makes @chat, @public, @session, etc., resolvable during module load
                         module.__dict__['chat'] = _mcp_identity_decorator
                         module.__dict__['public'] = _mcp_identity_decorator
+                        module.__dict__['session'] = _mcp_identity_decorator
                         # Add app decorator which takes parameters
                         module.__dict__['app'] = app
                         # Add location decorator which takes parameters
                         module.__dict__['location'] = location
-                        # Add hidden decorator
-                        module.__dict__['hidden'] = hidden
                         # Add visible decorator
                         module.__dict__['visible'] = visible
                         # Add tick decorator

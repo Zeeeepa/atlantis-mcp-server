@@ -11,6 +11,7 @@ import logging
 # ANSI escape codes for colors
 GREY = "\x1b[90m"
 YELLOW = "\x1b[33m"
+ORANGE = "\x1b[38;5;214m"  # Orange/Amber color
 RED = "\x1b[31m"
 BOLD_RED = "\x1b[31;1m"
 RESET = "\x1b[0m"  # Reset to default color
