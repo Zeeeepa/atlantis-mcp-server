@@ -569,6 +569,36 @@ async def client_script(content: str):
     result = await client_log(content, level="INFO", message_type="script")
     return result
 
+async def set_background(base64_data: str):
+    """Sets the background of the 'feedback' div using base64 image data
+    and clears the parent 'chatFeedback' div gradient to black
+
+    Args:
+        base64_data: Base64-encoded image data (with or without 'base64:' prefix)
+    """
+    # Remove 'base64:' prefix if present
+    if base64_data.startswith('base64:'):
+        base64_data = base64_data[7:]
+
+    # Generate JavaScript to clear parent gradient and set the background of the feedback div
+    script = f"""
+    const chatFeedbackDiv = document.getElementById('chatFeedback');
+    if (chatFeedbackDiv) {{
+        chatFeedbackDiv.style.background = 'black';
+    }}
+
+    const feedbackDiv = document.getElementById('chatFeedback');
+    if (feedbackDiv) {{
+        feedbackDiv.style.backgroundImage = 'url(data:image/png;base64,{base64_data})';
+        feedbackDiv.style.backgroundSize = 'cover';
+        feedbackDiv.style.backgroundPosition = 'center';
+        feedbackDiv.style.backgroundRepeat = 'no-repeat';
+    }}
+    """
+
+    result = await client_script(script)
+    return result
+
 async def client_markdown(content: str):
     """Sends Markdown content back to the requesting client for rendering
 
