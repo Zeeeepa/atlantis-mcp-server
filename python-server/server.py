@@ -1888,7 +1888,12 @@ class DynamicAdditionServer(Server):
                         await self._notify_tool_list_changed(change_type="added", tool_name=func_name) # Pass params
                     except Exception as e:
                         logger.error(f"Error sending tool notification after adding {func_name}: {str(e)}")
-                    result_raw = [TextContent(type="text", text=f"Empty function '{func_name}' created successfully.")] # <-- Success message
+                    # Show app in success message
+                    if app_name:
+                        success_msg = f"Empty function '{func_name}' created successfully in app '{app_name}'."
+                    else:
+                        success_msg = f"Empty function '{func_name}' created successfully in root."
+                    result_raw = [TextContent(type="text", text=success_msg)]
 
             elif actual_function_name == "_server_get":
                 svc_name = args.get("name")
