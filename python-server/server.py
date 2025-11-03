@@ -2760,11 +2760,13 @@ async def index():
 
         except Exception as e:
             logger.error(f"❌ Error executing tool '{tool_name}': {str(e)}")
-            return {
+            error_response = {
                 "jsonrpc": "2.0",
                 "id": request_id,
                 "error": {"code": -32000, "message": f"Tool execution failed: {str(e)}"}
             }
+            logger.debug(f"📤 Returning error response: {error_response}")
+            return error_response
 
     async def _notify_tool_list_changed(self, change_type: str, tool_name: str):
         """Send a 'notifications/tools/list_changed' notification with details to all connected clients."""

@@ -10,6 +10,7 @@ import os.path
 import json
 import base64
 import logging
+import mimetypes
 from datetime import datetime, timezone
 
 # --- Context Variables ---
@@ -305,20 +306,29 @@ def reset_context(tokens: tuple):
 
 # --- Utility Functions ---
 
-async def client_image(image_path: str, image_format: str = "image/png"):
+async def client_image(image_path: str, image_format: Optional[str] = None):
     """Sends an image back to the requesting client for the current context.
     This is a wrapper around client_log that automatically loads the image,
     converts it to base64, and sets the appropriate message type.
 
     Args:
         image_path: Path to the image file to send
-        level: Log level (e.g., "INFO", "DEBUG")
-        image_format: MIME type of the image (e.g., "image/png", "image/jpeg")
+        image_format: Optional MIME type of the image (e.g., "image/png", "image/jpeg").
+                     If not provided, will be inferred from the file extension.
 
     Raises:
         FileNotFoundError: If the image file doesn't exist
         IOError: If there's an error reading the file
     """
+    # Infer MIME type from file extension if not provided
+    if image_format is None:
+        mime_type, _ = mimetypes.guess_type(image_path)
+        if mime_type and mime_type.startswith('image/'):
+            image_format = mime_type
+        else:
+            # Default to PNG if we can't determine the type
+            image_format = "image/png"
+
     # Convert image to base64
     base64_data = image_to_base64(image_path)
 
