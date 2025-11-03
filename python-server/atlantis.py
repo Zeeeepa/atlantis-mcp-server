@@ -579,16 +579,21 @@ async def client_script(content: str):
     result = await client_log(content, level="INFO", message_type="script")
     return result
 
-async def set_background(base64_data: str):
-    """Sets the background of the 'feedback' div using base64 image data
+async def set_background(image_path: str):
+    """Sets the background of the 'feedback' div using an image file
     and clears the parent 'chatFeedback' div gradient to black
 
     Args:
-        base64_data: Base64-encoded image data (with or without 'base64:' prefix)
+        image_path: Path to the image file (MIME type will be auto-detected from extension)
     """
-    # Remove 'base64:' prefix if present
-    if base64_data.startswith('base64:'):
-        base64_data = base64_data[7:]
+    # Infer MIME type from file extension
+    mime_type, _ = mimetypes.guess_type(image_path)
+    if not mime_type or not mime_type.startswith('image/'):
+        # Default to PNG if we can't determine the type
+        mime_type = "image/png"
+
+    # Convert image to base64
+    base64_data = image_to_base64(image_path)
 
     # Generate JavaScript to clear parent gradient and set the background of the feedback div
     script = f"""
@@ -599,7 +604,7 @@ async def set_background(base64_data: str):
 
     const feedbackDiv = document.getElementById('chatFeedback');
     if (feedbackDiv) {{
-        feedbackDiv.style.backgroundImage = 'url(data:image/png;base64,{base64_data})';
+        feedbackDiv.style.backgroundImage = 'url(data:{mime_type};base64,{base64_data})';
         feedbackDiv.style.backgroundSize = 'cover';
         feedbackDiv.style.backgroundPosition = 'center';
         feedbackDiv.style.backgroundRepeat = 'no-repeat';
