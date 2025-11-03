@@ -204,12 +204,15 @@ class DynamicConfigEventHandler(FileSystemEventHandler):
 
     def _trigger_reload(self, event_path):
         # Check if the change is relevant (Python file in any watched function dir or JSON file in any watched server dir)
-        is_function_change = event_path.endswith(".py") and any(
-            event_path.startswith(watched_dir + os.sep) or os.path.dirname(event_path) == watched_dir
+        # Also handle directory changes (for directory deletions/additions)
+        is_function_change = any(
+            (event_path.endswith(".py") or event_path.startswith(watched_dir + os.sep)) and
+            (event_path.startswith(watched_dir + os.sep) or os.path.dirname(event_path) == watched_dir)
             for watched_dir in self.watched_function_dirs
         )
-        is_server_change = event_path.endswith(".json") and any(
-            event_path.startswith(watched_dir + os.sep) or os.path.dirname(event_path) == watched_dir
+        is_server_change = any(
+            (event_path.endswith(".json") or event_path.startswith(watched_dir + os.sep)) and
+            (event_path.startswith(watched_dir + os.sep) or os.path.dirname(event_path) == watched_dir)
             for watched_dir in self.watched_server_dirs
         )
 
