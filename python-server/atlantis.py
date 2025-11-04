@@ -314,20 +314,17 @@ async def client_image(image_path: str, image_format: Optional[str] = None):
     Args:
         image_path: Path to the image file to send
         image_format: Optional MIME type of the image (e.g., "image/png", "image/jpeg").
-                     If not provided, will be inferred from the file extension.
+                     If not provided, will default to "image/png" for client compatibility.
 
     Raises:
         FileNotFoundError: If the image file doesn't exist
         IOError: If there's an error reading the file
     """
-    # Infer MIME type from file extension if not provided
+    # Always use image/png for all images to ensure client compatibility
+    # The cloud client only recognizes messageType="image/png", but will correctly
+    # render base64 data from JPEG and other formats when labeled as image/png
     if image_format is None:
-        mime_type, _ = mimetypes.guess_type(image_path)
-        if mime_type and mime_type.startswith('image/'):
-            image_format = mime_type
-        else:
-            # Default to PNG if we can't determine the type
-            image_format = "image/png"
+        image_format = "image/png"
 
     # Convert image to base64
     base64_data = image_to_base64(image_path)

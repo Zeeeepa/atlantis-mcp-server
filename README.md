@@ -55,7 +55,7 @@ To add Atlantis Open Weather for testing:
 
 5. To connect to Atlantis, sign into https://www.projectatlantis.ai under the same email
 
-6. Your remote(s) should autoconnect using email and default api key = 'foobar' (see '\user api_key' command to change). The first server to connect will be assigned your 'default' unless you manually change it later
+6. Your remote(s) should autoconnect using email and default api key = 'foobar' (see 'api' command to generate a new key later). The first server to connect will be assigned your 'default' unless you manually change it later
 
 7. Initially the functions and servers folders will be empty except for some examples
 
