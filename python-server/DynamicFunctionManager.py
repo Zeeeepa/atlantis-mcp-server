@@ -1627,25 +1627,32 @@ async def {name}():
         logger.info(f"⚙️ Extracted {len(function_names)} function(s) via AST: {', '.join(function_names)}")
 
         # 2. Check if at least one function exists in the mapping (required for update)
-        # Use the first function name to find the file to update
-        first_func_name = function_names[0]
-        existing_file = await self._find_file_containing_function(first_func_name, app_name)
+        # Try each function name to find one that exists in the mapping
+        # (The buffer may contain new functions not yet in the mapping)
+        matched_func_name = None
+        existing_file = None
+        for func_name in function_names:
+            existing_file = await self._find_file_containing_function(func_name, app_name)
+            if existing_file:
+                matched_func_name = func_name
+                logger.info(f"⚙️ Matched function '{func_name}' to file: {existing_file}")
+                break
 
-        if not existing_file:
-            error_response = f"Cannot update function '{first_func_name}' - function not found in mapping. Use function_add to create new functions."
+        if not existing_file or not matched_func_name:
+            error_response = f"Cannot update functions - none of the functions ({', '.join(function_names)}) found in mapping. Use function_add to create new functions."
             logger.error(f"❌ function_set: {error_response}")
             return None, [TextContent(type="text", text=error_response)]
 
         logger.info(f"⚙️ Updating existing file: {existing_file}")
 
         # 3. Save the code using _fs_update_code (overwrites entire file with complete code)
-        saved_path = await self._fs_update_code(first_func_name, code_buffer, app_name)
+        saved_path = await self._fs_update_code(matched_func_name, code_buffer, app_name)
 
         if not saved_path:
             error_response = f"Error saving functions to file '{existing_file}'."
             logger.error(f"❌ function_set: {error_response}")
-            # Return first function name, but with error message
-            return first_func_name, [TextContent(type="text", text=error_response)]
+            # Return matched function name, but with error message
+            return matched_func_name, [TextContent(type="text", text=error_response)]
 
         logger.info(f"💾 Functions saved successfully to {saved_path}")
 
@@ -1689,7 +1696,7 @@ async def {name}():
             logger.info(f"✅ {response_message}")
 
         # Return TextContent with text and potentially annotations
-        return first_func_name, [TextContent(type="text", text=response_message, annotations=annotations)]
+        return matched_func_name, [TextContent(type="text", text=response_message, annotations=annotations)]
 
     # Function to get code for a dynamic function
     async def get_function_code(self, args, mcp_server) -> list[TextContent]:
