@@ -314,17 +314,20 @@ async def client_image(image_path: str, image_format: Optional[str] = None):
     Args:
         image_path: Path to the image file to send
         image_format: Optional MIME type of the image (e.g., "image/png", "image/jpeg").
-                     If not provided, will default to "image/png" for client compatibility.
+                     If not provided, will be auto-detected from file extension.
 
     Raises:
         FileNotFoundError: If the image file doesn't exist
         IOError: If there's an error reading the file
     """
-    # Always use image/png for all images to ensure client compatibility
-    # The cloud client only recognizes messageType="image/png", but will correctly
-    # render base64 data from JPEG and other formats when labeled as image/png
+    # Auto-detect MIME type from file extension if not provided
     if image_format is None:
-        image_format = "image/png"
+        mime_type, _ = mimetypes.guess_type(image_path)
+        if not mime_type or not mime_type.startswith('image/'):
+            # Default to PNG if we can't determine the type
+            image_format = "image/png"
+        else:
+            image_format = mime_type
 
     # Convert image to base64
     base64_data = image_to_base64(image_path)
@@ -364,6 +367,69 @@ def image_to_base64(image_path: str) -> str:
     except IOError as e:
         # Log the error for debugging
         print(f"Error converting image to base64: {e}")
+        # Re-raise to allow caller to handle
+        raise
+
+async def client_video(video_path: str, video_format: Optional[str] = None):
+    """Sends a video back to the requesting client for the current context.
+    This is a wrapper around client_log that automatically loads the video,
+    converts it to base64, and sets the appropriate message type.
+
+    Args:
+        video_path: Path to the video file to send
+        video_format: Optional MIME type of the video (e.g., "video/mp4", "video/webm").
+                     If not provided, will be auto-detected from file extension.
+
+    Raises:
+        FileNotFoundError: If the video file doesn't exist
+        IOError: If there's an error reading the file
+    """
+    # Auto-detect MIME type from file extension if not provided
+    if video_format is None:
+        mime_type, _ = mimetypes.guess_type(video_path)
+        if not mime_type or not mime_type.startswith('video/'):
+            # Default to MP4 if we can't determine the type
+            video_format = "video/mp4"
+        else:
+            video_format = mime_type
+
+    # Convert video to base64
+    base64_data = video_to_base64(video_path)
+
+    # Add 'base64:' prefix to the string
+    prefixed_data = f"base64:{base64_data}"
+
+    # Send to client_log with appropriate message_type
+    result = await client_log(prefixed_data, level="INFO", message_type=video_format)
+    return result
+
+def video_to_base64(video_path: str) -> str:
+    """Loads a video from the given file path and converts it to a base64 string.
+
+    Args:
+        video_path: The path to the video file to load
+
+    Returns:
+        A base64-encoded string representation of the video
+
+    Raises:
+        FileNotFoundError: If the video file doesn't exist
+        IOError: If there's an error reading the file
+    """
+    # Verify file exists to provide a helpful error
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video file not found: {video_path}")
+
+    try:
+        # Read the binary data from the file
+        with open(video_path, "rb") as video_file:
+            # Convert binary data to base64 encoded string
+            encoded_string = base64.b64encode(video_file.read())
+            # Return as UTF-8 string
+            return encoded_string.decode('utf-8')
+    except IOError as e:
+        # Log the error for debugging
+        print(f"Error converting video to base64: {e}")
         # Re-raise to allow caller to handle
         raise
 
