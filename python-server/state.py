@@ -71,7 +71,7 @@ os.makedirs(SERVERS_DIR, exist_ok=True)
 HOST = "127.0.0.1"  # Listen on localhost only for security
 PORT = 8000
 
-SERVER_REQUEST_TIMEOUT = 30.0 # Seconds to wait for proxied server requests
+SERVER_REQUEST_TIMEOUT = 300.0 # Seconds to wait for proxied server requests and awaitable client commands (e.g., long-running cloud jobs)
 
 # Flags to track server state
 is_shutting_down = False
