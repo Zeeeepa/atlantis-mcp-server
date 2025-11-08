@@ -1656,8 +1656,17 @@ class DynamicAdditionServer(Server):
 
             # ONLY send to the specific client that made the request - NO broadcasting
             if client_id and client_id in client_connections:
+                # Debug logging for large messages (like videos/images)
+                if message_type and message_type.startswith(('image/', 'video/')):
+                    data_len = len(str(data)) if data else 0
+                    logger.info(f"📹 Sending {message_type} message: data length = {data_len} bytes ({data_len / (1024*1024):.2f} MB)")
+
                 # Convert to JSON string
                 notification_json = json.dumps(notification)
+                json_len = len(notification_json)
+
+                if message_type and message_type.startswith(('image/', 'video/')):
+                    logger.info(f"📦 JSON notification size: {json_len} bytes ({json_len / (1024*1024):.2f} MB)")
 
 
                 client_info = client_connections[client_id]

@@ -396,11 +396,8 @@ async def client_video(video_path: str, video_format: Optional[str] = None):
     # Convert video to base64
     base64_data = video_to_base64(video_path)
 
-    # Add 'base64:' prefix to the string
-    prefixed_data = f"base64:{base64_data}"
-
-    # Send to client_log with appropriate message_type
-    result = await client_log(prefixed_data, level="INFO", message_type=video_format)
+    # Send to client_log with appropriate message_type (same as client_image)
+    result = await client_log(base64_data, level="INFO", message_type=video_format)
     return result
 
 def video_to_base64(video_path: str) -> str:
