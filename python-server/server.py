@@ -25,7 +25,7 @@ import traceback
 from collections import defaultdict
 
 # Version
-SERVER_VERSION = "2.4.5"
+SERVER_VERSION = "2.4.6"
 
 # Tool list display column widths
 COL_WIDTH_APP = 30
@@ -3250,7 +3250,8 @@ class ServiceClient:
                         "serviceName": self.serviceName,
                         "hostname": hostname,
                         "port": self.server_port, # Send the stored port
-                        "serverVersion": SERVER_VERSION
+                        "serverVersion": SERVER_VERSION,
+                        "pythonVersion": sys.version.split()[0]
                     },
                     retry=False # We handle retries manually with backoff
                 )
