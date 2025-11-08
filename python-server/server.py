@@ -2502,8 +2502,8 @@ async def index():
                 # Support new June 2025 MCP spec: provide both serialized JSON and structuredContent
                 logger.debug(f"<--- Creating structured content result for tool '{name}' (June 2025 MCP spec).")
                 try:
-                    # Use pretty JSON formatting for dict results
-                    json_string = format_json_log(result_raw, colored=True)
+                    # Use plain JSON for the text field (actual data sent to cloud)
+                    json_string = json.dumps(result_raw, indent=2)
                     # Create TextContent with both text and structured content for backwards compatibility
                     annotations = {
                         "sourceType": "json",
@@ -2528,7 +2528,7 @@ async def index():
                         result_str = json.dumps(result_raw, indent=2, default=str)
                     elif isinstance(result_raw, dict):
                         # Pretty format dict
-                        result_str = format_json_log(result_raw, colored=True)
+                        result_str = json.dumps(result_raw, indent=2, default=str)
                     else:
                         # Use standard compact formatting for other types
                         result_str = json.dumps(result_raw)
