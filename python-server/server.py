@@ -595,7 +595,7 @@ class DynamicAdditionServer(Server):
 
                             # NEW OPT-IN VISIBILITY: Check if function has a visibility decorator or is internal
                             decorators_from_info = func_info.get("decorators", [])
-                            is_internal = tool_name.startswith('_function') or tool_name.startswith('_server') or tool_name.startswith('_admin')
+                            is_internal = tool_name.startswith('_function') or tool_name.startswith('_server') or tool_name.startswith('_admin') or tool_name.startswith('_public')
                             is_visible = any(dec in decorators_from_info for dec in VISIBILITY_DECORATORS) if decorators_from_info else False
 
                             # Skip if not visible and not internal
@@ -964,9 +964,9 @@ class DynamicAdditionServer(Server):
                 },
                 annotations=ToolAnnotations(title="_admin_pip_install")
             ),
-            Tool( # Add definition for _admin_click
-                name="_admin_click",
-                description="Handles click events from the client UI. Only available to server owner.",
+            Tool( # Add definition for _public_click
+                name="_public_click",
+                description="Handles click events from the client UI. Requires a valid callback key for security.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -974,11 +974,11 @@ class DynamicAdditionServer(Server):
                     },
                     "required": ["key"]
                 },
-                annotations=ToolAnnotations(title="_admin_click")
+                annotations=ToolAnnotations(title="_public_click")
             ),
-            Tool( # Add definition for _admin_upload
-                name="_admin_upload",
-                description="Handles upload calls from the client UI. Only available to server owner.",
+            Tool( # Add definition for _public_upload
+                name="_public_upload",
+                description="Handles upload calls from the client UI. Requires a valid callback key for security.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -989,7 +989,7 @@ class DynamicAdditionServer(Server):
                     },
                     "required": ["key", "filename", "filetype", "base64Content"]
                 },
-                annotations=ToolAnnotations(title="_admin_upload")
+                annotations=ToolAnnotations(title="_public_upload")
             ),
             Tool( # Add definition for _admin_app_create
                 name="_admin_app_create",
@@ -1541,7 +1541,7 @@ class DynamicAdditionServer(Server):
                             pass
                 else:
                     # Don't complain about missing lastModified for internal tools
-                    is_internal = tool.name.startswith('_admin') or tool.name.startswith('_function') or tool.name.startswith('_server')
+                    is_internal = tool.name.startswith('_admin') or tool.name.startswith('_function') or tool.name.startswith('_server') or tool.name.startswith('_public')
                     if not is_internal:
                         logger.debug(f"  -> No lastModified in original annotations for {tool.name}")
 
@@ -1727,7 +1727,7 @@ class DynamicAdditionServer(Server):
         # Store call start time for logging later
         call_start_datetime = datetime.datetime.now(datetime.timezone.utc)
         call_start_time = call_start_datetime.isoformat()
-        should_log_call = not (actual_function_name.startswith('_function') or actual_function_name.startswith('_server') or actual_function_name.startswith('_admin'))
+        should_log_call = not (actual_function_name.startswith('_function') or actual_function_name.startswith('_server') or actual_function_name.startswith('_admin') or actual_function_name.startswith('_public'))
         # --- END TOOL CALL LOGGING ---
 
         try:
@@ -2182,13 +2182,13 @@ class DynamicAdditionServer(Server):
                     logger.error(f"📦 Pip install error for package '{package}': {str(e)}")
                     result_raw = [TextContent(type="text", text=error_msg)]
 
-            elif actual_function_name == "_admin_click":
+            elif actual_function_name == "_public_click":
                 # Handle click events by invoking stored callbacks as dynamic functions
                 key = args.get("key")
                 if not key:
                     raise ValueError("Missing required parameter: key")
 
-                logger.info(f"🖱️ ADMIN CLICK: {user} clicked key: {key}")
+                logger.info(f"🖱️ PUBLIC CLICK: {user} clicked key: {key}")
 
                 # Check if we have a callback for this key using the global atlantis
                 callback = atlantis._click_callbacks.get(key)
@@ -2224,7 +2224,7 @@ class DynamicAdditionServer(Server):
                     click_msg = f"🖱️ Click received for key '{key}' but no callback registered"
                     result_raw = [TextContent(type="text", text=click_msg)]
 
-            elif actual_function_name == "_admin_upload":
+            elif actual_function_name == "_public_upload":
                 # Handle uploads by invoking stored callbacks as dynamic functions
                 key = args.get("key")
                 filename = args.get("filename")
@@ -2240,7 +2240,7 @@ class DynamicAdditionServer(Server):
                 if not base64Content:
                     raise ValueError("Missing required parameter: base64Content")
 
-                logger.info(f"🖱️ ADMIN UPLOAD: {user} uploading id: {key}, filename: {filename}, filetype: {filetype}")
+                logger.info(f"🖱️ PUBLIC UPLOAD: {user} uploading id: {key}, filename: {filename}, filetype: {filetype}")
 
                 # Check if we have a callback for this key using the global atlantis
                 callback = atlantis._upload_callbacks.get(key)
@@ -2370,8 +2370,8 @@ async def index():
                     logger.error(f"🔄 Git update exception: {error_msg}")
                     result_raw = [TextContent(type="text", text=error_msg)]
 
-            elif actual_function_name.startswith('_function') or actual_function_name.startswith('_server') or actual_function_name.startswith('_admin'):
-                # Catch-all for invalid internal functions (only _function* and _server* are internal)
+            elif actual_function_name.startswith('_function') or actual_function_name.startswith('_server') or actual_function_name.startswith('_admin') or actual_function_name.startswith('_public'):
+                # Catch-all for invalid internal functions (only _function*, _server*, _admin*, and _public* are internal)
                 error_message = f"Invalid internal function: '{actual_function_name}'. Check available internal functions."
                 error_annotations = {
                     "tool_error": {"tool_name": actual_function_name, "message": error_message}
@@ -2457,7 +2457,7 @@ async def index():
                     logger.error(f"❌ Unexpected error proxying tool call '{name}' to '{server_alias}': {proxy_err}", exc_info=True)
                     raise ValueError(f"Unexpected error calling '{tool_name_on_server}' on server '{server_alias}': {proxy_err}") from proxy_err
 
-            elif not (actual_function_name.startswith('_function') or actual_function_name.startswith('_server') or actual_function_name.startswith('_admin')):
+            elif not (actual_function_name.startswith('_function') or actual_function_name.startswith('_server') or actual_function_name.startswith('_admin') or actual_function_name.startswith('_public')):
 
                 # --- Handle Local Dynamic Function Call ---
                 logger.info(f"🔧 CALLING LOCAL DYNAMIC FUNCTION: {name}")
@@ -3007,7 +3007,7 @@ class ServiceClient:
             is_mcp_tool = tool_type == 'server_tool'  # MCP tools from external servers
 
             # Check if this is an internal tool - check the tool name regardless of app_source
-            is_internal = tool.name.startswith('_admin') or tool.name.startswith('_function') or tool.name.startswith('_server')
+            is_internal = tool.name.startswith('_admin') or tool.name.startswith('_function') or tool.name.startswith('_server') or tool.name.startswith('_public')
 
             if is_internal:
                 internal_count += 1
