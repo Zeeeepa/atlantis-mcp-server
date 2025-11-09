@@ -1,0 +1,14 @@
+{
+    "mcpServers": {
+        "weather": {
+            "command": "uvx",
+            "args": [
+                "--from",
+                "atlantis-open-weather-mcp",
+                "start-weather-server",
+                "--api-key",
+                "<your api key>"
+            ]
+        }
+    }
+}
