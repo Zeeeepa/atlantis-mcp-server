@@ -353,11 +353,11 @@ class DynamicAdditionServer(Server):
         # These now wrap the actual logic methods defined below
 
         @self.list_tools()
-        async def handle_list_tools() -> list[Tool]:
-            """SDK Handler for tools/list"""
-            logger.info(f"🚀 Processing MCP tool list request")
-            # Pass context indicating this call is from the SDK handler (likely a direct request)
-            return await self._get_tools_list(caller_context="handle_list_tools_sdk")
+        async def handle_list_tools_local() -> list[Tool]:
+            """SDK Handler for tools/list from LOCAL clients"""
+            logger.info(f"🚀 Processing LOCAL MCP tool list request")
+            # Delegate to _get_tools_list - this is a LOCAL client request
+            return await self._get_tools_list(caller_context="handle_list_tools_local", for_local_client=True)
 
         @self.list_prompts()
         async def handle_list_prompts() -> list:
@@ -371,7 +371,14 @@ class DynamicAdditionServer(Server):
 
         @self.call_tool()
         async def handle_call_tool(name: str, args: dict) -> list[TextContent]:
-            """SDK Handler for tools/call"""
+            """SDK Handler for tools/call
+
+            NOTE: This handler is NOT USED by this server!
+            This server uses custom WebSocket handlers that route through _handle_tools_call() instead.
+            SDK handlers like this are for stdio transport, which this server doesn't use.
+            """
+            # This should never be reached
+            logger.warning(f"⚠️ Unexpected call to SDK handler handle_call_tool for: {name}")
             return await self._execute_tool(name=name, args=args)
 
     # Initialization for function discovery
@@ -700,9 +707,53 @@ class DynamicAdditionServer(Server):
 
         return tools_list
 
-    async def _get_tools_list(self, caller_context: str = "unknown") -> list[Tool]:
-        """Core logic to return a list of available tools"""
-        logger.info(f"{BRIGHT_WHITE}📋 === GETTING TOOL LIST (Called by: {caller_context}) ==={RESET}")
+    async def _get_tools_list(self, caller_context: str = "unknown", for_local_client: bool = False) -> list[Tool]:
+        """Core logic to return a list of available tools
+
+        Args:
+            caller_context: Description of who/what is calling (for logging)
+            for_local_client: True if request is from a LOCAL client, False if from cloud or internal
+
+        Three scenarios:
+        1. Cloud requests tool list (for_local_client=False) → return FULL local tool list
+        2. Local requests, NO cloud connection exists → return FULL local tool list
+        3. Local requests, cloud connection EXISTS → return ONLY 'readme' and 'command' proxy tools
+        """
+        logger.info(f"{BRIGHT_WHITE}📋 === GETTING TOOL LIST (Called by: {caller_context}, for_local_client={for_local_client}) ==={RESET}")
+
+        # --- Check if this is a local client request with an active cloud connection ---
+        if for_local_client:
+            global client_connections
+            has_cloud_connection = any(info.get("type") == "cloud" for info in client_connections.values())
+
+            if has_cloud_connection:
+                # Scenario 3: Local client + cloud exists → return only proxy tools
+                logger.info("☁️ Local client request with cloud connection - returning only proxy tools (readme, command)")
+                return [
+                    Tool(
+                        name="readme",
+                        description="Get information about this MCP server from connected cloud",
+                        inputSchema={"type": "object", "properties": {}},
+                        annotations=ToolAnnotations(title="readme")
+                    ),
+                    Tool(
+                        name="command",
+                        description="Execute a command on the connected cloud",
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                "cmd": {"type": "string", "description": "The command to execute"}
+                            },
+                            "required": ["cmd"]
+                        },
+                        annotations=ToolAnnotations(title="command")
+                    )
+                ]
+
+        # Scenarios 1 & 2: Return full local tool list
+        # - Cloud requesting tools (for_local_client=False)
+        # - Local client but no cloud connection exists
+        logger.info("🏠 Returning full local tool list")
 
         # --- Caching Logic ---
         try:
@@ -2695,8 +2746,79 @@ async def index():
             connection_info = client_connections[client_id]
             logger.debug(f"✅ Found client {client_id} with type: {connection_info.get('type')}")
 
+        # Intercept local (non-cloud) tool calls to handle pseudo tools
+        if not for_cloud:
+            logger.info(f"🏠 Local MCP tool call intercepted: {tool_name}")
+
+            # Handle pseudo tools for local connections
+            if tool_name == "readme" or tool_name == "command":
+                # Find first cloud connection (client_connections already declared global above)
+                cloud_client_id = None
+
+                for cid, info in client_connections.items():
+                    if info.get("type") == "cloud":
+                        cloud_client_id = cid
+                        logger.info(f"☁️ Found cloud connection: {cloud_client_id}")
+                        break
+
+                if not cloud_client_id:
+                    # This shouldn't happen since we only expose these tools when cloud is connected
+                    logger.error(f"❌ {tool_name} tool called but no cloud connection found!")
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {
+                            "code": -32603,
+                            "message": f"No cloud connection available for {tool_name}"
+                        }
+                    }
+
+                # Send awaitable command to cloud client
+                try:
+                    logger.info(f"☁️ Sending '{tool_name}' command to cloud client {cloud_client_id}")
+                    response = await self.send_awaitable_client_command(
+                        client_id_for_routing=cloud_client_id,
+                        request_id=request_id,
+                        command=tool_name,
+                        command_data=params.get("arguments", {}),
+                        seq_num=1,
+                        entry_point_name=tool_name
+                    )
+
+                    logger.info(f"☁️ Got response from cloud client: {response}")
+
+                    # Return the response wrapped in MCP format
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": {
+                            "content": [{"type": "text", "text": str(response)}]
+                        }
+                    }
+                except Exception as e:
+                    logger.error(f"❌ Error sending {tool_name} to cloud: {e}")
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {
+                            "code": -32000,
+                            "message": f"Error communicating with cloud: {str(e)}"
+                        }
+                    }
+
+            # If we get here, it's an unexpected tool for local connections
+            logger.warning(f"⚠️ Unexpected tool call from local client: {tool_name}")
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32601,
+                    "message": f"Unknown tool: {tool_name}"
+                }
+            }
+
         try:
-            # Execute the tool
+            # Execute the tool (cloud connections only reach here)
             result_list = await self._execute_tool(
                 name=tool_name,
                 args=tool_args,
@@ -2919,9 +3041,40 @@ async def get_all_tools_for_response(server: 'DynamicAdditionServer', caller_con
     logger.debug(f"Helper: Prepared {len(tools_dict_list)} tool dictionaries.")
     return tools_dict_list
 
+def get_pseudo_tools_for_response() -> List[Dict[str, Any]]:
+    """
+    Returns pseudo tools for local WebSocket connections.
+    Local connections act as a routing layer and only see these two pseudo tools.
+    """
+    logger.info(f"🏠 Returning pseudo tools for local WebSocket connection")
+    return [
+        {
+            "name": "readme",
+            "description": "Returns information about this MCP server",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "command",
+            "description": "Execute a command (placeholder - does nothing for now)",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "cmd": {"type": "string", "description": "The command to execute"}
+                },
+                "required": ["cmd"]
+            }
+        }
+    ]
+
+
 async def get_filtered_tools_for_response(server: 'DynamicAdditionServer', caller_context: str) -> List[Dict[str, Any]]:
     """
     Fetches tools, filters out server-type tools, and prepares them for a JSON response.
+    Used for cloud Socket.IO connections.
     """
     logger.debug(f"Helper: Calling get_all_tools_for_response for filtering from {caller_context}")
     all_tools_dict_list = await get_all_tools_for_response(server, caller_context)
@@ -3800,14 +3953,15 @@ async def process_mcp_request(server, request, client_id=None):
             # Return empty object per MCP protocol spec
             return {"jsonrpc": "2.0", "id": req_id, "result": result}
         elif method == "tools/list":
-            logger.info(f"🧰 Processing 'tools/list' request via helper")
-            filtered_tools_dict_list = await get_filtered_tools_for_response(server, caller_context="process_mcp_request_websocket")
+            logger.info(f"🧰 Processing 'tools/list' request via helper for local WebSocket connection")
+            # Local WebSocket connections only see pseudo tools (readme, command)
+            pseudo_tools_list = get_pseudo_tools_for_response()
             response = {
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "result": {"tools": filtered_tools_dict_list}
+                "result": {"tools": pseudo_tools_list}
             }
-            logger.debug(f"📦 Prepared tools/list response (ID: {req_id}) with {len(filtered_tools_dict_list)} tools.")
+            logger.debug(f"📦 Prepared tools/list response (ID: {req_id}) with {len(pseudo_tools_list)} pseudo tools.")
             return response
         elif method == "tools/list_all": # Handling for list_all in direct connections
             # get all tools including internal

@@ -44,6 +44,152 @@ The dynamic functions system has **one source of truth**: the **file mapping**. 
 └─────────────────────────┘   └─────────────────────────────┘
 ```
 
+## Connection Types & Request Routing
+
+The server supports **two distinct connection types** with different entry points but shared core logic:
+
+### 1. Local WebSocket Connection 🏠
+
+**Used by:** `npx atlantis-mcp --port 8000`, Claude Desktop, or any MCP client connecting locally
+
+**Endpoint:** `ws://localhost:PORT/mcp` (defined in server.py:4066)
+
+**Entry Point:** `handle_websocket()` (server.py:3737)
+
+**Architecture:** Acts as a **routing layer** that forwards requests to cloud connections
+
+**Capabilities:**
+- ✅ Exposes 2 pseudo tools: `readme` and `command`
+- 🔄 Actual work is routed to cloud connections (not executed locally)
+- ✅ Standard MCP JSON-RPC protocol over WebSocket
+
+**Request Flow:**
+```
+WebSocket(/mcp) → handle_websocket() (3737)
+  → process_mcp_request() (3839)
+  → [method routing]
+  → tools/list:  get_filtered_tools_for_response() (2991)
+  → tools/call:  _handle_tools_call(for_cloud=False) (2687)
+                   → Intercepts pseudo tools (2730-2754)
+                   → Routes/forwards to cloud for actual execution
+```
+
+**Client Registration:**
+```python
+client_id = f"ws_{websocket.client.host}_{id(websocket)}"
+client_connections[client_id] = {"type": "websocket", "connection": websocket}
+```
+
+### 2. Cloud Socket.IO Connection ☁️
+
+**Used by:** Cloud-based clients connecting via Socket.IO
+
+**Transport:** Socket.IO with custom namespace
+
+**Entry Point:** `@self.sio.event` handler for `service_message` (server.py:3502)
+
+**Capabilities:**
+- ✅ Full access to all dynamic functions
+- ✅ Can execute actual Python functions from `dynamic_functions/`
+- ✅ JSON-RPC over Socket.IO events
+- ✅ Supports awaitable commands with correlation IDs
+
+**Request Flow:**
+```
+Socket.IO(service_message) → service_message handler (3502)
+  → _process_mcp_request() (3558)
+  → [method routing]
+  → tools/list:  get_filtered_tools_for_response() (2991)
+  → tools/call:  _handle_tools_call(for_cloud=True) (2687)
+                   → SKIPS pseudo tool intercepts
+                   → _execute_tool() (2769)
+                   → function_manager.function_call()
+                   → Actual dynamic function execution
+```
+
+**Client Registration:**
+```python
+client_id = f"cloud_{self._creation_time}_{id(self)}"
+client_connections[client_id] = {"type": "cloud", "connection": self}
+```
+
+### Shared Logic: `_handle_tools_call()`
+
+**Location:** server.py:2687
+
+**Purpose:** Consolidated tools/call handler for BOTH connection types
+
+**Key Decision Point (line 2730):**
+```python
+if not for_cloud:
+    # LOCAL PATH: Handle pseudo tools that route to cloud
+    if tool_name == "readme":
+        return hardcoded_readme_response
+    elif tool_name == "command":
+        return hardcoded_command_response  # Routes to cloud
+    else:
+        return error_unknown_tool
+else:
+    # CLOUD PATH: Execute actual dynamic functions
+    result = await self._execute_tool(...)
+    return formatted_result
+```
+
+This is the **critical branching point** that determines whether a tool call is handled as a routing pseudo tool (local) or executed directly (cloud).
+
+### SDK Decorators: NOT USED ⚠️
+
+The SDK decorators at server.py:355-406 are **not used** by either connection type:
+
+```python
+@self.list_tools()
+async def handle_list_tools() -> list[Tool]:
+    # NOT USED - only for stdio transport
+
+@self.call_tool()
+async def handle_call_tool(name: str, args: dict) -> list[TextContent]:
+    # NOT USED - bypassed by custom WebSocket handlers
+```
+
+These decorators are part of the MCP Python SDK's standard pattern but are bypassed because:
+- WebSocket connections use `process_mcp_request()` for custom routing
+- Socket.IO connections use `_process_mcp_request()` for custom routing
+- Both route directly to shared helpers (`get_filtered_tools_for_response()`, `_handle_tools_call()`)
+- SDK decorators would only be used for stdio transport (not implemented)
+
+**Why they exist:**
+- Required to initialize the MCP Server object
+- Generate server capabilities metadata
+- Follow SDK conventions for potential future stdio support
+
+### Comparison Table
+
+| Aspect | Local (WebSocket) | Cloud (Socket.IO) |
+|--------|-------------------|-------------------|
+| **Entry Point** | `handle_websocket()` | `service_message()` |
+| **Protocol** | MCP JSON-RPC over WebSocket | JSON-RPC over Socket.IO events |
+| **Tools Exposed** | 2 pseudo tools (routing layer) | All dynamic functions |
+| **Dynamic Functions** | 🔄 Routed to cloud via pseudo tools | ✅ Executed directly via `_execute_tool()` |
+| **Client ID Format** | `ws_{host}_{id}` | `cloud_{time}_{id}` |
+| **Response Format** | Standard MCP | Wrapped in Socket.IO event |
+| **Use Case** | Local MCP clients (routing layer) | Cloud execution backend |
+
+### Helper Functions (Shared by Both)
+
+Both connection types converge on these shared functions:
+
+**`get_filtered_tools_for_response(server, caller_context)` (server.py:2991)**
+- Filters out server-type tools from the list
+- Calls `get_all_tools_for_response()` → `_get_tools_list()`
+- Used by both WebSocket and Cloud paths
+
+**`get_all_tools_for_response(server, caller_context)` (server.py:2919)**
+- Fetches ALL tools via `_get_tools_list()`
+- Serializes Tool objects to dictionaries for JSON response
+- Preserves annotations and metadata
+
+Both ultimately flow through the same `_get_tools_list()` method documented below, ensuring a single source of truth for available tools.
+
 ## Key Components
 
 ### 1. DynamicFunctionManager (`DynamicFunctionManager.py`)
@@ -249,10 +395,14 @@ Parsing happens in `server.py:1645-1663`. The parsed fields provide routing cont
 
 ## Call Flow Examples
 
-### Example 1: Calling a Regular Function
+### Example 1: Calling a Regular Function (Cloud Path)
 
 ```
-Client: tools/call {name: "my_function", args: {...}}
+Cloud Client: tools/call {name: "my_function", args: {...}}
+    ↓
+Socket.IO service_message event
+    ↓
+_process_mcp_request() → _handle_tools_call(for_cloud=True)
     ↓
 server._execute_tool("my_function", {...})
     ↓
@@ -267,7 +417,33 @@ _function_file_mapping.get("my_function")
     ↓
 Load module, execute function
     ↓
-Return result to client
+Return result to client via Socket.IO
+```
+
+### Example 1b: Calling via Local Path (Routing Layer)
+
+```
+Local Client (npx atlantis-mcp): tools/call {name: "command", args: {...}}
+    ↓
+WebSocket message
+    ↓
+handle_websocket() → process_mcp_request()
+    ↓
+_handle_tools_call(for_cloud=False)
+    ↓
+Check: if not for_cloud (line 2730)
+    ↓
+tool_name == "command" (pseudo tool)
+    ↓
+Pseudo tool handler routes request to cloud connection
+    ↓
+Cloud connection executes actual dynamic function
+    ↓
+Result returned back through local WebSocket to client
+
+Note: Direct function names (e.g., "my_function") are not exposed
+to local clients. Local clients use pseudo tools like "command"
+which act as a routing layer to cloud execution.
 ```
 
 ### Example 2: Calling a Non-Visible Function (Security)
@@ -294,12 +470,19 @@ Raise FileNotFoundError (line 964)
 Return error to client
 ```
 
-### Example 3: Tools List Generation
+### Example 3: Tools List Generation (Both Paths)
+
+**Note:** Both connection types call the same `get_filtered_tools_for_response()` helper. However, local clients see a routing-layer interface (pseudo tools) while cloud clients see direct execution tools.
 
 ```
 Client: tools/list {}
     ↓
-server._get_tools_list("protocol")
+[WebSocket Path]: handle_websocket() → process_mcp_request()
+[Cloud Path]: service_message() → _process_mcp_request()
+    ↓
+get_filtered_tools_for_response(server, caller_context)
+    ↓
+get_all_tools_for_response() → server._get_tools_list()
     ↓
 Check cache (directory mtime)
     → Cache invalid, rebuild
@@ -315,7 +498,16 @@ For each function in mapping:
     → Check @hidden (redundant, defensive)
     → Create Tool object
     ↓
+Filter out server-type tools (type='server' in annotations)
+    ↓
 Return tools list to client
+
+Architecture Note:
+  → Local WebSocket clients are designed to use pseudo tools as a routing layer
+  → The @self.list_tools() decorator (355) defines pseudo tools for local clients
+  → But this decorator is NOT USED (bypassed by custom routing)
+  → The actual tools list comes from _get_tools_list() for both paths
+  → Local clients route through pseudo tools; cloud clients execute directly
 ```
 
 ## Performance Considerations
@@ -422,3 +614,19 @@ A: For debugging and introspection. It tracks all functions that were skipped du
 **Q: Can I change visibility at runtime?**
 
 A: No. Use decorators (`@visible` or `@public`) to control function visibility. Changes require editing the function file and rely on the file watcher for automatic reload.
+
+**Q: Why do local WebSocket clients only see pseudo tools?**
+
+A: Local WebSocket connections act as a **routing layer** rather than direct execution. The `_handle_tools_call()` method has a `for_cloud` parameter that determines behavior:
+- `for_cloud=False` (local WebSocket): Exposes pseudo tools ("readme", "command") that route requests to cloud connections
+- `for_cloud=True` (cloud Socket.IO): Direct execution of dynamic functions
+
+This architecture allows local MCP clients (like Claude Desktop or `npx atlantis-mcp`) to connect locally but have the actual work executed in the cloud. The pseudo tools act as routing commands rather than standalone functionality.
+
+**Q: How do I connect via the local WebSocket vs Cloud Socket.IO?**
+
+A:
+- **Local WebSocket:** Use any MCP client like `npx atlantis-mcp --port 8000` or configure Claude Desktop to connect to `ws://localhost:8000/mcp`
+- **Cloud Socket.IO:** Run the server with cloud credentials: `python server.py --email user@example.com --api-key KEY --service-name myservice`
+
+Both connections share the same core logic but have different entry points and capabilities as documented in the "Connection Types & Request Routing" section.
