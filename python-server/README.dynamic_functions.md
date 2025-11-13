@@ -135,6 +135,9 @@ async def special_function(data: str):
 - `@protected` → Visible, owner-only (currently), future enhancements planned
 - `@public` → Visible, accessible to all users
 
+> **📖 Security Note**: For comprehensive security information including network architecture,
+> secrets management, and best practices, see [README_SECURITY.md](./README_SECURITY.md).
+
 ## Atlantis Module
 
 **Communication:**

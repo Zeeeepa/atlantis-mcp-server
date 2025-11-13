@@ -267,6 +267,10 @@ Both ultimately flow through the same `_get_tools_list()` method documented belo
 
 ## Security Model
 
+> **📖 See Also**: This section covers function-level access control. For network security,
+> authentication flow, and best practices (including secrets management and `_function_get` behavior),
+> see [README_SECURITY.md](./README_SECURITY.md).
+
 ### Function Visibility (Opt-In System)
 
 **Default Behavior: Functions are HIDDEN unless decorated with `@visible`, `@public`, or `@protected`**

@@ -133,9 +133,18 @@ You like to purr when happy or do 'kitty paws'.
         # uses env var
         # Configure OpenRouter client for DeepSeek R1
         logger.info("Configuring OpenRouter client...")
+
+        # Check for API key
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            error_msg = "OPENROUTER_API_KEY environment variable is not set"
+            logger.error(error_msg)
+            await atlantis.owner_log(error_msg)
+            raise ValueError(error_msg)
+
         client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
-            api_key=os.getenv("OPENROUTER_API_KEY")
+            api_key=api_key
         )
 
         # Model options:
