@@ -43,7 +43,7 @@ import utils  # Utility module for dynamic functions
 PARENT_PACKAGE_NAME = "dynamic_functions"
 
 # Visibility decorators that allow remote function calls
-VISIBILITY_DECORATORS = ['visible', 'public', 'protected', 'tick', 'chat', 'session', 'index', 'price', 'location', 'app']
+VISIBILITY_DECORATORS = ['visible', 'public', 'protected', 'tick', 'chat', 'session', 'index', 'price', 'location', 'app', 'copy']
 
 # --- Identity Decorator Definition ---
 def _mcp_identity_decorator(f):
@@ -192,6 +192,28 @@ def price(pricePerCall: float, pricePerSec: float):
         return func
 
     return decorator
+
+# --- Copy Decorator Definition ---
+def copy(func):
+    """
+    Decorator that marks a function as 'copyable' via _function_get.
+    When applied, non-owners can retrieve the function's source code
+    according to the function's visibility rules (@public, @protected, @visible).
+
+    Usage: @copy
+           @public
+           async def my_copyable_function():
+               # Non-owners can view source via _function_get
+               ...
+
+    Note: @copy only affects _function_get access control.
+    - @copy + @public = Anyone can read the source code
+    - @copy + @protected("func") = Custom authorization via protection function
+    - @copy + @visible = Owner-only source code access (same as without @copy)
+    """
+    # Mark the function as copyable by setting an attribute
+    setattr(func, '_is_copyable', True)
+    return func
 
 class DynamicFunctionManager:
     def __init__(self, functions_dir):
@@ -730,22 +752,26 @@ class DynamicFunctionManager:
                     docstring = ast.get_docstring(func_def_node)
                     input_schema = {"type": "object"} # Default empty schema
 
-                    # Extract decorators, app_name, location_name, protection_name, is_index, and price
+                    # Extract decorators, app_name, location_name, protection_name, is_index, is_copyable, and price
                     decorator_names = []
                     app_name_from_decorator = None # Initialize app_name
                     location_name_from_decorator = None # Initialize location_name
                     protection_name_from_decorator = None # Initialize protection_name
                     is_index_from_decorator = False # Initialize is_index
+                    is_copyable_from_decorator = False # Initialize is_copyable
                     price_per_call_from_decorator = None # Initialize price_per_call
                     price_per_sec_from_decorator = None # Initialize price_per_sec
                     if func_def_node.decorator_list:
                         for decorator_node in func_def_node.decorator_list:
-                            if isinstance(decorator_node, ast.Name): # e.g. @public, @hidden, @index
+                            if isinstance(decorator_node, ast.Name): # e.g. @public, @hidden, @index, @copy
                                 decorator_name = decorator_node.id
                                 decorator_names.append(decorator_name)
                                 # Check if it's the @index decorator
                                 if decorator_name == 'index':
                                     is_index_from_decorator = True
+                                # Check if it's the @copy decorator
+                                if decorator_name == 'copy':
+                                    is_copyable_from_decorator = True
                             elif isinstance(decorator_node, ast.Call): # e.g. @app(name="foo") or @app("foo"), @location(name="bar") or @location("bar")
                                 if isinstance(decorator_node.func, ast.Name):
                                     decorator_func_name = decorator_node.func.id
@@ -863,6 +889,7 @@ class DynamicFunctionManager:
                         "location_name": location_name_from_decorator, # Add extracted location_name
                         "protection_name": protection_name_from_decorator, # Add extracted protection_name
                         "is_index": is_index_from_decorator, # Add extracted is_index flag
+                        "is_copyable": is_copyable_from_decorator, # Add extracted is_copyable flag
                         "price_per_call": price_per_call_from_decorator, # Add extracted price_per_call
                         "price_per_sec": price_per_sec_from_decorator # Add extracted price_per_sec
                     }
@@ -1405,6 +1432,8 @@ async def {name}():
                         module.__dict__['index'] = index
                         # Add price decorator
                         module.__dict__['price'] = price
+                        # Add copy decorator
+                        module.__dict__['copy'] = copy
                         # Add other known decorator names here if they arise
 
                         spec.loader.exec_module(module)

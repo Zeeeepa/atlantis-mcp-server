@@ -1793,10 +1793,86 @@ class DynamicAdditionServer(Server):
         try:
             result_raw = None # Initialize raw result variable
 
-            # Security check: Only owner can call internal functions
-            if (actual_function_name.startswith('_function') or
-                actual_function_name.startswith('_server') or
-                actual_function_name.startswith('_admin')):
+            # Security check: Special handling for _function_get with @copy decorator
+            if actual_function_name == "_function_get":
+                caller = user or client_id or "unknown"
+                owner = atlantis.get_owner()
+
+                # Treat localhost websocket connections as the owner
+                if caller.startswith("ws_127.0.0.1_") and owner:
+                    caller = owner
+
+                # Owner can always use _function_get
+                if owner and caller == owner:
+                    logger.debug(f"✅ _function_get authorized for owner: {caller}")
+                else:
+                    # Non-owner trying to use _function_get - check if target has @copy
+                    target_func_name = args.get("name")
+                    target_app_name = args.get("app")
+
+                    if not target_func_name:
+                        logger.warning(f"🚨 SECURITY: Non-owner '{caller}' tried _function_get without target function")
+                        raise ValueError("Access denied: _function_get requires owner (no target function specified)")
+
+                    # Look up target function metadata (cache should already be built)
+                    app_path = self.function_manager._app_name_to_path(target_app_name) if target_app_name else None
+                    target_metadata = self.function_manager._function_metadata_by_app.get(app_path, {}).get(target_func_name)
+
+                    if not target_metadata:
+                        logger.warning(f"🚨 SECURITY: Non-owner '{caller}' tried _function_get for unknown function '{target_func_name}'")
+                        raise ValueError(f"Access denied: Function '{target_func_name}' not found")
+
+                    # Check for @copy decorator
+                    is_copyable = target_metadata.get('is_copyable', False)
+                    if not is_copyable:
+                        logger.warning(f"🚨 SECURITY: Non-owner '{caller}' tried to copy '{target_func_name}' without @copy decorator")
+                        raise ValueError(f"Access denied: Function '{target_func_name}' is not copyable (missing @copy decorator)")
+
+                    # Has @copy - now check visibility decorators
+                    decorators_list = target_metadata.get('decorators', [])
+
+                    if 'public' in decorators_list:
+                        # @copy + @public = anyone can read
+                        logger.debug(f"✅ _function_get authorized for '{target_func_name}' (@copy + @public) by caller: {caller}")
+                    elif 'protected' in decorators_list:
+                        # @copy + @protected = check protection function
+                        protection_name = target_metadata.get('protection_name')
+                        if not protection_name:
+                            logger.warning(f"🚨 SECURITY: Function '{target_func_name}' has @protected but no protection function")
+                            raise ValueError(f"Access denied: Function '{target_func_name}' has @protected but no protection function")
+
+                        logger.debug(f"🔒 _function_get for '{target_func_name}' (@copy + @protected) - calling protection function: {protection_name}")
+
+                        # Call protection function to check authorization
+                        try:
+                            is_allowed = await self.function_manager.function_call(
+                                name=protection_name,
+                                client_id=client_id,
+                                request_id=request_id,
+                                user=user,
+                                app=None,  # Protection functions must be top-level
+                                args={'user': user}
+                            )
+
+                            if not is_allowed:
+                                logger.warning(f"🚨 SECURITY: Protection function '{protection_name}' denied _function_get for '{target_func_name}' by user '{user}'")
+                                raise PermissionError(f"Access denied: User '{user}' not authorized to copy '{target_func_name}'")
+
+                            logger.debug(f"✅ _function_get authorized for '{target_func_name}' via protection function '{protection_name}'")
+                        except PermissionError:
+                            raise
+                        except Exception as prot_err:
+                            logger.error(f"❌ Error executing protection function '{protection_name}' for _function_get: {prot_err}")
+                            raise PermissionError(f"Access denied: Error checking authorization for '{target_func_name}'") from prot_err
+                    else:
+                        # @copy + @visible (or other owner-only decorator) = still owner-only
+                        logger.warning(f"🚨 SECURITY: Non-owner '{caller}' tried to copy owner-only function '{target_func_name}' (has @copy but not @public/@protected)")
+                        raise ValueError(f"Access denied: Function '{target_func_name}' is owner-only (@copy requires @public or @protected for non-owner access)")
+
+            # Security check: Only owner can call other internal functions
+            elif (actual_function_name.startswith('_function') or
+                  actual_function_name.startswith('_server') or
+                  actual_function_name.startswith('_admin')):
 
                 caller = user or client_id or "unknown"
                 owner = atlantis.get_owner()
@@ -3229,6 +3305,8 @@ class ServiceClient:
                     visibility_str += f" {CYAN_COLOR}[@app]{RESET_COLOR}"
                 if 'location' in decorators:
                     visibility_str += f" {GREY_COLOR}[@location]{RESET_COLOR}"
+                if 'copy' in decorators:
+                    visibility_str += f" {CYAN_COLOR}[@copy]{RESET_COLOR}"
 
             # Add index indicator if function is marked as index
             if is_index:
