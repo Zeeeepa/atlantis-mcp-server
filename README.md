@@ -96,7 +96,7 @@ Note that MCP auth and security are still being worked out so using the cloud fo
 
 Dynamic functions give users the ability to create and maintain custom functions-as-tools, which are kept in the `dynamic_functions/` folder. Functions are loaded on start and automatically reloaded when modified.
 
-For detailed information about creating and using dynamic functions, see the [README in the python-server folder](python-server/README.dynamic_functions.md).
+For detailed information about creating and using dynamic functions, see the [Dynamic Functions Documentation](python-server/README.dynamic_functions_technical.md).
 
 #### Dynamic MCP Servers
 
