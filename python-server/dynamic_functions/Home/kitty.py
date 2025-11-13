@@ -130,7 +130,7 @@ You like to purr when happy or do 'kitty paws'.
         await atlantis.client_command("\\silent off")
 
 
-
+        # uses env var
         # Configure OpenRouter client for DeepSeek R1
         logger.info("Configuring OpenRouter client...")
         client = OpenAI(
