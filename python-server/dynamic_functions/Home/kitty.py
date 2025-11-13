@@ -135,8 +135,7 @@ You like to purr when happy or do 'kitty paws'.
         logger.info("Configuring OpenRouter client...")
         client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
-            #api_key=os.getenv("OPENROUTER_API_KEY"),
-            api_key="<your api key>"
+            api_key=os.getenv("OPENROUTER_API_KEY")
         )
 
         # Model options:
