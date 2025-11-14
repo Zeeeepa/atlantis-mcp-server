@@ -20,8 +20,8 @@ async def session():
     await atlantis.set_background(image_path)
 
 
-    await atlantis.client_command("\\chat set " + user_id + "*kitty")
-
+    #await atlantis.client_command("\\chat set " + user_id + "*kitty")
+    await atlantis.client_command("\\chat set admin*kitty")
 
     # send kitty face image
     kitty_path = os.path.join(os.path.dirname(__file__), "kitty_face_compressed.jpg")
