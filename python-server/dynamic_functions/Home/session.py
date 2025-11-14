@@ -15,13 +15,13 @@ async def session():
     user_id = atlantis.get_caller()
     logger.info(f"Session started for user: {user_id}")
 
+    owner_id = atlantis.get_owner()
+
     # set background
     image_path = os.path.join(os.path.dirname(__file__), "builder.jpg")
     await atlantis.set_background(image_path)
 
-
-    #await atlantis.client_command("\\chat set " + user_id + "*kitty")
-    await atlantis.client_command("\\chat set " + user_id + "*kitty")
+    await atlantis.client_command("\\chat set " + owner_id + "*kitty")
 
     # send kitty face image
     kitty_path = os.path.join(os.path.dirname(__file__), "kitty_face_compressed.jpg")
