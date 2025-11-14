@@ -4,7 +4,7 @@ import os
 
 logger = logging.getLogger("mcp_server")
 
-
+@public
 @session
 async def session():
     """
