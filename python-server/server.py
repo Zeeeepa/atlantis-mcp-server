@@ -4364,6 +4364,17 @@ if __name__ == "__main__":
             if not args.email or not args.api_key or not args.service_name:
                 logger.error("❌ CLOUD SERVER CONNECTION REQUIRES EMAIL, API KEY AND SERVICE NAME")
                 logger.error("❌ Use --email and --api_key to specify credentials, --service-name to specify desired service name")
+                logger.error("")
+                logger.error("📋 RECEIVED PARAMETERS:")
+                logger.error(f"   --email: {repr(args.email) if args.email else '❌ MISSING'}")
+                logger.error(f"   --api-key: {repr(args.api_key) if args.api_key else '❌ MISSING'}")
+                logger.error(f"   --service-name: {repr(args.service_name) if args.service_name else '❌ MISSING'}")
+                logger.error("")
+                logger.error("🔍 TROUBLESHOOTING:")
+                logger.error("   If calling from a shell script, check for broken line continuations (\\)")
+                logger.error("   Each line except the last must end with a backslash if command spans multiple lines")
+                logger.error("")
+                logger.error(f"📝 RAW COMMAND LINE ARGS: {sys.argv}")
                 logger.info("☁️ CLOUD SERVER CONNECTION DISABLED")
             else:
                 logger.info(f"{PINK}☁️ CLOUD SERVER CONNECTION ENABLED: {CLOUD_SERVER_URL}{RESET}")
