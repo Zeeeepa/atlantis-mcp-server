@@ -11,7 +11,8 @@ while true; do
     --port=8000  \
     --cloud-host=wss://projectatlantis.ai  \
     --cloud-port=443  \
-    --service-name=home
+    --service-name=home \
+    --app-name=pa
 
   exit_code=$?
   echo "Server exited with code $exit_code"
