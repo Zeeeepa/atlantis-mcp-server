@@ -3192,11 +3192,12 @@ class ServiceClient:
 
     Manages the Socket.IO connection to the cloud server's service namespace.
     """
-    def __init__(self, server_url: str, namespace: str, email: str, api_key: str, serviceName: str, mcp_server: Server, port: int):
+    def __init__(self, appName:str, server_url: str, namespace: str, email: str, api_key: str, serviceName: str, mcp_server: Server, port: int):
         self.server_url = server_url
         self.namespace = namespace
         self.email = email
         self.api_key = api_key
+        self.appName = appName
         self.serviceName = serviceName
         self.mcp_server = mcp_server
         self.server_port = port # Store the server's listening port
@@ -3208,6 +3209,7 @@ class ServiceClient:
         self.connection_active = True
         # Store creation time for stable client ID
         self._creation_time = int(time.time())
+        logger.info(f"🎯 ServiceClient initialized with appName: '{self.appName}', serviceName: '{self.serviceName}'")
 
     # THIS IS THE BIG REPORT
     async def _report_tools_to_console(self, tools_list=None):
@@ -3480,19 +3482,22 @@ class ServiceClient:
                 # Connect with authentication data including hostname
 
                 hostname = socket.gethostname()
+                auth_payload = {
+                    "email": self.email,
+                    "apiKey": self.api_key,
+                    "serviceName": self.serviceName,
+                    "appName": self.appName,
+                    "hostname": hostname,
+                    "port": self.server_port, # Send the stored port
+                    "serverVersion": SERVER_VERSION,
+                    "pythonVersion": sys.version.split()[0]
+                }
+                logger.info(f"🔐 Connecting with auth: email={self.email}, serviceName={self.serviceName}, appName={self.appName}, hostname={hostname}")
                 await self.sio.connect(
                     self.server_url,
                     namespaces=[self.namespace],
                     transports=['websocket'],  # Prefer websocket
-                    auth={
-                        "email": self.email,
-                        "apiKey": self.api_key,
-                        "serviceName": self.serviceName,
-                        "hostname": hostname,
-                        "port": self.server_port, # Send the stored port
-                        "serverVersion": SERVER_VERSION,
-                        "pythonVersion": sys.version.split()[0]
-                    },
+                    auth=auth_payload,
                     retry=False # We handle retries manually with backoff
                 )
 
@@ -4247,6 +4252,7 @@ if __name__ == "__main__":
     parser.add_argument("--email", help="Service email for cloud authentication")
     parser.add_argument("--api-key", help="Service API key for cloud authentication")
     parser.add_argument("--service-name", help="Desired service name")
+    parser.add_argument("--app-name", help="App name for cloud authentication")
     parser.add_argument("--no-cloud", action="store_true", help="Disable cloud server connection")
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], default="INFO", help="Set the logging level")
     args = parser.parse_args()
@@ -4385,6 +4391,7 @@ if __name__ == "__main__":
                     email=args.email,
                     api_key=args.api_key,
                     serviceName=args.service_name,
+                    appName = args.app_name,
                     mcp_server=mcp_server,
                     port=PORT # Pass the listening port
                 )
