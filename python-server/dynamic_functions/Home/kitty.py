@@ -219,7 +219,7 @@ You like to purr when happy or do 'kitty paws'.
 
                 for chunk in stream:
                     chunk_count += 1
-                    #logger.info(f"CHUNK {chunk_count} RECEIVED AT: {datetime.now().isoformat()}")
+                    logger.info(f"CHUNK {chunk_count} RECEIVED AT: {datetime.now().isoformat()}")
 
                     if chunk.choices and len(chunk.choices) > 0:
                         delta = chunk.choices[0].delta
@@ -253,12 +253,39 @@ You like to purr when happy or do 'kitty paws'.
                             logger.info(f"TOOL CALLS DETECTED: {format_json_log(chunk.model_dump())}")
 
                             for tool_call in delta.tool_calls:
-                                call_id = tool_call.id
-                                function_name = tool_call.function.name
-                                arguments_str = tool_call.function.arguments
+                                index = tool_call.index
+
+                                # Initialize accumulator for this tool call if needed
+                                if index not in tool_calls_accumulator:
+                                    tool_calls_accumulator[index] = {
+                                        'id': None,
+                                        'name': None,
+                                        'arguments': ''
+                                    }
+
+                                # Accumulate the chunks
+                                if tool_call.id:
+                                    tool_calls_accumulator[index]['id'] = tool_call.id
+                                if tool_call.function.name:
+                                    tool_calls_accumulator[index]['name'] = tool_call.function.name
+                                if tool_call.function.arguments:
+                                    tool_calls_accumulator[index]['arguments'] += tool_call.function.arguments
+
+                                logger.info(f"Accumulated tool call {index}: id={tool_calls_accumulator[index]['id']}, name={tool_calls_accumulator[index]['name']}, args_len={len(tool_calls_accumulator[index]['arguments'])}")
+
+                        # Check if stream is ending (finish_reason is set)
+                        finish_reason = chunk.choices[0].finish_reason if chunk.choices else None
+                        if finish_reason == 'tool_calls':
+                            logger.info("Stream finished with tool_calls - executing accumulated tool calls")
+
+                            # Execute all accumulated tool calls
+                            for index, accumulated_call in tool_calls_accumulator.items():
+                                call_id = accumulated_call['id']
+                                function_name = accumulated_call['name']
+                                arguments_str = accumulated_call['arguments']
 
                                 try:
-                                    # Parse the arguments JSON
+                                    # Parse the complete arguments JSON
                                     arguments = json.loads(arguments_str) if arguments_str else {}
 
                                     await atlantis.client_log(f"Executing tool call: {function_name} with args: {arguments}")
@@ -266,8 +293,6 @@ You like to purr when happy or do 'kitty paws'.
                                     # Execute the tool call through atlantis client command
                                     tool_result = await atlantis.client_command(f"@{function_name}", data=arguments)
                                     logger.info(f"Tool result: {tool_result}")
-
-
 
                                     # Send tool result to client for display
                                     await atlantis.tool_result(function_name, tool_result)
@@ -301,6 +326,7 @@ You like to purr when happy or do 'kitty paws'.
                                     logger.error(f"Failed arguments_str (length {len(arguments_str) if arguments_str else 0}): {repr(arguments_str)}")
                                     await atlantis.client_log(f"Error parsing tool call arguments: {e}\nFailed data: {repr(arguments_str)}", level="ERROR")
                                 except Exception as e:
+                                    logger.error(f"Error executing tool call: {e}")
                                     await atlantis.client_log(f"Error executing tool call: {e}", level="ERROR")
 
                             # Break out of stream loop to make another API call with updated transcript
