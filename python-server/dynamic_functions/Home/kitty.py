@@ -288,13 +288,17 @@ You like to purr when happy or do 'kitty paws'.
                                     # Parse the complete arguments JSON
                                     arguments = json.loads(arguments_str) if arguments_str else {}
 
-                                    await atlantis.client_log(f"Executing tool call: {function_name} with args: {arguments}")
+                                    #await atlantis.client_log(f"Executing tool call: {function_name} with args: {arguments}")
 
                                     # Execute the tool call through atlantis client command
+
+                                    await atlantis.client_command("\\silent on")
                                     tool_result = await atlantis.client_command(f"@{function_name}", data=arguments)
+                                    await atlantis.client_command("\\silent off")
+
                                     logger.info(f"Tool result: {tool_result}")
 
-                                    # Send tool result to client for display
+                                    # Send tool result to client for transcript
                                     await atlantis.tool_result(function_name, tool_result)
 
                                     # Add assistant message with tool_call to transcript

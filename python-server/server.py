@@ -32,6 +32,8 @@ COL_WIDTH_APP = 30
 COL_WIDTH_FUNCTION = 40
 COL_WIDTH_FILEPATH = 70
 
+logger = logging.getLogger("mcp_server")
+
 from mcp.server import Server
 
 from mcp.client.websocket import websocket_client
@@ -109,14 +111,9 @@ try:
     # Add the parent directory to sys.path if not already present
     if parent_dir not in sys.path:
         sys.path.insert(0, parent_dir)
-        # Use state.logger if available, otherwise print
-        try:
-            from state import logger
-            logger.info(f"✅ Added '{parent_dir}' to sys.path for dynamic function imports.")
-        except ImportError:
-            print(f"INFO: Added '{parent_dir}' to sys.path for dynamic function imports.")
+        logger.info(f"✅ Added '{parent_dir}' to sys.path for dynamic function imports.")
 except Exception as e:
-    print(f"ERROR: Failed to add dynamic_functions parent directory to sys.path: {e}")
+    logger.error(f"Failed to add dynamic_functions parent directory to sys.path: {e}")
 # -------------------------------------------------------------
 
 # Import Uvicorn for running the server
@@ -163,15 +160,15 @@ def handle_sigint(signum, frame):
     global is_shutting_down, pid_manager
     if not is_shutting_down:
         is_shutting_down = True
-        print("\n🐱 Meow! Graceful shutdown in progress... Press Ctrl+C again to force exit! 🐱")
-        print("🧹 Cleaning up resources and closing connections...")
+        logger.info("\n🐱 Meow! Graceful shutdown in progress... Press Ctrl+C again to force exit! 🐱")
+        logger.info("🧹 Cleaning up resources and closing connections...")
         # Signal the cloud connection to close
         if 'cloud_connection' in globals() and cloud_connection is not None:
             logger.info("☁️ Closing cloud server connection...")
             asyncio.create_task(cloud_connection.disconnect())
             pid_manager.remove_pid_file()
     else:
-        print("\n🚨 Forced exit! 🚨")
+        logger.warning("\n🚨 Forced exit! 🚨")
         # Ensure PID file is removed even on force exit
         pid_manager.remove_pid_file()
         sys.exit(1)
@@ -3563,11 +3560,11 @@ class ServiceClient:
         try:
             with open(filepath, 'r') as file:
                 ascii_art = file.read()
-                print(ascii_art)
+                logger.info(ascii_art)
         except FileNotFoundError:
-            print(f"Error: The file '{filepath}' was not found.")
+            logger.error(f"The file '{filepath}' was not found.")
         except Exception as e:
-            print(f"An error occurred: {e}")
+            logger.error(f"An error occurred: {e}")
 
     def _register_event_handlers(self):
         """Register Socket.IO event handlers"""

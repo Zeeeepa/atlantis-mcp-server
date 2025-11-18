@@ -13,6 +13,8 @@ import logging
 import mimetypes
 from datetime import datetime, timezone
 
+logger = logging.getLogger("mcp_server")
+
 # --- Context Variables ---
 # client_log_func: Holds the partially bound client_log function for the current request
 _client_log_var: contextvars.ContextVar[Optional[Callable]] = contextvars.ContextVar("_client_log_var", default=None)
@@ -122,7 +124,7 @@ async def get_and_increment_seq_num(context_name: str = "operation") -> int:
         current_seq_to_send = seq_list_container[0]  # Get current value
         seq_list_container[0] += 1  # Increment for next call
     else:
-        print(f"ERROR: {context_name} - _log_seq_num_var is None. Cannot get sequence number.")
+        logger.error(f"{context_name} - _log_seq_num_var is None. Cannot get sequence number.")
 
     return current_seq_to_send
 
@@ -157,7 +159,7 @@ async def client_log(message: Any, level: str = "INFO", message_type: str = "tex
                 caller_name = frame.f_back.f_code.co_name
             del frame
         except Exception as inspect_err:
-            print(f"WARNING: Could not inspect caller frame for client_log: {inspect_err}")
+            logger.warning(f"Could not inspect caller frame for client_log: {inspect_err}")
 
         try:
             # Get current sequence number and increment it for the next call
@@ -169,7 +171,7 @@ async def client_log(message: Any, level: str = "INFO", message_type: str = "tex
             request_id = _request_id_var.get()
 
             if client_id is None or request_id is None:
-                print(f"WARNING: Missing context data - client_id: {client_id}, request_id: {request_id}")
+                logger.warning(f"Missing context data - client_id: {client_id}, request_id: {request_id}")
                 return None
 
             task = await util_client_log(
@@ -194,11 +196,11 @@ async def client_log(message: Any, level: str = "INFO", message_type: str = "tex
 
             return None # Return None in either case
         except Exception as e:
-            print(f"ERROR: Failed during async client_log call (after inspect): {e}")
+            logger.error(f"Failed during async client_log call (after inspect): {e}")
             # Decide if to re-raise or return an error indicator
             raise
     else:
-        print(f"WARNING: client_log called but no logger in context. Message: {message}")
+        logger.warning(f"client_log called but no logger in context. Message: {message}")
         return None # Or raise an error
 
 async def tool_result(name: str, result: Any):
@@ -286,7 +288,7 @@ def reset_context(tokens: tuple):
     """Resets the context variables using the provided tuple of tokens."""
     # Expected order: client_log, request_id, client_id, log_seq_num, entry_point, user, session_id, command_seq
     if not isinstance(tokens, tuple) or len(tokens) != 8:
-        print(f"ERROR: reset_context expected a tuple of 8 tokens, got {tokens}")
+        logger.error(f"reset_context expected a tuple of 8 tokens, got {tokens}")
         # Add more robust error handling or logging as needed
         return
 
@@ -366,7 +368,7 @@ def image_to_base64(image_path: str) -> str:
             return encoded_string.decode('utf-8')
     except IOError as e:
         # Log the error for debugging
-        print(f"Error converting image to base64: {e}")
+        logger.error(f"Error converting image to base64: {e}")
         # Re-raise to allow caller to handle
         raise
 
@@ -426,7 +428,7 @@ def video_to_base64(video_path: str) -> str:
             return encoded_string.decode('utf-8')
     except IOError as e:
         # Log the error for debugging
-        print(f"Error converting video to base64: {e}")
+        logger.error(f"Error converting video to base64: {e}")
         # Re-raise to allow caller to handle
         raise
 
@@ -446,7 +448,7 @@ async def stream_start(sid: str, who: str) -> str:
 
     # Check for required context data
     if actual_client_id is None or request_id is None:
-        print(f"WARNING: Missing context data in stream_start - client_id: {actual_client_id}, request_id: {request_id}")
+        logger.warning(f"Missing context data in stream_start - client_id: {actual_client_id}, request_id: {request_id}")
         raise ValueError("Missing required context data for stream_start")
 
     caller_name = "unknown_caller"
@@ -456,7 +458,7 @@ async def stream_start(sid: str, who: str) -> str:
             caller_name = frame.f_back.f_code.co_name
         del frame
     except Exception as inspect_err:
-        print(f"WARNING: Could not inspect caller frame for stream_start: {inspect_err}")
+        logger.warning(f"Could not inspect caller frame for stream_start: {inspect_err}")
 
     # Get and increment sequence number using the per-stream helper function
     current_seq_to_send = await get_and_increment_stream_seq_num(stream_id_to_send)
@@ -477,7 +479,7 @@ async def stream_start(sid: str, who: str) -> str:
         )
         return stream_id_to_send # Return the generated stream_id to the caller
     except Exception as e:
-        print(f"ERROR: Failed during async stream_start call: {e}")
+        logger.error(f"Failed during async stream_start call: {e}")
         raise
 
 async def stream(message: str, stream_id_param: str):
@@ -489,7 +491,7 @@ async def stream(message: str, stream_id_param: str):
 
     # Check for required context data
     if actual_client_id is None or request_id is None:
-        print(f"WARNING: Missing context data in stream - client_id: {actual_client_id}, request_id: {request_id}")
+        logger.warning(f"Missing context data in stream - client_id: {actual_client_id}, request_id: {request_id}")
         raise ValueError("Missing required context data for stream")
 
     caller_name = "unknown_caller"
@@ -499,7 +501,7 @@ async def stream(message: str, stream_id_param: str):
             caller_name = frame.f_back.f_code.co_name
         del frame
     except Exception as inspect_err:
-        print(f"WARNING: Could not inspect caller frame for stream: {inspect_err}")
+        logger.warning(f"Could not inspect caller frame for stream: {inspect_err}")
 
     # Get and increment sequence number using the per-stream helper function
     current_seq_to_send = await get_and_increment_stream_seq_num(stream_id_param)
@@ -518,7 +520,7 @@ async def stream(message: str, stream_id_param: str):
         )
         return result
     except Exception as e:
-        print(f"ERROR: Failed during async stream call: {e}")
+        logger.error(f"Failed during async stream call: {e}")
         raise
 
 async def stream_end(stream_id_param: str):
@@ -530,7 +532,7 @@ async def stream_end(stream_id_param: str):
 
     # Check for required context data
     if actual_client_id is None or request_id is None:
-        print(f"WARNING: Missing context data in stream_end - client_id: {actual_client_id}, request_id: {request_id}")
+        logger.warning(f"Missing context data in stream_end - client_id: {actual_client_id}, request_id: {request_id}")
         raise ValueError("Missing required context data for stream_end")
 
     caller_name = "unknown_caller"
@@ -540,7 +542,7 @@ async def stream_end(stream_id_param: str):
             caller_name = frame.f_back.f_code.co_name
         del frame
     except Exception as inspect_err:
-        print(f"WARNING: Could not inspect caller frame for stream_end: {inspect_err}")
+        logger.warning(f"Could not inspect caller frame for stream_end: {inspect_err}")
 
     # Get and increment sequence number using the per-stream helper function
     current_seq_to_send = await get_and_increment_stream_seq_num(stream_id_param)
@@ -559,7 +561,7 @@ async def stream_end(stream_id_param: str):
         )
         return result
     except Exception as e:
-        print(f"ERROR: Failed during async stream_end call: {e}")
+        logger.error(f"Failed during async stream_end call: {e}")
         raise
 
 
@@ -587,7 +589,7 @@ async def client_command(command: str, data: Any = None) -> Any:
 
     if not client_id or not request_id:
         # This should ideally not happen if called within a proper request context
-        print(f"ERROR: client_command called without client_id or request_id in context. Command: {command}")
+        logger.error(f"client_command called without client_id or request_id in context. Command: {command}")
         raise RuntimeError("Client ID or Request ID not found in context for client_command.")
 
     try:
@@ -595,11 +597,11 @@ async def client_command(command: str, data: Any = None) -> Any:
         # Using the helper function for consistent sequence number management
         current_seq_to_send = await get_and_increment_seq_num(context_name="client_command")
 
-        print(f"INFO: Atlantis: Sending awaitable command '{command}' for client {client_id}, request {request_id}, seq {current_seq_to_send}")
+        logger.info(f"Atlantis: Sending awaitable command '{command}' for client {client_id}, request {request_id}, seq {current_seq_to_send}")
         if isinstance(data, dict):
-            print(f"INFO: Atlantis: Command data type: {type(data)}, data:\n{format_json_log(data)}")
+            logger.info(f"Atlantis: Command data type: {type(data)}, data:\n{format_json_log(data)}")
         else:
-            print(f"INFO: Atlantis: Command data type: {type(data)}, data: {data}")
+            logger.info(f"Atlantis: Command data type: {type(data)}, data: {data}")
         # Call the dedicated utility function for awaitable commands
         result = await execute_client_command_awaitable(
             client_id_for_routing=client_id,
@@ -609,8 +611,16 @@ async def client_command(command: str, data: Any = None) -> Any:
             seq_num=current_seq_to_send,  # Pass the sequence number
             entry_point_name=entry_point_name  # Pass the entry point name for logging
         )
-        #print(f"INFO: Atlantis: Received result for awaitable command '{command}': {result}")
-        print(f"INFO: Atlantis: Received result for awaitable command '{command}', type: {type(result)}")
+        #logger.info(f"Atlantis: Received result for awaitable command '{command}': {result}")
+        logger.info(f"Atlantis: Received result for awaitable command '{command}', type: {type(result)}")
+
+        # TEMPORARY DEBUG: Add delay after silent commands to prove race condition
+        if command in ["\\silent on", "\\silent off"]:
+            delay_ms = 100  # Adjust this value to test
+            logger.debug(f"Adding {delay_ms}ms delay after '{command}' to allow client to fully apply...")
+            await asyncio.sleep(delay_ms / 1000.0)
+            logger.debug(f"Delay complete for '{command}'")
+
         return result
     except Exception as e:
         # Server layer already logged with enhanced error message including command context
@@ -718,10 +728,10 @@ async def client_data(description: str, data: Any, column_formatter: Optional[di
         result = await client_log(json_str, level="INFO", message_type="data")
         return result
     except TypeError as e:
-        print(f"ERROR: Failed to serialize data to JSON: {e}")
+        logger.error(f"Failed to serialize data to JSON: {e}")
         raise TypeError(f"Data is not JSON-serializable: {e}")
     except Exception as e:
-        print(f"ERROR: Failed during client_data call: {e}")
+        logger.error(f"Failed during client_data call: {e}")
         raise
 
 async def gather_logs():
@@ -780,7 +790,7 @@ async def owner_log(message: str):
             os.makedirs(log_dir)
     except Exception as e:
         # Using print as a fallback for logging since this is a logging function
-        print(f"Warning: Could not create directory {log_dir}. Error: {e}")
+        logger.warning(f"Could not create directory {log_dir}. Error: {e}")
 
     log_entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -799,13 +809,13 @@ async def owner_log(message: str):
                     if isinstance(loaded_json, list):
                         entries = loaded_json
                     else:
-                        print(f"Warning: Log file {log_file_path} did not contain a JSON list. Re-initializing.")
+                        logger.warning(f"Log file {log_file_path} did not contain a JSON list. Re-initializing.")
                         entries = []
         except json.JSONDecodeError:
-            print(f"Warning: Could not decode JSON from {log_file_path}. Re-initializing log.")
+            logger.warning(f"Could not decode JSON from {log_file_path}. Re-initializing log.")
             entries = []
         except Exception as e:
-            print(f"Error reading log file {log_file_path}: {e}. Re-initializing log.")
+            logger.error(f"Error reading log file {log_file_path}: {e}. Re-initializing log.")
             entries = []
 
     entries.append(log_entry)
@@ -815,7 +825,7 @@ async def owner_log(message: str):
             json.dump(entries, f, indent=4)
         return f"Message logged to {log_file_path}"
     except Exception as e:
-        print(f"Critical: Error writing to log file {log_file_path}: {e}")
+        logger.error(f"Error writing to log file {log_file_path}: {e}")
         return f"Error writing to log file {log_file_path}: {e}"
 
     return False
