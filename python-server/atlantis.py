@@ -614,13 +614,6 @@ async def client_command(command: str, data: Any = None) -> Any:
         #logger.info(f"Atlantis: Received result for awaitable command '{command}': {result}")
         logger.info(f"Atlantis: Received result for awaitable command '{command}', type: {type(result)}")
 
-        # TEMPORARY DEBUG: Add delay after silent commands to prove race condition
-        if command in ["\\silent on", "\\silent off"]:
-            delay_ms = 100  # Adjust this value to test
-            logger.debug(f"Adding {delay_ms}ms delay after '{command}' to allow client to fully apply...")
-            await asyncio.sleep(delay_ms / 1000.0)
-            logger.debug(f"Delay complete for '{command}'")
-
         return result
     except Exception as e:
         # Server layer already logged with enhanced error message including command context
