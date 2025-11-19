@@ -3662,6 +3662,21 @@ class ServiceClient:
             else:
                 logger.info("☁️ Disconnection was expected or shutdown initiated, not reconnecting.")
 
+        # General error event (different from connect_error)
+        @self.sio.event(namespace=self.namespace)
+        async def error(data):
+            logger.error(f"❌ SOCKET.IO ERROR: {data}")
+            # This catches errors during the connection lifecycle, not just connection errors
+
+        # Ping event - fires when receiving ping from server
+        @self.sio.on('ping', namespace=self.namespace)
+        async def on_ping():
+            logger.debug("🏓 Received ping from cloud server")
+
+        # Pong event - fires when sending pong to server
+        @self.sio.on('pong', namespace=self.namespace)
+        async def on_pong():
+            logger.debug("🏓 Sent pong to cloud server")
 
         # Service message event
         @self.sio.event(namespace=self.namespace)
