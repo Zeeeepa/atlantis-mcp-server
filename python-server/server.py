@@ -1994,11 +1994,11 @@ class DynamicAdditionServer(Server):
                         for existing_app_path, app_functions in self.function_manager._function_file_mapping_by_app.items():
                             if func_name in app_functions:
                                 filename = app_functions[func_name]
-                                if existing_app_path == "unknown":
+                                if existing_app_path is None:
                                     location = f"root {filename}"
                                 else:
                                     # Convert slash path to dot notation for display to user
-                                    existing_app_display = self.function_manager._path_to_app_name(existing_app_path) if existing_app_path else "unknown"
+                                    existing_app_display = self.function_manager._path_to_app_name(existing_app_path)
                                     location = f"{existing_app_display} {filename}"
                                 existing_locations.append(location)
 
