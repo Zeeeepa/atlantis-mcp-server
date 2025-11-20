@@ -293,7 +293,8 @@ You like to purr when happy or do 'kitty paws'.
                                     # Execute the tool call through atlantis client command
 
                                     await atlantis.client_command("\\silent on")
-                                    tool_result = await atlantis.client_command(f"@{function_name}", data=arguments)
+                                    # use '%' prefix instead of '@' in call to ignore any working path / force absolute path
+                                    tool_result = await atlantis.client_command(f"%{function_name}", data=arguments)
                                     await atlantis.client_command("\\silent off")
 
                                     logger.info(f"Tool result: {tool_result}")

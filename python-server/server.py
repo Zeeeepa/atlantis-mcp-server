@@ -410,17 +410,27 @@ class DynamicAdditionServer(Server):
                                       command: str, # The command string for the client
                                       command_data: Optional[Any] = None, # Optional data for the command
                                       seq_num: Optional[int] = None, # Sequence number for client-side ordering
-                                      entry_point_name: Optional[str] = None # Entry point name for logging
+                                      entry_point_name: Optional[str] = None, # Entry point name for logging
+                                      local_pseudo_call: bool = False # True if this is a pseudo tool call from local client
                                       ) -> Any:
         """Sends a command to a specific client and waits for a response with a correlation ID.
 
+        NOTE: Function parameters use snake_case (Python convention) but are transformed to camelCase
+        for JSON payloads sent to clients:
+            request_id → requestId
+            command_data → data
+            seq_num → seqNum
+            entry_point_name → entryPoint
+            local_pseudo_call → localPseudoCall
+
         Args:
             client_id_for_routing: The ID of the client to send the command to.
-            request_id: The original MCP request ID, for client-side context.
+            request_id: The original MCP request ID, for client-side context (None for pseudo tools).
             command: The command identifier string.
             command_data: Optional data payload for the command.
             seq_num: Optional sequence number for client-side ordering.
             entry_point_name: Optional name of the entry point function for logging.
+            local_pseudo_call: True if this is a pseudo tool call from local client (readme/command).
 
         Returns:
             The result from the client's command execution.
@@ -487,6 +497,11 @@ class DynamicAdditionServer(Server):
                 # Add entryPoint if provided
                 if entry_point_name is not None:
                     cloud_notification_params["entryPoint"] = entry_point_name
+
+                # Add localPseudoCall flag if true
+                if local_pseudo_call:
+                    cloud_notification_params["localPseudoCall"] = True
+
                 cloud_wrapper_payload = {
                     "jsonrpc": "2.0",
                     "method": "notifications/message",
@@ -2820,11 +2835,15 @@ async def index():
             logger.debug(f"✅ Found client {client_id} with type: {connection_info.get('type')}")
 
         # Intercept local (non-cloud) tool calls to handle pseudo tools
+        # CLAUDE etc come thru here
         if not for_cloud:
             logger.info(f"🏠 Local MCP tool call intercepted: {tool_name}")
 
-            # Handle pseudo tools for local connections
-            if tool_name == "readme" or tool_name == "command":
+            # Check if cloud connection exists (same logic as pseudo tool list generation)
+            has_cloud_connection = any(info.get("type") == "cloud" for info in client_connections.values())
+
+            # If local client + cloud exists, this must be a pseudo tool (readme or command)
+            if has_cloud_connection and (tool_name == "readme" or tool_name == "command"):
                 # Find first cloud connection (client_connections already declared global above)
                 cloud_client_id = None
 
@@ -2847,15 +2866,18 @@ async def index():
                     }
 
                 # Send awaitable command to cloud client
+                # For pseudo tools, don't send the MCP request_id (it's meaningless to cloud)
                 try:
                     logger.info(f"☁️ Sending '{tool_name}' command to cloud client {cloud_client_id}")
+                    logger.info(f"🔄 Pseudo tool detected - omitting MCP request_id (was {request_id}), cloud will use correlationId only")
                     response = await self.send_awaitable_client_command(
                         client_id_for_routing=cloud_client_id,
-                        request_id=request_id,
+                        request_id=None,  # Don't send MCP request_id for pseudo tools
                         command=tool_name,
                         command_data=params.get("arguments", {}),
                         seq_num=1,
-                        entry_point_name=tool_name
+                        entry_point_name=tool_name,
+                        local_pseudo_call=True  # Flag this as a pseudo tool call from local client
                     )
 
                     logger.info(f"☁️ Got response from cloud client: {response}")
