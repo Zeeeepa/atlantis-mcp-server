@@ -1037,7 +1037,7 @@ class DynamicAdditionServer(Server):
                     },
                     "required": ["key"]
                 },
-                annotations=ToolAnnotations(title="_public_click")
+                annotations=ToolAnnotations(title="_public_click", decorators=["public"])
             ),
             Tool( # Add definition for _public_upload
                 name="_public_upload",
@@ -1052,7 +1052,7 @@ class DynamicAdditionServer(Server):
                     },
                     "required": ["key", "filename", "filetype", "base64Content"]
                 },
-                annotations=ToolAnnotations(title="_public_upload")
+                annotations=ToolAnnotations(title="_public_upload", decorators=["public"])
             ),
             Tool( # Add definition for _admin_app_create
                 name="_admin_app_create",
@@ -3304,8 +3304,10 @@ class ServiceClient:
             is_protected = 'protected' in decorators if decorators else False
 
             # Determine visibility indicator for non-internal functions - show ALL decorators
+            # Special case: also show decorators for _public_* tools even though they're internal
+            is_public_tool = tool.name.startswith('_public')
             visibility_str = ""
-            if not is_internal and not is_server:
+            if (not is_internal or is_public_tool) and not is_server:
                 if 'public' in decorators:
                     visibility_str += f" {GREEN}[@public]{RESET_COLOR}"
                 if 'protected' in decorators:
@@ -3348,7 +3350,8 @@ class ServiceClient:
                 formatted_line = f"{CYAN_COLOR}{origin_server:{COL_WIDTH_APP}}{RESET_COLOR} {tool.name:{COL_WIDTH_FUNCTION}} {GREY_COLOR}{source_file:{COL_WIDTH_FILEPATH}}{RESET_COLOR}{timestamp_str}"
                 mcp_tools_list.append((origin_server, tool.name, formatted_line))
             elif is_internal:
-                formatted_line = f"{BOLD_COLOR}{app_display:{COL_WIDTH_APP}}{RESET_COLOR} {tool.name:{COL_WIDTH_FUNCTION}} {GREY_COLOR}{source_file:{COL_WIDTH_FILEPATH}}{RESET_COLOR}{timestamp_str}"
+                # Include visibility_str for _public_* tools to show their [@public] decorator
+                formatted_line = f"{BOLD_COLOR}{app_display:{COL_WIDTH_APP}}{RESET_COLOR} {tool.name:{COL_WIDTH_FUNCTION}} {GREY_COLOR}{source_file:{COL_WIDTH_FILEPATH}}{RESET_COLOR}{visibility_str}{timestamp_str}"
                 internal_info_list.append((app_display, tool.name, formatted_line))
             elif is_hidden:
                 formatted_line = f"{BOLD_COLOR}{app_display:{COL_WIDTH_APP}}{RESET_COLOR} {tool.name:{COL_WIDTH_FUNCTION}} {GREY_COLOR}{source_file:{COL_WIDTH_FILEPATH}}{RESET_COLOR}{visibility_str}{timestamp_str}"
@@ -3631,12 +3634,12 @@ class ServiceClient:
             logger.info(f"{BOLD}{BRIGHT_WHITE}🚀✨🎉 CONNECTED TO ATLANTIS CLOUD SERVER! 🎉✨🚀{RESET}")
             logger.info(f"{BOLD}{CYAN}=================================================={RESET}")
             logger.info("") # Blank line after
+            logger.info(f"{BOLD}{BRIGHT_WHITE}REMOTE NAME : {self.serviceName}{RESET}")
             logger.info(f"{BOLD}{BRIGHT_WHITE}APP NAME    : {self.appName}{RESET}")
+            logger.info(f"{BOLD}{BRIGHT_WHITE}OWNER       : {atlantis._owner}{RESET}")
+            logger.info(f"{BOLD}{BRIGHT_WHITE}LOGIN       : {self.email}{RESET}")
             logger.info(f"{BOLD}{BRIGHT_WHITE}VERSION     : {SERVER_VERSION}{RESET}")
             logger.info(f"{BOLD}{BRIGHT_WHITE}CLOUD URL   : {self.server_url}{RESET}")
-            logger.info(f"{BOLD}{BRIGHT_WHITE}REMOTE NAME : {self.serviceName}{RESET}")
-            logger.info(f"{BOLD}{BRIGHT_WHITE}LOGIN       : {self.email}{RESET}")
-            logger.info(f"{BOLD}{BRIGHT_WHITE}OWNER       : {atlantis._owner}{RESET}")
             logger.info(f"{BOLD}{BRIGHT_WHITE}LOCAL PORT  : {self.server_port}{RESET}")
             logger.info("") # Blank line after
             logger.info("") # Blank line after
