@@ -748,19 +748,26 @@ class DynamicAdditionServer(Server):
                 return [
                     Tool(
                         name="readme",
-                        description="Get information about this MCP server from connected cloud",
+                        description="Get information about how to use Atlantis commands",
                         inputSchema={"type": "object", "properties": {}},
                         annotations=ToolAnnotations(title="readme")
                     ),
                     Tool(
                         name="command",
-                        description="Execute a command on the connected cloud",
+                        description="Execute an Atlantis command on the connected cloud",
                         inputSchema={
                             "type": "object",
                             "properties": {
-                                "cmd": {"type": "string", "description": "The command to execute"}
+                                "content": {
+                                    "type": "string",
+                                    "description": "The Atlantis command to execute"
+                                },
+                                "params": {
+                                    "type": "object",
+                                    "description": "Additional params for the Atlantis command as needed"
+                                }
                             },
-                            "required": ["cmd"]
+                            "required": ["content"]
                         },
                         annotations=ToolAnnotations(title="command")
                     )
@@ -2886,16 +2893,27 @@ async def index():
                         local_pseudo_call=True  # Flag this as a pseudo tool call from local client
                     )
 
-                    logger.info(f"☁️ Got response from cloud client: {response}")
+                    logger.info(f"☁️ Got response from cloud client")
+                    logger.info(f"☁️ Response structure: {format_json_log(response) if isinstance(response, (dict, list)) else repr(response)}")
 
                     # Return the response wrapped in MCP format
-                    return {
+                    # Format JSON nicely so Claude can read it
+                    response_text = format_json_log(response, colored=False) if isinstance(response, (dict, list)) else str(response)
+                    result = {
+                        "content": [{"type": "text", "text": response_text}]
+                    }
+
+                    # If response is JSON (dict/list), also include structuredContent per MCP spec
+                    if isinstance(response, (dict, list)):
+                        result["structuredContent"] = response
+
+                    mcp_response = {
                         "jsonrpc": "2.0",
                         "id": request_id,
-                        "result": {
-                            "content": [{"type": "text", "text": str(response)}]
-                        }
+                        "result": result
                     }
+                    logger.info(f"📤 Returning MCP response: {format_json_log(mcp_response)}")
+                    return mcp_response
                 except Exception as e:
                     logger.error(f"❌ Error sending {tool_name} to cloud: {e}")
                     return {
@@ -2998,7 +3016,7 @@ async def index():
             error_response = {
                 "jsonrpc": "2.0",
                 "id": request_id,
-                "error": {"code": -32000, "message": f"Tool execution failed: {str(e)}"}
+                "error": {"code": -32000, "message": f"Tool execution failed for '{tool_name}': {str(e)}"}
             }
             logger.debug(f"📤 Returning error response: {error_response}")
             return error_response
