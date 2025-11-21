@@ -504,23 +504,9 @@ class DynamicServerManager:
                                 if shutdown_requested:
                                     break
 
-                                # Optional: Check session is still responsive with lightweight ping
-                                # Only do this for servers that have been running a while
-                                if name in self.server_tasks and self.server_tasks[name].get('status') == 'running':
-                                    started_at = self.server_tasks[name].get('started_at')
-                                    now = datetime.datetime.now(datetime.timezone.utc)
-
-                                    # Only ping if server has been running more than 2 minutes
-                                    if started_at and (now - started_at).total_seconds() > 120:
-                                        try:
-                                            # Just list_tools as a lightweight ping
-                                            await asyncio.wait_for(session.list_tools(), timeout=5.0)
-                                            # No need to process the result, we're just checking if it responds
-                                        except Exception as e:
-                                            logger.warning(f"[{name}] Session health check failed: {e}")
-                                            # Break the loop if session is no longer responsive
-                                            # This will trigger cleanup in finally block
-                                            break
+                                # Health check disabled to support long-running jobs
+                                # The session will naturally close if the process dies or connection is lost
+                                pass
                             except asyncio.TimeoutError:
                                 # This is expected - it just means the shutdown_event.wait timed out
                                 # We'll loop and check again

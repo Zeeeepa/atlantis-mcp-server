@@ -4388,8 +4388,8 @@ if __name__ == "__main__":
         port=PORT,
         log_level="warning",
         ws_max_size=100 * 1024 * 1024,  # 100MB max websocket message size
-        ws_ping_interval=60,           # Ping interval in seconds
-        ws_ping_timeout=120,           # Ping timeout in seconds
+        ws_ping_interval=60,           # Keepalive ping every 60 seconds (keeps connection alive through NAT/firewalls)
+        ws_ping_timeout=None,          # No timeout - never close connection due to missing pongs (pure keepalive)
         limit_max_requests=1000,       # Max concurrent requests
         limit_concurrency=1000,        # Max concurrent connections
         h11_max_incomplete_event_size=100 * 1024 * 1024  # 100MB max HTTP body size
