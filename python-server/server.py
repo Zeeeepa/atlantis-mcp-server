@@ -200,6 +200,10 @@ class DynamicConfigEventHandler(FileSystemEventHandler):
         self.watched_server_dirs = watched_server_dirs or []
 
     def _trigger_reload(self, event_path):
+        # Ignore __pycache__ directories
+        if '__pycache__' in event_path:
+            return
+
         # Check if the change is relevant (Python file in any watched function dir or JSON file in any watched server dir)
         # Also handle directory changes (for directory deletions/additions)
         is_function_change = any(
