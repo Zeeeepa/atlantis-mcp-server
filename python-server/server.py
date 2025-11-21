@@ -2870,13 +2870,15 @@ async def index():
                     }
 
                 # Send awaitable command to cloud client
-                # For pseudo tools, don't send the MCP request_id (it's meaningless to cloud)
+                # For pseudo tools, use the generic request_id from cloud
                 try:
+                    # Get the generic request_id from the cloud client
+                    generic_req_id = self.cloud_client.generic_request_id if hasattr(self, 'cloud_client') and self.cloud_client else None
                     logger.info(f"☁️ Sending '{tool_name}' command to cloud client {cloud_client_id}")
-                    logger.info(f"🔄 Pseudo tool detected - omitting MCP request_id (was {request_id}), cloud will use correlationId only")
+                    logger.info(f"🔄 Pseudo tool detected - using generic request_id ({generic_req_id}) instead of MCP request_id ({request_id})")
                     response = await self.send_awaitable_client_command(
                         client_id_for_routing=cloud_client_id,
-                        request_id=None,  # Don't send MCP request_id for pseudo tools
+                        request_id=generic_req_id,  # Use generic request_id for pseudo tools
                         command=tool_name,
                         command_data=params.get("arguments", {}),
                         seq_num=1,
@@ -3232,6 +3234,8 @@ class ServiceClient:
         self.connection_active = True
         # Store creation time for stable client ID
         self._creation_time = int(time.time())
+        # Store the generic request_id received from cloud for unsolicited requests
+        self.generic_request_id = None
         logger.info(f"🎯 ServiceClient initialized with appName: '{self.appName}', serviceName: '{self.serviceName}'")
 
     # THIS IS THE BIG REPORT
@@ -3706,6 +3710,11 @@ class ServiceClient:
         @self.sio.on('pong', namespace=self.namespace)
         async def on_pong():
             logger.debug("🏓 Sent pong to cloud server")
+
+        @self.sio.event(namespace=self.namespace)
+        async def request_id(serviceId): # gets the generic request id to use for unsolicited adhoc svr requests (Claude etc)
+            self.generic_request_id = serviceId
+            logger.info(f"🏓 Got generic request id: {serviceId}")
 
         # Service message event
         @self.sio.event(namespace=self.namespace)
