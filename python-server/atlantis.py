@@ -118,13 +118,20 @@ async def get_and_increment_seq_num(context_name: str = "operation") -> int:
     """
     current_seq_to_send = -1  # Default to an invalid sequence number
 
-    #async with _seq_num_lock:
-    seq_list_container = _log_seq_num_var.get()
-    if seq_list_container is not None:
-        current_seq_to_send = seq_list_container[0]  # Get current value
-        seq_list_container[0] += 1  # Increment for next call
-    else:
-        logger.error(f"{context_name} - _log_seq_num_var is None. Cannot get sequence number.")
+    # CRITICAL: This lock prevents race conditions in sequence number generation.
+    # Used by both client_command() and client_log().
+    # - client_command() REQUIRES strict ordering - commands must run synchronously
+    # - client_log() also uses this lock (unnecessary but harmless)
+    # Multiple concurrent tasks within the same request context share the same
+    # seq_list_container, so without this lock they could read the same value
+    # before any of them increment it, causing duplicate sequence numbers.
+    async with _seq_num_lock:
+        seq_list_container = _log_seq_num_var.get()
+        if seq_list_container is not None:
+            current_seq_to_send = seq_list_container[0]  # Get current value
+            seq_list_container[0] += 1  # Increment for next call
+        else:
+            logger.error(f"{context_name} - _log_seq_num_var is None. Cannot get sequence number.")
 
     return current_seq_to_send
 
