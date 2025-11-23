@@ -52,7 +52,8 @@ from mcp.types import (
     NotificationParams,
     Annotations, # Ensure Annotation, ToolErrorAnnotation are NOT imported
     ToolAnnotations as McpToolAnnotations,
-    ErrorData
+    ErrorData,
+    INTERNAL_ERROR
 )
 from pydantic import ConfigDict
 from typing import Any, Dict
@@ -3767,7 +3768,9 @@ class ServiceClient:
                                 error_text = "Unknown error"
                                 if "content" in raw_result and len(raw_result["content"]) > 0:
                                     error_text = raw_result["content"][0].get("text", error_text)
-                                future.set_exception(McpError(error_text))
+                                # Create proper MCP ErrorData object
+                                error_data = ErrorData(code=INTERNAL_ERROR, message=error_text)
+                                future.set_exception(McpError(error_data))
                             # Try structuredContent first (modern MCP spec)
                             elif isinstance(raw_result, dict) and "structuredContent" in raw_result and raw_result["structuredContent"] is not None:
                                 structured = raw_result["structuredContent"]
@@ -3799,12 +3802,18 @@ class ServiceClient:
                                 logger.info(f"☁️ Final result type: {type(extracted_result)}")
                                 future.set_result(extracted_result)
                         elif "error" in params:
-                            client_error_details = params["error"] # This could be a string from the cloud
+                            client_error_details = params["error"] # This could be a string or dict from the cloud
                             logger.error(f"❌☁️ Received cloud error for awaitable command (correlationId: {correlation_id}): {client_error_details}")
                             if isinstance(client_error_details, Exception):
-                                future.set_exception(McpError(client_error_details))
+                                # Already an exception, wrap in ErrorData
+                                error_data = ErrorData(code=INTERNAL_ERROR, message=str(client_error_details))
+                                future.set_exception(McpError(error_data))
                             elif isinstance(client_error_details, dict) and "message" in client_error_details:
-                                future.set_exception(McpError(client_error_details.get("message", "Unknown cloud error")))
+                                # MCP-compliant error object with code and message
+                                error_code = client_error_details.get("code", INTERNAL_ERROR)
+                                error_message = client_error_details.get("message", "Unknown cloud error")
+                                error_data = ErrorData(code=error_code, message=error_message)
+                                future.set_exception(McpError(error_data))
                             else: # Handle string error or other non-Exception types
                                 future.set_exception(Exception(f"{str(client_error_details)}"))
                         else:
