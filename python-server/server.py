@@ -3756,7 +3756,49 @@ class ServiceClient:
                     if future and not future.done():
                         if "result" in params:
                             logger.info(f"✅☁️ Received cloud result for awaitable command (correlationId: {correlation_id})")
-                            future.set_result(params["result"])
+
+                            # Extract result with priority: structuredContent > result > content[0].text
+                            raw_result = params["result"]
+                            extracted_result = None
+
+                            # Check for MCP CallToolResult with isError flag
+                            if isinstance(raw_result, dict) and raw_result.get("isError"):
+                                logger.error(f"❌☁️ Result has isError=true")
+                                # Extract error message from content
+                                error_text = "Unknown error"
+                                if "content" in raw_result and len(raw_result["content"]) > 0:
+                                    error_text = raw_result["content"][0].get("text", error_text)
+                                future.set_exception(McpError(error_text))
+                            # Try structuredContent first (modern MCP spec)
+                            elif isinstance(raw_result, dict) and "structuredContent" in raw_result and raw_result["structuredContent"] is not None:
+                                structured = raw_result["structuredContent"]
+                                # Unwrap arrays that were wrapped with {"result": [...]} per MCP convention
+                                if isinstance(structured, dict) and "result" in structured and len(structured) == 1:
+                                    extracted_result = structured["result"]
+                                    logger.info(f"☁️ Unwrapped array from structuredContent.result")
+                                else:
+                                    extracted_result = structured
+                                    logger.info(f"☁️ Using structuredContent (modern MCP format)")
+                                logger.info(f"☁️ Final result type: {type(extracted_result)}")
+                                future.set_result(extracted_result)
+                            # Fall back to direct result field (raw data pass-through)
+                            elif not isinstance(raw_result, dict) or "content" not in raw_result:
+                                extracted_result = raw_result
+                                logger.info(f"☁️ Using raw result field (legacy format)")
+                                logger.info(f"☁️ Final result type: {type(extracted_result)}")
+                                future.set_result(extracted_result)
+                            # Last resort: parse content[0].text (stringified JSON)
+                            elif isinstance(raw_result, dict) and "content" in raw_result:
+                                try:
+                                    text_content = raw_result["content"][0]["text"]
+                                    extracted_result = json.loads(text_content)
+                                    logger.info(f"☁️ Parsed content[0].text as JSON (fallback)")
+                                except (json.JSONDecodeError, KeyError, IndexError):
+                                    # If parsing fails, use the text as-is
+                                    extracted_result = text_content if 'text_content' in locals() else raw_result
+                                    logger.warning(f"☁️ Could not parse content as JSON, using as-is")
+                                logger.info(f"☁️ Final result type: {type(extracted_result)}")
+                                future.set_result(extracted_result)
                         elif "error" in params:
                             client_error_details = params["error"] # This could be a string from the cloud
                             logger.error(f"❌☁️ Received cloud error for awaitable command (correlationId: {correlation_id}): {client_error_details}")
