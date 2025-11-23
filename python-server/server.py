@@ -2903,9 +2903,8 @@ async def index():
                         "content": [{"type": "text", "text": response_text}]
                     }
 
-                    # If response is JSON (dict/list), also include structuredContent per MCP spec
-                    if isinstance(response, (dict, list)):
-                        result["structuredContent"] = response
+                    # Don't add structuredContent here - cloud already sends it properly formatted
+                    # and we unwrapped it. Just pass through as text.
 
                     mcp_response = {
                         "jsonrpc": "2.0",
