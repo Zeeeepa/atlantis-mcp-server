@@ -5,6 +5,7 @@ import inspect
 import asyncio
 import os
 import importlib
+import importlib.metadata
 import re
 import signal
 import sys
@@ -3538,7 +3539,8 @@ class ServiceClient:
                     "hostname": hostname,
                     "port": self.server_port, # Send the stored port
                     "serverVersion": SERVER_VERSION,
-                    "pythonVersion": sys.version.split()[0]
+                    "pythonVersion": sys.version.split()[0],
+                    "mcpVersion": importlib.metadata.version('mcp')
                 }
                 logger.info(f"🔐 Connecting with auth: email={self.email}, serviceName={self.serviceName}, appName={self.appName}, hostname={hostname}")
                 await self.sio.connect(
