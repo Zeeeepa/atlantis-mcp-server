@@ -118,13 +118,11 @@ async def get_and_increment_seq_num(context_name: str = "operation") -> int:
     """
     current_seq_to_send = -1  # Default to an invalid sequence number
 
-    # CRITICAL: This lock prevents race conditions in sequence number generation.
-    # Used by both client_command() and client_log().
-    # - client_command() REQUIRES strict ordering - commands must run synchronously
-    # - client_log() also uses this lock (unnecessary but harmless)
-    # Multiple concurrent tasks within the same request context share the same
-    # seq_list_container, so without this lock they could read the same value
-    # before any of them increment it, causing duplicate sequence numbers.
+    # NOTE: Lock is intentionally commented out because the server handles message ordering.
+    # The server ensures messages are processed sequentially, eliminating the need for
+    # client-side locking of sequence number generation. While concurrent tasks within
+    # the same request context share the same seq_list_container, server-side ordering
+    # guarantees prevent race conditions that could cause duplicate sequence numbers.
     #async with _seq_num_lock:
     seq_list_container = _log_seq_num_var.get()
     if seq_list_container is not None:

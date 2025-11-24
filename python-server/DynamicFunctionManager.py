@@ -231,6 +231,12 @@ class DynamicFunctionManager:
         self._skipped_functions = []  # Track functions skipped (syntax errors, missing decorators, etc.)
         self._duplicate_functions = []  # Track duplicates: [(app_path, func_name, [file_paths])]
 
+        # Per-function execution queues for automatic serialization
+        # Key is fully qualified function name (e.g., "Home/kitty" or "App.Module/function")
+        self._function_queues = {}  # function_name -> asyncio.Queue of (future, args_dict)
+        self._function_queue_tasks = {}  # function_name -> asyncio.Task (queue processor)
+        self._function_queue_lock = asyncio.Lock()  # Protects queue dict operations
+
         # Create directories if they don't exist
         os.makedirs(self.functions_dir, exist_ok=True)
         self.old_dir = os.path.join(self.functions_dir, "OLD")
@@ -1289,15 +1295,117 @@ async def {name}():
             # Don't let logging errors disrupt the main flow
             logger.error(f"Failed to write error log for '{secure_name}': {e}")
 
+    async def _queue_processor(self, function_key: str):
+        """
+        Background task that processes queued function calls sequentially.
+        Each function gets its own queue processor that runs one call at a time.
+
+        Args:
+            function_key: Unique identifier for the function (e.g., "Home/kitty")
+        """
+        logger.info(f"Queue processor started for function: {function_key}")
+
+        try:
+            while True:
+                # Get next queued call (blocks until available)
+                queue = self._function_queues.get(function_key)
+                if not queue:
+                    logger.warning(f"Queue for {function_key} disappeared, stopping processor")
+                    break
+
+                future, call_args = await queue.get()
+
+                logger.info(f"Processing queued call for {function_key} (queue size: {queue.qsize()})")
+
+                try:
+                    # Execute the actual function call
+                    result = await self._execute_function(**call_args)
+                    future.set_result(result)
+                except Exception as e:
+                    future.set_exception(e)
+                finally:
+                    queue.task_done()
+
+        except asyncio.CancelledError:
+            logger.info(f"Queue processor for {function_key} cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"Queue processor for {function_key} failed: {e}", exc_info=True)
+
+    async def _get_or_create_queue(self, function_key: str) -> asyncio.Queue:
+        """
+        Get or create a queue for a function, and ensure its processor task is running.
+
+        Args:
+            function_key: Unique identifier for the function
+
+        Returns:
+            asyncio.Queue for the function
+        """
+        async with self._function_queue_lock:
+            if function_key not in self._function_queues:
+                logger.info(f"Creating new queue for function: {function_key}")
+                self._function_queues[function_key] = asyncio.Queue()
+                # Start queue processor task
+                task = asyncio.create_task(self._queue_processor(function_key))
+                self._function_queue_tasks[function_key] = task
+
+            return self._function_queues[function_key]
+
     async def function_call(self, name: str, client_id: str, request_id: str, user: str = None, **kwargs) -> Any:
-        '''
+        """
+        Public API for calling a dynamic function. Automatically queues the call
+        so that each function's invocations run sequentially (one at a time).
+
+        Multiple concurrent calls to the same function will be queued and processed
+        in order. Different functions have separate queues and run concurrently.
+
+        Returns the function's return value.
+        """
+        # Build function key for queueing - use app+name to ensure proper isolation
+        app_name = kwargs.get("app")
+        if app_name:
+            function_key = f"{app_name}/{name}"
+        else:
+            function_key = name
+
+        logger.info(f"Queueing call to function: {function_key}")
+
+        # Get or create the queue for this function
+        queue = await self._get_or_create_queue(function_key)
+
+        # Create a future to receive the result
+        result_future = asyncio.Future()
+
+        # Package all the call arguments
+        call_args = {
+            'name': name,
+            'client_id': client_id,
+            'request_id': request_id,
+            'user': user,
+            **kwargs
+        }
+
+        # Add to queue
+        await queue.put((result_future, call_args))
+        logger.info(f"Call queued for {function_key} (queue size: {queue.qsize()})")
+
+        # Wait for the result from the queue processor
+        result = await result_future
+        return result
+
+    async def _execute_function(self, name: str, client_id: str, request_id: str, user: str = None, **kwargs) -> Any:
+        """
+        Internal method that actually executes a dynamic function.
+        This is called by the queue processor to run functions sequentially.
+
         Loads and executes a dynamic function by its name, passing kwargs.
         Flushes ALL dynamic function caches before loading to ensure freshness, protected by a lock.
         Ensures parent package exists in sys.modules.
         Returns the function's return value.
         Raises exceptions if the function doesn't exist, fails to load, or errors during execution.
         Gets the 'user' field that tells us who is making the call and passes it to the function context.
-        '''
+        """
         # Function name is now pre-parsed by server.py, so 'name' is the actual function name
         actual_function_name = name
 

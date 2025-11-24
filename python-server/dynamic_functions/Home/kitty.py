@@ -17,9 +17,6 @@ logger = logging.getLogger("mcp_client")
 
 from utils import format_json_log
 
-# Busy flag to prevent concurrent chat executions
-_chat_busy = False
-
 
 def find_last_chat_entry(transcript):
     """Find the last entry in transcript where type is 'chat'"""
@@ -38,29 +35,23 @@ def find_last_chat_entry(transcript):
 async def kitty():
     """
     Main chat function
+
+    Note: Concurrent calls are automatically queued by the server,
+    so each invocation runs sequentially without manual busy flag management.
     """
-    global _chat_busy
+    logger.info("=== CHAT FUNCTION STARTING ===")
+    sessionId = atlantis.get_session_id()
+    logger.info(f"Session ID: {sessionId}")
+    #caller = atlantis.get_caller()
+    #return atlantis.get_owner()
 
-    # Check if already running
-    if _chat_busy:
-        logger.info("Chat function already running, skipping this invocation")
-        return
+    # Check for existing session
+    sessions_dir = os.path.join(os.path.dirname(__file__), 'sessions')
+    session_file = os.path.join(sessions_dir, f'session_{sessionId}.txt')
 
-    # Set busy flag
-    _chat_busy = True
-
-    try:
-        logger.info("=== CHAT FUNCTION STARTING ===")
-        sessionId = atlantis.get_session_id()
-        logger.info(f"Session ID: {sessionId}")
-        #caller = atlantis.get_caller()
-        #return atlantis.get_owner()
-
-        # Check for existing session
-        sessions_dir = os.path.join(os.path.dirname(__file__), 'sessions')
-        session_file = os.path.join(sessions_dir, f'session_{sessionId}.txt')
-
-
+    # The rest of the function body is indented due to the removed try/finally block
+    # Keeping the indentation to avoid reformatting the entire file
+    if True:
         # Define the catgirl base prompt
         CATGIRL_SYSTEM_MESSAGE = {
             "type": "chat",
@@ -382,11 +373,6 @@ You like to purr when happy or do 'kitty paws'.
 
         logger.info("=== CHAT FUNCTION COMPLETED SUCCESSFULLY ===")
         return
-
-    finally:
-        # Always clear the busy flag when function exits
-        _chat_busy = False
-        logger.info("Chat function busy flag cleared")
 
 
 
