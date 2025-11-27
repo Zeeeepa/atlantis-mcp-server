@@ -2832,6 +2832,8 @@ async def index():
             logger.debug(f"Call made by user: {user}")
         if session_id:
             logger.debug(f"Call made with session_id: {session_id}")
+        if for_cloud:
+            logger.info(f"☁️ CLOUD TOOL CALL - Tool: '{tool_name}', User: '{user}', Session: '{session_id}', Seq: {command_seq}")
 
         # Log the tool execution (don't re-register connections here)
         if for_cloud:
@@ -3569,32 +3571,16 @@ class ServiceClient:
 
                 self.is_connected = False
                 self.sio = None
-
-                detailed_error_info_message = "Check DEBUG logs for a full traceback."
-                error_message = str(e)
-
-
                 self.retry_count += 1
 
-                # Enhanced error message logic
-                if error_message == "One or more namespaces failed to connect":
-                    if self.email and self.api_key:
-                        specific_error_log = f"Authentication failed. Please make sure credentials are valid (email: {self.email}, API key, service name: {self.serviceName})"
-                    else:
-                        specific_error_log = f"Namespace '{self.namespace}' failed to connect. This could be due to server-side issues, incorrect namespace configuration, or missing authentication details if required by the server."
-                elif isinstance(e, socketio.exceptions.ConnectionError):
-                    specific_error_log = f"{error_message}. This often indicates a network issue, the cloud server at {self.server_url} being down, or a firewall blocking the connection."
-                else:
-                    specific_error_log = f"{error_message}. An unexpected error occurred during connection. {detailed_error_info_message}"
-
-                logger.error(f"❌ EGAD!! ATLANTIS CLOUD SERVER CONNECTION ERROR (attempt {self.retry_count}): {specific_error_log}")
-
-                # Print a more detailed stack trace for debugging
+                # Show exactly what we're sending and suggest checking account
+                logger.error(f"❌ Authentication failed with credentials: email={self.email}, api_key={'*' * len(self.api_key) if self.api_key else 'None'}, serviceName={self.serviceName}, appName={self.appName}")
+                logger.error(f"❌ Does this account exist on the cloud server? Check your credentials.")
                 logger.debug(f"Traceback: {traceback.format_exc()}")
 
                 # Calculate exponential backoff delay with jitter
                 backoff_delay = 5
-                jitter = 5 * random.uniform(0, 1) # Add random jitter (0-1 seconds)
+                jitter = 5 * random.uniform(0, 1)
                 actual_delay = min(backoff_delay + jitter, CLOUD_CONNECTION_MAX_BACKOFF_SECONDS)
 
                 # Wait before retrying

@@ -1314,14 +1314,17 @@ async def {name}():
                     break
 
                 future, call_args = await queue.get()
+                req_id = call_args.get('request_id', 'unknown')
 
-                logger.info(f"Processing queued call for {function_key} (queue size: {queue.qsize()})")
+                logger.info(f"Processing queued call for {function_key} (queue size: {queue.qsize()}) - request_id: {req_id}")
 
                 try:
                     # Execute the actual function call
                     result = await self._execute_function(**call_args)
                     future.set_result(result)
+                    logger.debug(f"Queue processor set result for {function_key} - request_id: {req_id}, type: {type(result)}")
                 except Exception as e:
+                    logger.error(f"Queue processor caught exception for {function_key}: {e}", exc_info=True)
                     future.set_exception(e)
                 finally:
                     queue.task_done()
@@ -1331,6 +1334,11 @@ async def {name}():
             raise
         except Exception as e:
             logger.error(f"Queue processor for {function_key} failed: {e}", exc_info=True)
+            # IMPORTANT: If we have a future that hasn't been resolved, resolve it with the exception
+            # This prevents the caller from hanging forever
+            if 'future' in locals() and not future.done():
+                logger.error(f"Queue processor resolving pending future with exception for {function_key}")
+                future.set_exception(e)
 
     async def _get_or_create_queue(self, function_key: str) -> asyncio.Queue:
         """
@@ -1388,10 +1396,12 @@ async def {name}():
 
         # Add to queue
         await queue.put((result_future, call_args))
-        logger.info(f"Call queued for {function_key} (queue size: {queue.qsize()})")
+        logger.info(f"Call queued for {function_key} (queue size: {queue.qsize()}) - request_id: {request_id}")
 
         # Wait for the result from the queue processor
+        logger.debug(f"Waiting for result from queue processor for {function_key} - request_id: {request_id}")
         result = await result_future
+        logger.debug(f"Received result from queue processor for {function_key} - request_id: {request_id}, type: {type(result)}")
         return result
 
     async def _execute_function(self, name: str, client_id: str, request_id: str, user: str = None, **kwargs) -> Any:
