@@ -1821,14 +1821,12 @@ class DynamicAdditionServer(Server):
             # Security check: Special handling for _function_get with @copy decorator
             if actual_function_name == "_function_get":
                 caller = user or client_id or "unknown"
-                owner = atlantis.get_owner()
 
                 # Treat localhost websocket connections as the owner
-                if caller.startswith("ws_127.0.0.1_") and owner:
-                    caller = owner
+                is_localhost = caller.startswith("ws_127.0.0.1_")
 
                 # Owner can always use _function_get
-                if owner and caller == owner:
+                if is_localhost or atlantis.is_owner(caller):
                     logger.debug(f"✅ _function_get authorized for owner: {caller}")
                 else:
                     # Non-owner trying to use _function_get - check if target has @copy
@@ -1900,14 +1898,12 @@ class DynamicAdditionServer(Server):
                   actual_function_name.startswith('_admin')):
 
                 caller = user or client_id or "unknown"
-                owner = atlantis.get_owner()
 
                 # Treat localhost websocket connections as the owner
-                if caller.startswith("ws_127.0.0.1_") and owner:
-                    caller = owner
+                is_localhost = caller.startswith("ws_127.0.0.1_")
 
-                if owner and caller != owner:
-                    logger.warning(f"🚨 SECURITY: Internal function '{actual_function_name}' called by '{caller}' but owner is '{owner}' - ACCESS DENIED")
+                if not is_localhost and not atlantis.is_owner(caller):
+                    logger.warning(f"🚨 SECURITY: Internal function '{actual_function_name}' called by '{caller}' but owner usernames are '{atlantis.get_owner_usernames()}' - ACCESS DENIED")
                     raise ValueError(f"Access denied: Internal functions can only be accessed by owner")
 
                 logger.debug(f"✅ Internal function '{actual_function_name}' authorized for owner: {caller}")
@@ -1942,14 +1938,12 @@ class DynamicAdditionServer(Server):
                     else:
                         # @visible, @tick, @chat, @session, @price, @location, or @app - owner-only access
                         caller = user or client_id or "unknown"
-                        owner = atlantis.get_owner()
 
                         # Treat localhost websocket connections as the owner
-                        if caller.startswith("ws_127.0.0.1_") and owner:
-                            caller = owner
+                        is_localhost = caller.startswith("ws_127.0.0.1_")
 
-                        if owner and caller != owner:
-                            logger.warning(f"🚨 SECURITY: Owner-only function '{actual_function_name}' called by '{caller}' but owner is '{owner}' - ACCESS DENIED")
+                        if not is_localhost and not atlantis.is_owner(caller):
+                            logger.warning(f"🚨 SECURITY: Owner-only function '{actual_function_name}' called by '{caller}' but owner usernames are '{atlantis.get_owner_usernames()}' - ACCESS DENIED")
                             raise PermissionError(f"Access denied: Function '{actual_function_name}' can only be accessed by owner")
 
                         logger.debug(f"✅ Function '{actual_function_name}' authorized for owner: {caller}")
@@ -3637,8 +3631,18 @@ class ServiceClient:
 
         # Connection established event
         @self.sio.event(namespace=self.namespace)
-        async def welcome(username): # Ensure handler is async
-            atlantis._set_owner(username) # Update atlantis module
+        async def welcome(data): # Ensure handler is async
+            # Parse owner usernames from welcome data
+            if isinstance(data, list):
+                # New format: array of usernames
+                owner_usernames = data
+                atlantis._set_owner_usernames(owner_usernames)
+                atlantis._set_owner(owner_usernames[0] if owner_usernames else self.email)
+            else:
+                # Legacy format: single string (email or username)
+                atlantis._set_owner(data)
+                atlantis._set_owner_usernames([data] if data else [])
+
             self.retry_count = 0  # Reset retry counter on successful connection
 
             self.print_ascii_art("../kitty.txt")
@@ -3651,6 +3655,7 @@ class ServiceClient:
             logger.info(f"{BOLD}{BRIGHT_WHITE}REMOTE NAME : {self.serviceName}{RESET}")
             logger.info(f"{BOLD}{BRIGHT_WHITE}APP NAME    : {self.appName}{RESET}")
             logger.info(f"{BOLD}{BRIGHT_WHITE}OWNER       : {atlantis._owner}{RESET}")
+            logger.info(f"{BOLD}{BRIGHT_WHITE}OWNER USERS : {atlantis._owner_usernames}{RESET}")
             logger.info(f"{BOLD}{BRIGHT_WHITE}LOGIN       : {self.email}{RESET}")
             logger.info(f"{BOLD}{BRIGHT_WHITE}VERSION     : {SERVER_VERSION}{RESET}")
             logger.info(f"{BOLD}{BRIGHT_WHITE}CLOUD URL   : {self.server_url}{RESET}")

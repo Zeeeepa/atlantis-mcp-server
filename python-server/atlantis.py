@@ -36,6 +36,7 @@ _command_seq_var: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar
 
 # Owner of the remote server instance
 _owner: Optional[str] = ""
+_owner_usernames: List[str] = []  # List of owner usernames for permission checks
 
 # Simple task collection for logging tasks
 _log_tasks_var: contextvars.ContextVar[Optional[List[asyncio.Task]]] = contextvars.ContextVar("_log_tasks_var", default=None)
@@ -246,12 +247,25 @@ def get_owner() -> str:
     """Returns the user who owns this remote"""
     return _owner or ""
 
+def get_owner_usernames() -> List[str]:
+    """Returns the list of owner usernames for permission checks"""
+    return _owner_usernames
+
+def is_owner(username: str) -> bool:
+    """Check if the given username is an owner"""
+    return username in _owner_usernames
+
 # --- Setter Functions (primarily for internal use by dynamic_function_manager) ---
 
 def _set_owner(new_owner: str):
     """Sets the owner of the remote server instance. For internal use."""
     global _owner
     _owner = new_owner
+
+def _set_owner_usernames(usernames: List[str]):
+    """Sets the list of owner usernames. For internal use."""
+    global _owner_usernames
+    _owner_usernames = usernames
 
 
 def set_context(
