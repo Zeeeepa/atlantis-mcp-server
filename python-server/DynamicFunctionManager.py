@@ -1362,7 +1362,16 @@ async def {name}():
 
     async def function_call(self, name: str, client_id: str, request_id: str, user: str = None, **kwargs) -> Any:
         """
-        Public API for calling a dynamic function. Automatically queues the call
+        Public API for calling a dynamic function.
+        Directly executes the function (bypassing queue for now).
+
+        Returns the function's return value.
+        """
+        return await self._execute_function(name, client_id, request_id, user, **kwargs)
+
+    async def function_call_queued(self, name: str, client_id: str, request_id: str, user: str = None, **kwargs) -> Any:
+        """
+        Queued version of function_call. Automatically queues the call
         so that each function's invocations run sequentially (one at a time).
 
         Multiple concurrent calls to the same function will be queued and processed
@@ -1448,7 +1457,8 @@ async def {name}():
                     entry_point_name=actual_function_name,
                     user=user,
                     session_id=kwargs.get("session_id"),
-                    command_seq=kwargs.get("command_seq")
+                    command_seq=kwargs.get("command_seq"),
+                    shell_path=kwargs.get("shell_path")
                 )
 
                 try:
@@ -1641,6 +1651,9 @@ async def {name}():
             # Extract command_seq from kwargs if present
             command_seq = kwargs.get('command_seq', None)
 
+            # Extract shell_path from kwargs if present
+            shell_path = kwargs.get('shell_path', None)
+
             context_tokens = atlantis.set_context(
                 client_log_func=bound_client_log,
                 request_id=request_id,
@@ -1648,6 +1661,7 @@ async def {name}():
                 user=user,  # Pass the user who made the call - only works if atlantis.py has been updated
                 session_id=session_id,  # Pass the session_id
                 command_seq=command_seq,  # Pass the command_seq
+                shell_path=shell_path,  # Pass the shell_path
                 entry_point_name=actual_function_name # Pass the actual function name (not filename)
             )
 

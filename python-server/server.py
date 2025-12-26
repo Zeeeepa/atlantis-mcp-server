@@ -334,6 +334,12 @@ class DynamicAdditionServer(Server):
         self.awaitable_requests: Dict[str, asyncio.Future] = {} # For tracking awaitable commands
         self.awaitable_request_timeout: float = SERVER_REQUEST_TIMEOUT # Timeout for these commands
 
+        # DEBUG: Track command counts per execution context to detect infinite loops/duplicates
+        # Unique execution context: client_id + user + session_id + shell_path
+        # NOTE: request_id is NOT included because cloud sends new request_id per message
+        # Aborts if same command called > 5 times in a row
+        self._command_counts_per_context: Dict[str, Dict[str, int]] = {}  # "client_id:user:session_id:shell_path" -> {"command": command_key, "count": n}
+
         # TODO: Add prompts and resources
         self._cached_tools: Optional[List[Tool]] = None # Cache for tool list
         self._last_functions_dir_mtime: float = 0.0 # Timestamp for cache invalidation
@@ -417,7 +423,10 @@ class DynamicAdditionServer(Server):
                                       command_data: Optional[Any] = None, # Optional data for the command
                                       seq_num: Optional[int] = None, # Sequence number for client-side ordering
                                       entry_point_name: Optional[str] = None, # Entry point name for logging
-                                      local_pseudo_call: bool = False # True if this is a pseudo tool call from local client
+                                      local_pseudo_call: bool = False, # True if this is a pseudo tool call from local client
+                                      user: Optional[str] = None, # User who initiated the request
+                                      session_id: Optional[str] = None, # Session ID for request isolation
+                                      shell_path: Optional[str] = None # Shell path in command tree for request isolation
                                       ) -> Any:
         """Sends a command to a specific client and waits for a response with a correlation ID.
 
@@ -428,6 +437,7 @@ class DynamicAdditionServer(Server):
             seq_num → seqNum
             entry_point_name → entryPoint
             local_pseudo_call → localPseudoCall
+            shell_path → shellPath
 
         Args:
             client_id_for_routing: The ID of the client to send the command to.
@@ -437,6 +447,9 @@ class DynamicAdditionServer(Server):
             seq_num: Optional sequence number for client-side ordering.
             entry_point_name: Optional name of the entry point function for logging.
             local_pseudo_call: True if this is a pseudo tool call from local client (readme/command).
+            user: Optional user who initiated the request (for request isolation).
+            session_id: Optional session ID (for request isolation).
+            shell_path: Optional shell path in the command tree (for request isolation).
 
         Returns:
             The result from the client's command execution.
@@ -445,6 +458,28 @@ class DynamicAdditionServer(Server):
             McpError: If the client response times out or the client returns an error.
             Various other exceptions if sending or future handling fails.
         """
+        # DEBUG: Detect duplicate commands (possible infinite loop)
+        # Unique execution context: client_id + user + session_id + shell_path
+        # NOTE: request_id is NOT included because it changes per message from cloud
+        # Aborts if same command called > 5 times in a row
+        # DISABLED: Bug seems to be fixed, can re-enable if needed
+        # tracking_key = f"{client_id_for_routing}:{user}:{session_id}:{shell_path}"
+        # command_key = f"{command}:{entry_point_name}"
+        #
+        # ctx_data = self._command_counts_per_context.get(tracking_key)
+        # if ctx_data and ctx_data.get("command") == command_key:
+        #     # Same command as before - increment count
+        #     ctx_data["count"] += 1
+        #     if ctx_data["count"] > 5:
+        #         error_msg = f"🚨 DUPLICATE COMMAND DETECTED! Command '{command}' from entry_point '{entry_point_name}' called {ctx_data['count']} times in a row (user={user}, session={session_id}, shell={shell_path}). ABORTING to prevent infinite loop!"
+        #         logger.error(error_msg)
+        #         raise RuntimeError(error_msg)
+        #     logger.debug(f"🔍 DEBUG: Command '{command_key}' count={ctx_data['count']} for context {tracking_key}")
+        # else:
+        #     # Different command or first command - reset count
+        #     self._command_counts_per_context[tracking_key] = {"command": command_key, "count": 1}
+        #     logger.debug(f"🔍 DEBUG: Tracking new command '{command_key}' for context {tracking_key}")
+
         correlation_id = str(uuid.uuid4())
         future = asyncio.get_event_loop().create_future()
         self.awaitable_requests[correlation_id] = future
@@ -508,6 +543,14 @@ class DynamicAdditionServer(Server):
                 if local_pseudo_call:
                     cloud_notification_params["localPseudoCall"] = True
 
+                # Add user, sessionId, and shellPath for request context
+                if user is not None:
+                    cloud_notification_params["user"] = user
+                if session_id is not None:
+                    cloud_notification_params["sessionId"] = session_id
+                if shell_path is not None:
+                    cloud_notification_params["shellPath"] = shell_path
+
                 cloud_wrapper_payload = {
                     "jsonrpc": "2.0",
                     "method": "notifications/message",
@@ -529,10 +572,14 @@ class DynamicAdditionServer(Server):
             logger.debug(f"⏳ Waiting for response for command '{command}' (correlationId: {correlation_id}) timeout: {self.awaitable_request_timeout}s")
             result = await asyncio.wait_for(future, timeout=self.awaitable_request_timeout)
             logger.info(f"✅ Received response for awaitable command '{command}' (correlationId: {correlation_id})")
+            # Clear duplicate tracking on success so same command can be called again later
+            # DISABLED: Duplicate tracking disabled
+            # self._command_counts_per_context.pop(tracking_key, None)
             return result
         except asyncio.TimeoutError:
             logger.error(f"⏰ Timeout waiting for response for command '{command}' (correlationId {correlation_id}) from client {client_id_for_routing}")
             self.awaitable_requests.pop(correlation_id, None)
+            # self._command_counts_per_context.pop(tracking_key, None)  # Clear tracking on timeout - DISABLED
             error_data = ErrorData(
                 code=-32000,
                 message=f"Timeout waiting for client response for command: {command} (correlationId: {correlation_id})"
@@ -541,6 +588,7 @@ class DynamicAdditionServer(Server):
         except Exception as e:
             logger.error(f"❌ Error during awaitable command '{command}' processing (correlationId {correlation_id}): {type(e).__name__} - {e}")
             self.awaitable_requests.pop(correlation_id, None) # Ensure cleanup
+            self._command_counts_per_context.pop(tracking_key, None)  # Clear tracking on error
             if isinstance(e, McpError):
                 # Enhance McpError message to include command text
                 # Access the error data from the McpError
@@ -1773,7 +1821,7 @@ class DynamicAdditionServer(Server):
             logger.debug(f"Log notification error details: {traceback.format_exc()}")
             # We intentionally don't re-raise here
 
-    async def _execute_tool(self, name: str, args: dict, client_id: str = None, request_id: str = None, user: str = None, session_id: str = None, command_seq: int = None) -> list[TextContent]:
+    async def _execute_tool(self, name: str, args: dict, client_id: str = None, request_id: str = None, user: str = None, session_id: str = None, command_seq: int = None, shell_path: str = None) -> list[TextContent]:
         """Core logic to handle a tool call. Ensures result is List[TextContent(type='text')]"""
         logger.info(f"🔧 EXECUTING TOOL: {name}")
         logger.debug(f"WITH ARGUMENTS: {args}")
@@ -2638,7 +2686,7 @@ async def index():
                     # Pass arguments, client_id, user, and session_id distinctly
                     # Pass parsed app name for proper function routing
                     final_args = args.copy() if args else {}
-                    result_raw = await self.function_manager.function_call(name=actual_function_name, client_id=client_id, request_id=request_id, user=user, session_id=session_id, command_seq=command_seq, app=parsed_app_name, args=final_args)
+                    result_raw = await self.function_manager.function_call(name=actual_function_name, client_id=client_id, request_id=request_id, user=user, session_id=session_id, command_seq=command_seq, shell_path=shell_path, app=parsed_app_name, args=final_args)
                     logger.debug(f"<--- Dynamic function '{name}' RAW result: {result_raw} (type: {type(result_raw)})")
                 except Exception as e:
                     # Error already enhanced with command context at source, just re-raise
@@ -2810,6 +2858,7 @@ async def index():
         user = params.get("user", None)
         session_id = params.get("session_id", None)
         command_seq = params.get("command_seq", None)
+        shell_path = params.get("shell_path", None)
 
         # Validate required parameters
         if tool_name is None or tool_args is None:
@@ -2942,7 +2991,8 @@ async def index():
                 request_id=request_id,
                 user=user,
                 session_id=session_id,
-                command_seq=command_seq
+                command_seq=command_seq,
+                shell_path=shell_path
             )
 
             logger.info(f"🎯 Tool '{tool_name}' execution completed with {len(result_list)} content items")
@@ -3015,7 +3065,7 @@ async def index():
                 "id": request_id,
                 "error": {"code": -32000, "message": f"Tool execution failed for '{tool_name}': {str(e)}"}
             }
-            logger.debug(f"📤 Returning error response: {error_response}")
+            logger.debug(f"📤 Returning error response:\n{format_json_log(error_response)}")
             return error_response
 
     async def _notify_tool_list_changed(self, change_type: str, tool_name: str):
@@ -3570,7 +3620,7 @@ class ServiceClient:
                 # Show exactly what we're sending and suggest checking account
                 logger.error(f"❌ Authentication failed with credentials: email={self.email}, api_key={'*' * len(self.api_key) if self.api_key else 'None'}, serviceName={self.serviceName}, appName={self.appName}")
                 logger.error(f"❌ Does this account exist on the cloud server? Check your credentials.")
-                logger.debug(f"Traceback: {traceback.format_exc()}")
+                # logger.debug(f"Traceback: {traceback.format_exc()}")  # Too verbose
 
                 # Calculate exponential backoff delay with jitter
                 backoff_delay = 5
@@ -3730,12 +3780,11 @@ class ServiceClient:
         # Service message event
         @self.sio.event(namespace=self.namespace)
         async def service_message(data):
-            logger.info(f"☁️ RAW RECEIVED SERVICE MESSAGE")
-            #logger.debug(f"☁️ RAW RECEIVED SERVICE MESSAGE:\n{format_json_log(data) if isinstance(data, dict) else data}")
+            logger.info(f"☁️ RAW RECEIVED SERVICE MESSAGE:\n{format_json_log(data) if isinstance(data, dict) else data}")
 
             # --- Handle Awaitable Command Responses from Cloud Client ---
             if isinstance(data, dict) and \
-               data.get("method") == "atlantis/commandResult" and \
+               data.get("method") == "notifications/commandResult" and \
                isinstance(data.get("params"), dict):
 
                 params = data["params"]
@@ -3812,7 +3861,7 @@ class ServiceClient:
                         else:
                             # treat as result
                             future.set_result(None)
-                        logger.debug(f"📥☁️ Handled atlantis/commandResult for {correlation_id} from cloud. Returning from service_message.")
+                        logger.debug(f"📥☁️ Handled notifications/commandResult for {correlation_id} from cloud. Returning from service_message.")
                         return # IMPORTANT: Return early, this message is handled.
                     elif future and future.done():
                         logger.warning(f"⚠️☁️ Received cloud commandResult for {correlation_id}, but future was already done. Ignoring.")
@@ -3821,7 +3870,7 @@ class ServiceClient:
                         logger.warning(f"⚠️☁️ Received cloud commandResult for {correlation_id}, but no active future found (pop returned None). Might have timed out. Ignoring.")
                         return
                 else:
-                    logger.warning(f"⚠️☁️ Received cloud atlantis/commandResult with missing, invalid, or non-pending correlationId: '{correlation_id}'. It will be passed to standard MCP processing if not caught by other logic.")
+                    logger.warning(f"⚠️☁️ Received cloud notifications/commandResult with missing, invalid, or non-pending correlationId: '{correlation_id}'. It will be passed to standard MCP processing if not caught by other logic.")
             # --- End Awaitable Command Response Handling ---
 
             # Check if this is an MCP JSON-RPC request
@@ -3932,7 +3981,7 @@ class ServiceClient:
                 pass
                 #logger.info(f"☁️ SENDING CLIENT LOG/COMMAND via {event}: {data.get('params', {}).get('command', data.get('method'))}")
             else:
-                logger.debug(f"☁️ SENDING MCP MESSAGE via {event}: {data.get('method')}")
+                logger.debug(f"☁️ SENDING MCP MESSAGE via {event}:\n{format_json_log(data) if isinstance(data, dict) else data}")
 
             await self.sio.emit(event, data, namespace=self.namespace)
             # If emit succeeds, we don't return True anymore; success is implied by no exception.
@@ -4040,7 +4089,7 @@ async def handle_websocket(websocket: WebSocket):
 
                 # --- Handle Awaitable Command Responses ---
                 if isinstance(request_data, dict) and \
-                   request_data.get("method") == "atlantis/commandResult" and \
+                   request_data.get("method") == "notifications/commandResult" and \
                    "params" in request_data:
 
                     params = request_data["params"]
@@ -4063,7 +4112,7 @@ async def handle_websocket(websocket: WebSocket):
                                 # treat as result
                                 future.set_result(None)
                             # This message is handled, continue to next message in the loop
-                            logger.debug(f"📥 Handled atlantis/commandResult for {correlation_id}, continuing WebSocket loop.")
+                            logger.debug(f"📥 Handled notifications/commandResult for {correlation_id}, continuing WebSocket loop.")
                             continue
                         elif future and future.done():
                             # Future was already done (e.g., timed out and handled by send_awaitable_client_command)
@@ -4075,7 +4124,7 @@ async def handle_websocket(websocket: WebSocket):
                             continue
                     else:
                         # No correlationId or not in awaitable_requests, could be a stray message or an issue.
-                        logger.warning(f"⚠️ Received atlantis/commandResult without a valid/pending correlationId: '{correlation_id}'. Passing to standard processing just in case, but this is unusual.")
+                        logger.warning(f"⚠️ Received notifications/commandResult without a valid/pending correlationId: '{correlation_id}'. Passing to standard processing just in case, but this is unusual.")
                 # --- End Awaitable Command Response Handling ---
 
                 logger.debug(f"📥 Received (for MCP processing): {request_data}")

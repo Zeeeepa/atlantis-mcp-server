@@ -190,7 +190,10 @@ async def execute_client_command_awaitable(
     command: str, # The command string for the client
     command_data: Optional[Any] = None, # Optional data for the command
     seq_num: Optional[int] = None, # Sequence number for client-side ordering
-    entry_point_name: Optional[str] = None # Entry point name for logging
+    entry_point_name: Optional[str] = None, # Entry point name for logging
+    user: Optional[str] = None, # User who initiated the request
+    session_id: Optional[str] = None, # Session ID for request isolation
+    shell_path: Optional[str] = None # Shell path for request isolation
     ) -> Any:
     """
     Sends a command to a specific client via the server and waits for a dedicated response.
@@ -204,6 +207,9 @@ async def execute_client_command_awaitable(
         command_data: Optional data payload for the command.
         seq_num: Optional sequence number for client-side ordering.
         entry_point_name: Optional name of the entry point function for logging.
+        user: Optional user who initiated the request (for request isolation).
+        session_id: Optional session ID (for request isolation).
+        shell_path: Optional shell path in the command tree (for request isolation).
 
     Returns:
         The result from the client's command execution, as returned by the server.
@@ -234,7 +240,10 @@ async def execute_client_command_awaitable(
             command=command,
             command_data=command_data,
             seq_num=seq_num,
-            entry_point_name=entry_point_name
+            entry_point_name=entry_point_name,
+            user=user,
+            session_id=session_id,
+            shell_path=shell_path
         )
         logger.info(f"✅ Utils: Received result for dedicated awaitable command '{command}' from server.")
         logger.info(f"   📥 Result type: {type(result)}, length: {len(str(result)) if result else 0}")

@@ -33,6 +33,7 @@ _entry_point_name_var: contextvars.ContextVar[Optional[str]] = contextvars.Conte
 _user_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_user_var", default=None)
 _session_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_session_id_var", default=None)
 _command_seq_var: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar("_command_seq_var", default=None)
+_shell_path_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_shell_path_var", default=None)
 
 # Owner of the remote server instance
 _owner: Optional[str] = ""
@@ -187,6 +188,7 @@ async def client_log(message: Any, level: str = "INFO", message_type: str = "tex
                 message_type=message_type,
                 message=message,
                 level=level,
+                logger_name=caller_name,  # Pass the caller function name
                 seq_num=current_seq_to_send # Pass the obtained sequence number
             )
             # task is the asyncio.Task returned by utils.client_log
@@ -275,7 +277,8 @@ def set_context(
         entry_point_name: str,
         user: Optional[str] = None,
         session_id: Optional[str] = None,
-        command_seq: Optional[int] = None):
+        command_seq: Optional[int] = None,
+        shell_path: Optional[str] = None):
     """Sets all context variables and returns a tuple of their tokens for resetting."""
     client_log_token = _client_log_var.set(client_log_func)
     request_id_token = _request_id_var.set(request_id)
@@ -299,20 +302,24 @@ def set_context(
     actual_command_seq = command_seq if command_seq is not None else None # Explicitly use None if command_seq is not provided
     command_seq_token = _command_seq_var.set(actual_command_seq)
 
-    return (client_log_token, request_id_token, client_id_token, log_seq_num_token, entry_point_token, user_token, session_id_token, command_seq_token)
+    # Handle optional shell_path context
+    actual_shell_path = shell_path if shell_path is not None else None
+    shell_path_token = _shell_path_var.set(actual_shell_path)
+
+    return (client_log_token, request_id_token, client_id_token, log_seq_num_token, entry_point_token, user_token, session_id_token, command_seq_token, shell_path_token)
 
 # use sendChatter to send commands directly from browser
 
 def reset_context(tokens: tuple):
     """Resets the context variables using the provided tuple of tokens."""
-    # Expected order: client_log, request_id, client_id, log_seq_num, entry_point, user, session_id, command_seq
-    if not isinstance(tokens, tuple) or len(tokens) != 8:
-        logger.error(f"reset_context expected a tuple of 8 tokens, got {tokens}")
+    # Expected order: client_log, request_id, client_id, log_seq_num, entry_point, user, session_id, command_seq, shell_path
+    if not isinstance(tokens, tuple) or len(tokens) != 9:
+        logger.error(f"reset_context expected a tuple of 9 tokens, got {tokens}")
         # Add more robust error handling or logging as needed
         return
 
     # Unpack tokens
-    client_log_token, request_id_token, client_id_token, log_seq_num_token, entry_point_token, user_token, session_id_token, command_seq_token = tokens
+    client_log_token, request_id_token, client_id_token, log_seq_num_token, entry_point_token, user_token, session_id_token, command_seq_token, shell_path_token = tokens
 
     # Reset each context variable if its token is present (not strictly necessary with .set(None) giving a token)
     _client_log_var.reset(client_log_token)
@@ -323,6 +330,7 @@ def reset_context(tokens: tuple):
     _user_var.reset(user_token) # user_token will be valid even if user was None
     _session_id_var.reset(session_id_token) # session_id_token will be valid even if session_id was None
     _command_seq_var.reset(command_seq_token) # command_seq_token will be valid even if command_seq was None
+    _shell_path_var.reset(shell_path_token) # shell_path_token will be valid even if shell_path was None
 
 
 # --- Utility Functions ---
@@ -605,6 +613,9 @@ async def client_command(command: str, data: Any = None) -> Any:
     client_id = _client_id_var.get()
     request_id = _request_id_var.get()
     entry_point_name = _entry_point_name_var.get() # Now needed for logging with seq_num
+    user = _user_var.get()  # Who's calling
+    session_id = _session_id_var.get()  # Which session
+    shell_path = _shell_path_var.get()  # Where in the command tree
 
     if not client_id or not request_id:
         # This should ideally not happen if called within a proper request context
@@ -628,7 +639,10 @@ async def client_command(command: str, data: Any = None) -> Any:
             command=command,
             command_data=data,
             seq_num=current_seq_to_send,  # Pass the sequence number
-            entry_point_name=entry_point_name  # Pass the entry point name for logging
+            entry_point_name=entry_point_name,  # Pass the entry point name for logging
+            user=user,  # Pass user for unique request tracking
+            session_id=session_id,  # Pass session_id for unique request tracking
+            shell_path=shell_path  # Pass shell_path for unique request tracking
         )
         #logger.info(f"Atlantis: Received result for awaitable command '{command}': {result}")
         logger.info(f"Atlantis: Received result for awaitable command '{command}', type: {type(result)}")
