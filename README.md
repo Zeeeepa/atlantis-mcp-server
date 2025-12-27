@@ -3,13 +3,15 @@
 # Project Atlantis
 Meow! Ideally, you may want to create an account first at www.projectatlantis.ai and then have the bot walk you through setup (assuming everything works okay)
 
-I wrote this to get past the hype and learn what an MCP (Model Context Protocol) server was, as well as explore potential future directions. I'm not really a Python programmer so this repo suffers from a bit vibe coding, which I've been trying to clean up
+This project was created to explore the practical implementation of an MCP (Model Context Protocol) server beyond the hype, while investigating potential future directions. The codebase originated from experimental development and continues to be refined.
 
 ## MCP Python Remote Server
 
 What is MCP (Model Context Protocol) and why all the fuss? Well, MCP gives bots all sorts of agentic capabilities but LangChain was doing that a year ago. APIs are not new either. What is new about MCP is that it inverts the traditional cloud architecture and lets you run more stuff locally and control what is going on. The downside is more setup headache
 
-The centerpiece this project is a Python MCP host (which I call a 'remote') that lets you install functions and 3rd party MCP tools on the fly
+**Project Atlantis Network**: This project is part of a collaborative network of AI agents and developers. Using the Model Context Protocol, the platform creates an ecosystem where agents can discover and use each other's capabilities across the network. Tools and functions can be shared, discovered, and coordinated between agents—whether for robot-driven frontier development, automation tasks, or any other application. The network architecture enables agents to find and leverage tools from other users, creating a decentralized ecosystem of shared capabilities.
+
+The centerpiece of this project is a Python MCP host (referred to as a 'remote') that lets you install functions and 3rd party MCP tools on the fly
 
 ## Quick Start
 
@@ -68,7 +70,7 @@ Caveat: MCP terminology is already terrible and calling things 'servers' or 'hos
 Pieces of the system:
 
 - **Cloud**: our experimental Atlantis cloud server; mostly a place to share tools and let users bang on them
-- **Remote**: the Python server process found in this repo, which I think is officially called an MCP 'host' (you can run >1 either on same box or on different one, just specify different service names)
+- **Remote**: the Python server process found in this repo, officially referred to as an MCP 'host' (you can run >1 either on same box or on different one, just specify different service names)
 - **Dynamic Function**: a simple Python function that you write, acts as a tool
 - **Dynamic MCP Server**: any 3rd party MCP, stored as a JSON config file
 

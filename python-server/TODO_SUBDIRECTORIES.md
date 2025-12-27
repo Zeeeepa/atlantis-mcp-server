@@ -33,7 +33,7 @@ dynamic_functions/
 - No auto-cleaning or sanitization
 
 **Exception Handling Principles**:
-- **NO exception catching/burying** unless there's a damn good reason
+- **NO exception catching/burying** unless there is an exceptional reason
 - Let exceptions bubble up naturally to the caller
 - Clear error messages in exceptions
 - Fail fast and fail loudly
@@ -272,7 +272,7 @@ echo "async def message_handler(): return 'message'" > dynamic_functions/chat_ap
 - Assume dynamic_functions directory is empty (no migration needed)
 - **One level of depth only** - simplifies app naming and implementation
 - **No auto-cleaning of app names** - throw exceptions for invalid characters
-- **No exception catching/burying** - let exceptions bubble up unless there's a damn good reason
+- **No exception catching/burying** - let exceptions bubble up unless there is an exceptional reason
 - Each phase builds on the previous one
 - Easy rollback at each phase
 - Comprehensive testing at each step
