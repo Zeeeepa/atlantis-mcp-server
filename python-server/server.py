@@ -588,7 +588,7 @@ class DynamicAdditionServer(Server):
         except Exception as e:
             logger.error(f"❌ Error during awaitable command '{command}' processing (correlationId {correlation_id}): {type(e).__name__} - {e}")
             self.awaitable_requests.pop(correlation_id, None) # Ensure cleanup
-            self._command_counts_per_context.pop(tracking_key, None)  # Clear tracking on error
+            # self._command_counts_per_context.pop(tracking_key, None)  # Clear tracking on error - DISABLED
             if isinstance(e, McpError):
                 # Enhance McpError message to include command text
                 # Access the error data from the McpError

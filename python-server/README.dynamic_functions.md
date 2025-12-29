@@ -216,22 +216,16 @@ dynamic_functions/
 
 ## Atlantis Module
 
-**Communication:**
-- `client_log(message)` - Send messages to client
-- `client_command(command, data)` - Send commands, wait for response
-- `client_image(path)`, `client_html(content)`, `client_data(desc, data)` - Send media
+The `atlantis` module is automatically injected into every dynamic function's execution context. It provides the bridge between your Python code and the MCP client/cloud infrastructure.
 
-**Streaming:**
-- `stream_start(sid, who)` → stream_id
-- `stream(message, stream_id)` - Send chunks
-- `stream_end(stream_id)` - End stream
+**What it does:**
+- **Client Communication**: Send messages, images, video, HTML, markdown, and structured data back to the requesting client
+- **Streaming**: Stream responses chunk-by-chunk for real-time output (useful for LLM responses)
+- **Awaitable Commands**: Send commands to clients and wait for responses (e.g., get user input, fetch transcript)
+- **Context Access**: Get info about who's calling, which request this is, who owns the remote
+- **Shared State**: Persist objects (like DB connections) across function reloads
 
-**Context:**
-- `get_caller()`, `get_client_id()`, `get_request_id()`, `get_owner()`
-
-**Utils:**
-- `owner_log(message)` - Log to owner file
-- `shared` - Persistent memory container (connections, not data)
+**See `atlantis.py` for the full API** - the docstrings there are authoritative. Key functions include `client_log()`, `client_command()`, `stream_start/stream/stream_end()`, and various `get_*()` context accessors.
 
 
 ## Shared Container
