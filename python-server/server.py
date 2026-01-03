@@ -2937,7 +2937,8 @@ async def index():
                         command_data=params.get("arguments", {}),
                         seq_num=1,
                         entry_point_name=tool_name,
-                        local_pseudo_call=True  # Flag this as a pseudo tool call from local client
+                        local_pseudo_call=True,  # Flag this as a pseudo tool call from local client
+                        user=atlantis._owner  # Use the owner username from the welcome message
                     )
 
                     logger.info(f"☁️ Got response from cloud client")
@@ -3682,6 +3683,7 @@ class ServiceClient:
         # Connection established event
         @self.sio.event(namespace=self.namespace)
         async def welcome(data): # Ensure handler is async
+            logger.info(f"☁️ Received welcome message:\n{format_json_log(data)}")
             # Parse owner usernames from welcome data
             if isinstance(data, list):
                 # New format: array of usernames
@@ -3772,10 +3774,6 @@ class ServiceClient:
         async def on_pong():
             logger.debug("🏓 Sent pong to cloud server")
 
-        @self.sio.event(namespace=self.namespace)
-        async def request_id(serviceId): # gets the generic request id to use for unsolicited adhoc svr requests (Claude etc)
-            self.generic_request_id = serviceId
-            logger.info(f"🏓 Got generic request id: {serviceId}")
 
         # Service message event
         @self.sio.event(namespace=self.namespace)
@@ -4127,7 +4125,7 @@ async def handle_websocket(websocket: WebSocket):
                         logger.warning(f"⚠️ Received notifications/commandResult without a valid/pending correlationId: '{correlation_id}'. Passing to standard processing just in case, but this is unusual.")
                 # --- End Awaitable Command Response Handling ---
 
-                logger.debug(f"📥 Received (for MCP processing): {request_data}")
+                logger.debug(f"📥 Received (for MCP processing):\n{format_json_log(request_data)}")
                 logger.warning(f"🟡 WEBSOCKET→process_mcp_request: {request_data.get('method')}")
                 # Process the request using our MCP server (include client_id)
                 response = await process_mcp_request(mcp_server, request_data, client_id)
@@ -4191,7 +4189,7 @@ async def process_mcp_request(server, request, client_id=None):
     try:
         if method == "initialize":
             # Process initialize request
-            logger.info(f"🚀 Processing 'initialize' request with params: {params}")
+            logger.info(f"🚀 Processing 'initialize' request with params:\n{format_json_log(params)}")
             result = await server.initialize(params)
             logger.info(f"✅ Successfully processed 'initialize' request")
             # Return empty object per MCP protocol spec
