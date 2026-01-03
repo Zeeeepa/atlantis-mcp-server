@@ -81,7 +81,8 @@ async def client_log(
     seq_num: int = None,
     entry_point_name: str = None,
     message_type: str = "text",
-    stream_id: Optional[str] = None
+    stream_id: Optional[str] = None,
+    is_private: bool = True
     ):
     """
     Send a log message to the client.
@@ -106,6 +107,8 @@ async def client_log(
         seq_num: Optional sequence number for client-side ordering
         entry_point_name: Name of the top-level function called by the request.
         message_type: Type of message content ("text", "json", "image/png", etc.). Default is "text"
+        is_private: If True (default), send only to requesting client.
+                   If False, broadcast to all connected clients (used by scripts).
     """
     # Log locally first (always using INFO level for local display)
     seq_prefix = f"(Seq: {seq_num}) " if seq_num is not None else ""
@@ -164,7 +167,8 @@ async def client_log(
                         seq_num,
                         entry_point_name,
                         message_type,
-                        stream_id
+                        stream_id,
+                        is_private
                     )
 
                 except Exception as task_e:

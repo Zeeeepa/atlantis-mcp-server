@@ -137,7 +137,7 @@ async def get_and_increment_seq_num(context_name: str = "operation") -> int:
 
 # --- Accessor Functions ---
 
-async def client_log(message: Any, level: str = "INFO", message_type: str = "text"):
+async def client_log(message: Any, level: str = "INFO", message_type: str = "text", is_private: bool = True):
     """Sends a log message back to the requesting client for the current context.
     Includes a sequence number and automatically determines the calling function name.
     Also includes the original entry point function name.
@@ -151,6 +151,10 @@ async def client_log(message: Any, level: str = "INFO", message_type: str = "tex
     - "text" (default): A plain text message
     - "json": A JSON object or structured data
     - "image/*": Various image formats (e.g., "image/png", "image/jpeg")
+
+    Args:
+        is_private: If True (default), send only to requesting client.
+                   If False, broadcast to all connected clients (used by client_script).
 
     Calls the underlying log function directly; async dispatch is handled internally.
     """
@@ -189,7 +193,8 @@ async def client_log(message: Any, level: str = "INFO", message_type: str = "tex
                 message=message,
                 level=level,
                 logger_name=caller_name,  # Pass the caller function name
-                seq_num=current_seq_to_send # Pass the obtained sequence number
+                seq_num=current_seq_to_send, # Pass the obtained sequence number
+                is_private=is_private  # For broadcast control (scripts only)
             )
             # task is the asyncio.Task returned by utils.client_log
 
@@ -664,15 +669,17 @@ async def client_html(content: str):
     result = await client_log(content, level="INFO", message_type="html")
     return result
 
-async def client_script(content: str):
+async def client_script(content: str, is_private: bool = True):
     """Sends Javascript content back to the requesting client for rendering
 
     Args:
         content: The Javascript content to send
+        is_private: If True (default), script only runs on the requesting client.
+                   If False, script broadcasts to all connected clients.
     """
-    # Send to client_log with message_type set to 'html'
+    # Send to client_log with message_type set to 'script'
     # client_log is now async and returns a result
-    result = await client_log(content, level="INFO", message_type="script")
+    result = await client_log(content, level="INFO", message_type="script", is_private=is_private)
     return result
 
 async def set_background(image_path: str):

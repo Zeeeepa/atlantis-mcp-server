@@ -1724,7 +1724,8 @@ class DynamicAdditionServer(Server):
                               seq_num: Optional[int] = None,
                               entry_point_name: Optional[str] = None,
                               message_type: str = "text", # Message content type
-                              stream_id: Optional[str] = None # Stream identifier
+                              stream_id: Optional[str] = None, # Stream identifier
+                              is_private: bool = True  # If False, broadcast to all clients
                               ):
         """Send a log message notification to connected clients using direct WebSocket communication.
 
@@ -1738,6 +1739,8 @@ class DynamicAdditionServer(Server):
             entry_point_name: Optional name of the top-level function originally called
             message_type: Type of message content ("text", "json", "image/png", etc.). Default is "text"
             stream_id: Optional stream identifier for the message
+            is_private: If True (default), send only to requesting client.
+                       If False, broadcast to all connected clients (used by scripts).
         """
         try:
             # Normalize level to uppercase for consistency
@@ -1750,7 +1753,8 @@ class DynamicAdditionServer(Server):
                 "logger": logger_name or "unknown_caller", # The immediate caller
                 "requestId": request_id,
                 "entryPoint": entry_point_name or "unknown_entry_point", # The original entry point
-                "messageType": message_type # Type of content (text, json, image, etc.)
+                "messageType": message_type, # Type of content (text, json, image, etc.)
+                "isPrivate": is_private  # If False, cloud should broadcast to all clients
             }
 
             # Add seqNum if provided
@@ -1778,8 +1782,16 @@ class DynamicAdditionServer(Server):
             if client_id is None and 'current_request_client_id' in globals():
                 client_id = current_request_client_id
 
-            # ONLY send to the specific client that made the request - NO broadcasting
-            if client_id and client_id in client_connections:
+            # Determine which clients to send to
+            if is_private:
+                # Send only to the specific client that made the request
+                target_clients = {client_id: client_connections[client_id]} if client_id and client_id in client_connections else {}
+            else:
+                # Broadcast to ALL connected clients
+                target_clients = dict(client_connections)
+                logger.info(f"📡 Broadcasting script to {len(target_clients)} connected clients")
+
+            if target_clients:
                 # Debug logging for large messages (like videos/images)
                 if message_type and message_type.startswith(('image/', 'video/')):
                     data_len = len(str(data)) if data else 0
