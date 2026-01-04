@@ -22,10 +22,6 @@ _client_log_var: contextvars.ContextVar[Optional[Callable]] = contextvars.Contex
 _request_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_request_id_var", default=None)
 # client_id: The ID of the client that initiated the current request
 _client_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_client_id_var", default=None)
-# log_seq_num: A counter for log messages within the current request context. Holds a list [int] to be mutable across tasks.
-# It is initialized to [0] in server.py at the start of each request.
-_log_seq_num_var: contextvars.ContextVar[Optional[List[int]]] = contextvars.ContextVar("_log_seq_num_var", default=None)
-_seq_num_lock = asyncio.Lock() # Lock for synchronizing sequence number increments
 
 # entry_point_name: The name of the top-level dynamic function called by the request
 _entry_point_name_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_entry_point_name_var", default=None)
@@ -44,6 +40,9 @@ _log_tasks_var: contextvars.ContextVar[Optional[List[asyncio.Task]]] = contextva
 
 # Per-stream sequence numbers - each stream_id gets its own counter
 _stream_seq_counters: dict = {}
+
+# Per-request sequence numbers - each request_id gets its own counter
+_request_seq_counters: dict = {}
 
 # Click callback lookup table - maps click keys to callback functions
 _click_callbacks: dict = {}
@@ -112,28 +111,31 @@ async def get_and_increment_stream_seq_num(stream_id: str) -> int:
 async def get_and_increment_seq_num(context_name: str = "operation") -> int:
     """Get and increment the sequence number in a thread-safe way.
 
+    Sequence numbers are tracked per request_id to ensure uniqueness across
+    function hops within the same request.
+
     Args:
         context_name: Name of the calling context for error reporting
 
     Returns:
         The current sequence number before incrementing, or -1 if error
     """
-    current_seq_to_send = -1  # Default to an invalid sequence number
-
-    # NOTE: Lock is intentionally commented out because the server handles message ordering.
+    # NOTE: No lock needed because the server handles message ordering.
     # The server ensures messages are processed sequentially, eliminating the need for
     # client-side locking of sequence number generation. While concurrent tasks within
-    # the same request context share the same seq_list_container, server-side ordering
+    # the same request context share the same counter, server-side ordering
     # guarantees prevent race conditions that could cause duplicate sequence numbers.
-    #async with _seq_num_lock:
-    seq_list_container = _log_seq_num_var.get()
-    if seq_list_container is not None:
-        current_seq_to_send = seq_list_container[0]  # Get current value
-        seq_list_container[0] += 1  # Increment for next call
-    else:
-        logger.error(f"{context_name} - _log_seq_num_var is None. Cannot get sequence number.")
+    request_id = _request_id_var.get()
+    if request_id is None:
+        logger.error(f"{context_name} - request_id is None. Cannot get sequence number.")
+        return -1
 
-    return current_seq_to_send
+    if request_id not in _request_seq_counters:
+        _request_seq_counters[request_id] = 0
+
+    current_seq = _request_seq_counters[request_id]
+    _request_seq_counters[request_id] += 1
+    return current_seq
 
 # --- Accessor Functions ---
 
@@ -288,8 +290,6 @@ def set_context(
     client_log_token = _client_log_var.set(client_log_func)
     request_id_token = _request_id_var.set(request_id)
     client_id_token = _client_id_var.set(client_id)
-    # Initialize _log_seq_num_var with a new list [0] for each call context
-    log_seq_num_token = _log_seq_num_var.set([0])
     entry_point_token = _entry_point_name_var.set(entry_point_name)
 
     # Handle optional user context
@@ -311,26 +311,25 @@ def set_context(
     actual_shell_path = shell_path if shell_path is not None else None
     shell_path_token = _shell_path_var.set(actual_shell_path)
 
-    return (client_log_token, request_id_token, client_id_token, log_seq_num_token, entry_point_token, user_token, session_id_token, command_seq_token, shell_path_token)
+    return (client_log_token, request_id_token, client_id_token, entry_point_token, user_token, session_id_token, command_seq_token, shell_path_token)
 
 # use sendChatter to send commands directly from browser
 
 def reset_context(tokens: tuple):
     """Resets the context variables using the provided tuple of tokens."""
-    # Expected order: client_log, request_id, client_id, log_seq_num, entry_point, user, session_id, command_seq, shell_path
-    if not isinstance(tokens, tuple) or len(tokens) != 9:
-        logger.error(f"reset_context expected a tuple of 9 tokens, got {tokens}")
+    # Expected order: client_log, request_id, client_id, entry_point, user, session_id, command_seq, shell_path
+    if not isinstance(tokens, tuple) or len(tokens) != 8:
+        logger.error(f"reset_context expected a tuple of 8 tokens, got {tokens}")
         # Add more robust error handling or logging as needed
         return
 
     # Unpack tokens
-    client_log_token, request_id_token, client_id_token, log_seq_num_token, entry_point_token, user_token, session_id_token, command_seq_token, shell_path_token = tokens
+    client_log_token, request_id_token, client_id_token, entry_point_token, user_token, session_id_token, command_seq_token, shell_path_token = tokens
 
     # Reset each context variable if its token is present (not strictly necessary with .set(None) giving a token)
     _client_log_var.reset(client_log_token)
     _request_id_var.reset(request_id_token)
     _client_id_var.reset(client_id_token)
-    _log_seq_num_var.reset(log_seq_num_token)
     _entry_point_name_var.reset(entry_point_token)
     _user_var.reset(user_token) # user_token will be valid even if user was None
     _session_id_var.reset(session_id_token) # session_id_token will be valid even if session_id was None

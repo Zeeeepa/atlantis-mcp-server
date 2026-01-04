@@ -6,14 +6,36 @@
     "**/node_modules",
     "**/__pycache__",
     "**/venv",
-    "**/.venv"
+    "**/.venv",
+    "**/dynamic_functions/**"
   ],
-  "reportMissingImports": "warning",
-  "reportUndefinedVariable": "warning",
   "pythonVersion": "3.12",
   "pythonPlatform": "Darwin",
+  "venvPath": ".",
+  "venv": "venv",
+
+  "typeCheckingMode": "basic",
+
+  "reportMissingImports": "warning",
+  "reportUndefinedVariable": "error",
+  "reportSyntaxErrors": "error",
+
   "reportOptionalMemberAccess": "none",
   "reportOptionalCall": "none",
-  "venvPath": ".",
-  "venv": "venv"
+  "reportOptionalSubscript": "none",
+  "reportOptionalIterable": "none",
+  "reportOptionalContextManager": "none",
+  "reportOptionalOperand": "none",
+
+  "reportGeneralTypeIssues": "none",
+  "reportArgumentType": "none",
+  "reportAttributeAccessIssue": "none",
+  "reportIndexIssue": "none",
+  "reportCallIssue": "none",
+  "reportReturnType": "none",
+  "reportAssignmentType": "none",
+
+  "reportUnusedImport": "warning",
+  "reportUnusedVariable": "warning",
+  "reportDuplicateImport": "warning"
 }

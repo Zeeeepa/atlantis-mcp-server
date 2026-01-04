@@ -1753,8 +1753,7 @@ class DynamicAdditionServer(Server):
                 "logger": logger_name or "unknown_caller", # The immediate caller
                 "requestId": request_id,
                 "entryPoint": entry_point_name or "unknown_entry_point", # The original entry point
-                "messageType": message_type, # Type of content (text, json, image, etc.)
-                "isPrivate": is_private  # If False, cloud should broadcast to all clients
+                "messageType": message_type  # Type of content (text, json, image, etc.)
             }
 
             # Add seqNum if provided
