@@ -5,15 +5,15 @@ import os
 logger = logging.getLogger("mcp_server")
 
 @public
-@session
-async def session():
+@game
+async def game():
     """
-    Main session function
+    Main game function
     """
 
     # get user id
     user_id = atlantis.get_caller()
-    logger.info(f"Session started for user: {user_id}")
+    logger.info(f"Game started for user: {user_id}")
 
     owner_id = atlantis.get_owner()
 

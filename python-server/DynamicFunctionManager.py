@@ -1546,6 +1546,7 @@ async def {name}():
                         module.__dict__['chat'] = _mcp_identity_decorator
                         module.__dict__['public'] = _mcp_identity_decorator
                         module.__dict__['session'] = _mcp_identity_decorator
+                        module.__dict__['game'] = _mcp_identity_decorator
                         # Add app decorator which takes parameters
                         module.__dict__['app'] = app
                         # Add location decorator which takes parameters

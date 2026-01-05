@@ -1995,7 +1995,7 @@ class DynamicAdditionServer(Server):
                         # @protected - delegated access control via protection function (checked later in function_call)
                         logger.debug(f"🔒 Protected function '{actual_function_name}' - access will be validated by protection function")
                     else:
-                        # @visible, @tick, @chat, @session, @price, @location, or @app - owner-only access
+                        # @visible, @tick, @chat, @session, @game, @price, @location, or @app - owner-only access
                         caller = user or client_id or "unknown"
 
                         # Treat localhost websocket connections as the owner
@@ -3409,6 +3409,8 @@ class ServiceClient:
                     visibility_str += f" {CORAL_PINK}[@chat]{RESET_COLOR}"
                 if 'session' in decorators:
                     visibility_str += f" {MAGENTA}[@session]{RESET_COLOR}"
+                if 'game' in decorators:
+                    visibility_str += f" {MAGENTA}[@game]{RESET_COLOR}"
                 if 'app' in decorators:
                     visibility_str += f" {CYAN_COLOR}[@app]{RESET_COLOR}"
                 if 'location' in decorators:
@@ -3455,6 +3457,10 @@ class ServiceClient:
 
         # Calculate counts
         external_count = len(tools_list) - internal_count
+        logger.info(f"")
+        logger.info(f"{'═' * 70}")
+        logger.info(f"                    🛠️  TOOL INVENTORY REPORT  🛠️")
+        logger.info(f"{'═' * 70}")
         logger.info(f"📊 REGISTERING {len(tools_list)} TOOLS WITH CLOUD ({external_count} external + {internal_count} internal):")
         logger.info(f"")
         logger.info(f"  {BOLD_COLOR}Functions: {len(tool_info_list)}{RESET_COLOR}")

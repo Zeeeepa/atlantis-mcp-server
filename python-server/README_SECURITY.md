@@ -95,7 +95,7 @@ User-defined functions must have visibility decorators (server.py:1814-1856):
 
 - **@public / @index**: Anyone can call (including anonymous users)
 - **@protected**: Access validated by custom protection function
-- **@visible / @tick / @chat / @session / @price / @location / @app**: Owner-only access
+- **Other decorators** (see `DynamicFunctionManager.py`): Owner-only access
 
 Functions without visibility decorators **cannot be called remotely**.
 
