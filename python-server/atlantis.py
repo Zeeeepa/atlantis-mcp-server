@@ -365,8 +365,8 @@ async def client_image(image_path: str, image_format: Optional[str] = None):
     # Convert image to base64
     base64_data = image_to_base64(image_path)
 
-    # Add 'base64:' prefix to the string
-    prefixed_data = f"base64:{base64_data}"
+    # Format as proper data URL
+    prefixed_data = f"data:{image_format};base64,{base64_data}"
 
     # Send to client_log with appropriate message_type
     # client_log is now async and returns a result
@@ -682,38 +682,15 @@ async def client_script(content: str, is_private: bool = True):
     return result
 
 async def set_background(image_path: str):
-    """Sets the background of the 'feedback' div using an image file
-    and clears the parent 'chatFeedback' div gradient to black
+    """Sets the background image for the client UI.
 
     Args:
-        image_path: Path to the image file (MIME type will be auto-detected from extension)
+        image_path: Path to the image file
     """
-    # Infer MIME type from file extension
-    mime_type, _ = mimetypes.guess_type(image_path)
-    if not mime_type or not mime_type.startswith('image/'):
-        # Default to PNG if we can't determine the type
-        mime_type = "image/png"
-
     # Convert image to base64
     base64_data = image_to_base64(image_path)
 
-    # Generate JavaScript to clear parent gradient and set the background of the feedback div
-    script = f"""
-    const chatFeedbackDiv = document.getElementById('chatFeedback');
-    if (chatFeedbackDiv) {{
-        chatFeedbackDiv.style.background = 'black';
-    }}
-
-    const feedbackDiv = document.getElementById('chatFeedback');
-    if (feedbackDiv) {{
-        feedbackDiv.style.backgroundImage = 'url(data:{mime_type};base64,{base64_data})';
-        feedbackDiv.style.backgroundSize = 'cover';
-        feedbackDiv.style.backgroundPosition = 'center';
-        feedbackDiv.style.backgroundRepeat = 'no-repeat';
-    }}
-    """
-
-    result = await client_script(script)
+    result = await client_log(base64_data, message_type="background")
     return result
 
 async def client_markdown(content: str):
