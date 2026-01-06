@@ -26,7 +26,7 @@ import traceback
 from collections import defaultdict
 
 # Version
-SERVER_VERSION = "3.1.3"
+SERVER_VERSION = "3.2.1"
 
 # Tool list display column widths
 COL_WIDTH_APP = 30
