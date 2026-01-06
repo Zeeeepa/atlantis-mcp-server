@@ -271,11 +271,22 @@ You like to purr when happy or do 'kitty paws'.
             logger.warning("\x1b[38;5;204mLast chat entry was from kitty (bot), skipping response\x1b[0m")
             return
 
+        # Validate transcript before processing
+        if not rawTranscript:
+            logger.error("!!! CRITICAL: rawTranscript is EMPTY - no messages received from client!")
+            await atlantis.owner_log("CRITICAL: rawTranscript is empty!")
+            raise ValueError("Cannot process empty transcript")
+
+        logger.info(f"rawTranscript has {len(rawTranscript)} entries before system message handling")
+
         # Check if first message is system message, if not add catgirl system message at front
         if rawTranscript[0].get('role') != 'system':
             rawTranscript.insert(0, CATGIRL_SYSTEM_MESSAGE)
+            logger.info("Inserted catgirl system message at front of transcript")
         else:
-            rawTranscript = [CATGIRL_SYSTEM_MESSAGE]
+            # Replace existing system message with catgirl's system message
+            logger.warning(f"!!! Replacing existing system message. Old: {rawTranscript[0].get('content', '')[:100]}...")
+            rawTranscript[0] = CATGIRL_SYSTEM_MESSAGE
 
         logger.info("=== RAW TRANSCRIPT ===")
         logger.info(format_json_log(rawTranscript))
@@ -348,14 +359,21 @@ You like to purr when happy or do 'kitty paws'.
                 if turn_count == 1:
                     await atlantis.owner_log(f"Attempting to call open router: {model}")
 
-                logger.info("=== WORKING TRANSCRIPT ===")
-                logger.info(format_json_log(transcript))
-                logger.info("=== END WORKING TRANSCRIPT ===")
-
                 # Cast transcript and tools to proper types for OpenAI client
                 logger.info("Casting transcript and tools to proper types...")
                 typed_transcript = cast(List[ChatCompletionMessageParam], transcript)
-                typed_tools = cast(List[ChatCompletionToolParam], tools)
+
+                # Convert tools from cloud format to OpenAI-compatible format
+                converted_tools, _ = convert_tools_for_llm(tools)
+                typed_tools = cast(List[ChatCompletionToolParam], converted_tools)
+
+                # Log what we're actually sending to OpenRouter
+                logger.info(f"=== SENDING TO OPENROUTER (turn {turn_count}) ===")
+                logger.info(f"Messages ({len(typed_transcript)} entries):")
+                logger.info(format_json_log(typed_transcript))
+                logger.info(f"Tools ({len(typed_tools)} entries):")
+                logger.info(format_json_log(typed_tools))
+                logger.info("=== END OPENROUTER PAYLOAD ===")
 
                 logger.info("Creating streaming completion request...")
                 stream = client.chat.completions.create(
@@ -394,7 +412,7 @@ You like to purr when happy or do 'kitty paws'.
 
                 for chunk in stream:
                     chunk_count += 1
-                    logger.info(f"CHUNK {chunk_count} RECEIVED AT: {datetime.now().isoformat()}")
+                    #logger.info(f"CHUNK {chunk_count} RECEIVED AT: {datetime.now().isoformat()}")
 
                     if chunk.choices and len(chunk.choices) > 0:
                         delta = chunk.choices[0].delta
@@ -544,7 +562,27 @@ You like to purr when happy or do 'kitty paws'.
             logger.error(f"ERROR calling remote model: {str(e)}")
             logger.error(f"Error type: {type(e)}")
             logger.error(f"Full exception:", exc_info=True)
-            await atlantis.owner_log(f"Error calling remote model: {str(e)}")
+
+            # Extract detailed error info from OpenAI/OpenRouter APIError
+            error_details = str(e)
+            if hasattr(e, 'body') and e.body:
+                logger.error(f"Error body: {e.body}")
+                error_details = f"{error_details} | Body: {e.body}"
+            if hasattr(e, 'code') and e.code:
+                logger.error(f"Error code: {e.code}")
+            if hasattr(e, 'type') and e.type:
+                logger.error(f"Error type attr: {e.type}")
+            if hasattr(e, 'param') and e.param:
+                logger.error(f"Error param: {e.param}")
+            if hasattr(e, 'response') and e.response:
+                try:
+                    logger.error(f"Response status: {e.response.status_code}")
+                    logger.error(f"Response text: {e.response.text}")
+                    error_details = f"{error_details} | Status: {e.response.status_code} | Response: {e.response.text}"
+                except:
+                    pass
+
+            await atlantis.owner_log(f"Error calling remote model: {error_details}")
             await atlantis.owner_log(f"Error type: {type(e)}")
             # Make sure to close stream on error
             if streamTalkId:

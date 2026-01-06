@@ -3996,7 +3996,8 @@ class ServiceClient:
                 pass
                 #logger.info(f"☁️ SENDING CLIENT LOG/COMMAND via {event}: {data.get('params', {}).get('command', data.get('method'))}")
             else:
-                logger.debug(f"☁️ SENDING MCP MESSAGE via {event}:\n{format_json_log(data) if isinstance(data, dict) else data}")
+                #logger.debug(f"☁️ SENDING MCP MESSAGE via {event}:\n{format_json_log(data) if isinstance(data, dict) else data}")
+                pass
 
             await self.sio.emit(event, data, namespace=self.namespace)
             # If emit succeeds, we don't return True anymore; success is implied by no exception.
