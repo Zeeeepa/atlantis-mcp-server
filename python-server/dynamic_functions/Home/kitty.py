@@ -4,7 +4,189 @@ import asyncio
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolParam
 import json
-from typing import List, cast
+from typing import List, Dict, Any, Optional, TypedDict, Tuple, cast
+
+
+# =============================================================================
+# Cloud Tool Types (input from cloud)
+# =============================================================================
+
+class ToolT(TypedDict, total=False):
+    """Tool record from the cloud"""
+    remote_id: int
+    tool_id: int
+    perm_id: int
+    app_name: str
+    remote_user_id: int
+
+    is_chat: bool
+    is_tick: bool
+    is_session: bool
+    is_game: bool
+    is_index: bool
+    is_public: bool
+
+    is_connected: bool
+    is_default: bool
+
+    hostname: str
+    port: int
+
+    remote_owner: str
+    remote_name: str
+
+    mcp_name: str
+    mcp_tool: str
+
+    tool_app: str
+    tool_location: str
+    tool_name: str
+    protection_name: str
+    tool_type: str
+    tool_description: str
+    filename: str
+
+    price_per_call: float
+    price_per_sec: float
+
+    static_error_msg: str
+    runtime_error_msg: str
+    params: str
+    input_schema: str
+
+    started_at: str  # ISO date string
+    remote_updated_at: str  # ISO date string
+
+
+# =============================================================================
+# LLM Tool Types (output for OpenAI-compatible APIs)
+# =============================================================================
+
+class ToolSchemaPropertyT(TypedDict, total=False):
+    """Property definition within a tool schema"""
+    type: str
+    description: str
+    enum: List[str]
+
+
+class ToolSchemaT(TypedDict, total=False):
+    """JSON Schema for tool parameters"""
+    type: str
+    properties: Dict[str, ToolSchemaPropertyT]
+    required: List[str]
+
+
+class ToolFunctionT(TypedDict):
+    """Function definition within a tool"""
+    name: str
+    description: str
+    parameters: ToolSchemaT
+
+
+class TranscriptToolT(TypedDict):
+    """Tool format for LLM transcripts (OpenAI-compatible)"""
+    type: str
+    function: ToolFunctionT
+
+
+class SimpleToolT(TypedDict, total=False):
+    """Simplified tool format"""
+    type: str
+    name: str
+    description: str
+    parameters: ToolSchemaT
+
+
+# =============================================================================
+# Tool Conversion Functions
+# =============================================================================
+
+def get_consolidated_full_name(tool: ToolT) -> str:
+    """
+    Build a consolidated tool name from tool metadata.
+    Format: remote_owner*remote_name*app*location*function
+    Only includes parts that are needed to disambiguate.
+    """
+    # Extract values with .get() to satisfy Pylance
+    remote_owner = tool.get('remote_owner', '')
+    remote_name = tool.get('remote_name', '')
+    tool_app = tool.get('tool_app', '')
+    tool_location = tool.get('tool_location', '')
+    tool_name = tool.get('tool_name', '')
+
+    parts = [remote_owner, remote_name, tool_app, tool_location, tool_name]
+
+    # Build the full name, but simplify if possible
+    # If all prefix parts are empty, just return the tool name
+    if all(p == '' for p in parts[:-1]):
+        return parts[-1]
+
+    return '*'.join(parts)
+
+
+def convert_tools_for_llm(
+    tools: List[ToolT],
+    show_hidden: bool = False
+) -> Tuple[List[TranscriptToolT], List[SimpleToolT]]:
+    """
+    Convert cloud tool records to LLM-compatible format.
+
+    Args:
+        tools: List of ToolT records from the cloud
+        show_hidden: If False, skip tools starting with '_'
+
+    Returns:
+        Tuple of (full tools list, simple tools list)
+    """
+    out_tools: List[TranscriptToolT] = []
+    out_tools_simple: List[SimpleToolT] = []
+
+    for tool in tools:
+        # Skip hidden tools unless show_hidden is True
+        tool_name = tool.get('tool_name', '')
+        if not show_hidden and tool_name.startswith('_'):
+            continue
+
+        # Skip chat, tick, and session tools
+        if tool.get('is_chat') or tool.get('is_tick') or tool.get('is_session'):
+            continue
+
+        # Only process function, internal, or mcp_tool types
+        tool_type = tool.get('tool_type', '')
+        if tool_type not in ('function', 'internal', 'mcp_tool'):
+            continue
+
+        # Parse the input schema
+        input_schema_str = tool.get('input_schema', '{}')
+        try:
+            schema = cast(ToolSchemaT, json.loads(input_schema_str))
+        except json.JSONDecodeError:
+            schema: ToolSchemaT = {'type': 'object', 'properties': {}, 'required': []}
+
+        # Get consolidated name
+        consolidated_name = get_consolidated_full_name(tool)
+
+        # Build the output tool
+        out_tool: TranscriptToolT = {
+            'type': 'function',
+            'function': {
+                'name': consolidated_name,
+                'description': tool.get('tool_description', ''),
+                'parameters': schema
+            }
+        }
+
+        out_tools.append(out_tool)
+
+        # Build the simple version
+        out_tools_simple.append({
+            'type': 'function',
+            'name': consolidated_name,
+            'description': tool.get('tool_description', ''),
+            'parameters': schema
+        })
+
+    return out_tools, out_tools_simple
 
 # Load and test the foo.jinja template
 from jinja2 import Template
@@ -82,10 +264,11 @@ You like to purr when happy or do 'kitty paws'.
 
 
 
-        # Don't respond if last chat message was from assistant
+        # Don't respond if last chat message was from Kitty (the bot)
+        # Note: We check 'sid' not 'role' because user messages also have role='assistant'
         last_chat_entry = find_last_chat_entry(rawTranscript)
-        if last_chat_entry and last_chat_entry.get('role') == 'assistant':
-            logger.info("Last chat entry was from assistant, skipping response")
+        if last_chat_entry and last_chat_entry.get('type') == 'chat' and last_chat_entry.get('sid') == 'kitty':
+            logger.warning("\x1b[38;5;204mLast chat entry was from kitty (bot), skipping response\x1b[0m")
             return
 
         # Check if first message is system message, if not add catgirl system message at front
@@ -113,7 +296,7 @@ You like to purr when happy or do 'kitty paws'.
         # Get available tools
         logger.info("Fetching available tools...")
         # this may change to inventory stuff
-        tools = await atlantis.client_command("\\tool llm")
+        tools = await atlantis.client_command("\\dir")
         logger.info(f"Received {len(tools) if tools else 0} tools")
         logger.info("=== TOOLS ===")
         logger.info(format_json_log(tools))

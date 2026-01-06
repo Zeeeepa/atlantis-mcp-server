@@ -3855,7 +3855,7 @@ class ServiceClient:
                                 except (json.JSONDecodeError, KeyError, IndexError):
                                     # If parsing fails, use the text as-is
                                     extracted_result = text_content if 'text_content' in locals() else raw_result
-                                    logger.warning(f"☁️ Could not parse content as JSON, using as-is")
+                                    logger.debug(f"☁️ Could not parse content as JSON, using as-is")
                                 logger.info(f"☁️ Final result type: {type(extracted_result)}")
                                 future.set_result(extracted_result)
                         elif "error" in params:
