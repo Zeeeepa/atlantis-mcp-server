@@ -253,14 +253,14 @@ You like to purr when happy or do 'kitty paws'.
 
 
         # enable silent mode
-        await atlantis.client_command("\\silent on")
+        await atlantis.client_command("/silent on")
 
         # Get the latest transcript
         logger.info("Fetching transcript from client...")
-        rawTranscript = await atlantis.client_command("\\transcript get")
+        rawTranscript = await atlantis.client_command("/transcript get")
         logger.info(f"Received rawTranscript with {len(rawTranscript)} entries")
 
-        await atlantis.client_command("\\silent off")
+        await atlantis.client_command("/silent off")
 
 
 
@@ -302,18 +302,18 @@ You like to purr when happy or do 'kitty paws'.
 
 
 
-        await atlantis.client_command("\\silent on")
+        await atlantis.client_command("/silent on")
 
         # Get available tools
         logger.info("Fetching available tools...")
         # this may change to inventory stuff
-        tools = await atlantis.client_command("\\dir")
+        tools = await atlantis.client_command("/dir")
         logger.info(f"Received {len(tools) if tools else 0} tools")
         logger.info("=== TOOLS ===")
         logger.info(format_json_log(tools))
         logger.info("=== END TOOLS ===")
 
-        await atlantis.client_command("\\silent off")
+        await atlantis.client_command("/silent off")
 
 
         # uses env var
@@ -485,10 +485,10 @@ You like to purr when happy or do 'kitty paws'.
 
                                     # Execute the tool call through atlantis client command
 
-                                    await atlantis.client_command("\\silent on")
+                                    await atlantis.client_command("/silent on")
                                     # use '%' prefix instead of '@' in call to ignore any working path / force absolute path
                                     tool_result = await atlantis.client_command(f"%{function_name}", data=arguments)
-                                    await atlantis.client_command("\\silent off")
+                                    await atlantis.client_command("/silent off")
 
                                     logger.info(f"Tool result: {tool_result}")
 
