@@ -11,16 +11,18 @@ async def game():
     Main game function
     """
 
+    await atlantis.client_command("/silent on")
+
     # get user id
     user_id = atlantis.get_caller()
     logger.info(f"Game started for user: {user_id}")
 
     owner_id = atlantis.get_owner()
 
-    await atlantis.client_command("\\chat set " + owner_id + "*kitty")
+    await atlantis.client_command("/chat set " + owner_id + "*kitty")
 
     # set background
-    await atlantis.client_command("\\silent off")
+    await atlantis.client_command("/silent off")
     image_path = os.path.join(os.path.dirname(__file__), "builder.jpg")
 
 
