@@ -449,7 +449,7 @@ You like to purr when happy or do 'kitty paws'.
                 max_reasoning_chars = 1024  # Cut off reasoning after this many chars
                 chunk_count = 0
                 streamed_count = 0  # Track how many chunks we've actually streamed
-                max_stream_chunks = 128  # Abort after this many (max_tokens is broken on some models)
+                max_stream_chunks = 512  # Abort after this many (match max_completion_tokens)
                 tasks = []
                 tool_calls_accumulator = {}  # Store partial tool calls by index
                 streaming_content = False  # Becomes True once we start getting content tokens
