@@ -267,8 +267,28 @@ You like to purr when happy or do 'kitty paws'.
         # Don't respond if last chat message was from Kitty (the bot)
         # Note: We check 'sid' not 'role' because user messages also have role='assistant'
         last_chat_entry = find_last_chat_entry(rawTranscript)
+
+        # Debug logging to understand transcript state
+        logger.info(f"=== LAST CHAT ENTRY CHECK ===")
+        logger.info(f"Total transcript entries: {len(rawTranscript)}")
+        if last_chat_entry:
+            logger.info(f"Last chat entry found:")
+            logger.info(f"  - type: {last_chat_entry.get('type')}")
+            logger.info(f"  - sid: {last_chat_entry.get('sid')}")
+            logger.info(f"  - role: {last_chat_entry.get('role')}")
+            logger.info(f"  - content preview: {str(last_chat_entry.get('content', ''))[:100]}...")
+        else:
+            logger.info(f"No chat entry found in transcript!")
+
+        # Log last 3 entries for context
+        logger.info(f"Last 3 transcript entries:")
+        for i, entry in enumerate(rawTranscript[-3:]):
+            logger.info(f"  [{len(rawTranscript) - 3 + i}] type={entry.get('type')}, sid={entry.get('sid')}, role={entry.get('role')}")
+        logger.info(f"=== END LAST CHAT ENTRY CHECK ===")
+
         if last_chat_entry and last_chat_entry.get('type') == 'chat' and last_chat_entry.get('sid') == 'kitty':
             logger.warning("\x1b[38;5;204mLast chat entry was from kitty (bot), skipping response\x1b[0m")
+            await atlantis.owner_log(f"Skipping response - last chat was from kitty (sid={last_chat_entry.get('sid')})")
             return
 
         # Validate transcript before processing
@@ -294,11 +314,36 @@ You like to purr when happy or do 'kitty paws'.
 
 
         # Filter transcript to only include chat messages, removing type and sid fields
-        logger.info("Filtering transcript to chat messages only...")
+        logger.info("=== FILTERING TRANSCRIPT ===")
         transcript = []
-        for msg in rawTranscript:
-            if msg.get('type') == 'chat':
-                transcript.append({'role': msg['role'], 'content': msg['content']})
+        for i, msg in enumerate(rawTranscript):
+            msg_type = msg.get('type')
+            msg_sid = msg.get('sid')
+            msg_role = msg.get('role')
+            msg_content = str(msg.get('content', ''))[:50]
+            logger.info(f"  [{i}] type={msg_type}, sid={msg_sid}, role={msg_role}, content={repr(msg_content)}...")
+
+            if msg_type == 'chat':
+                # Skip system messages (we inject our own)
+                if msg_sid == 'system':
+                    logger.info(f"       -> SKIPPED (sid=system)")
+                    continue
+
+                # Skip blank messages
+                msg_content_full = msg.get('content', '')
+                if not msg_content_full or not msg_content_full.strip():
+                    logger.info(f"       -> SKIPPED (blank content)")
+                    continue
+
+                # Convert sid to proper role for LLM:
+                # - kitty messages = assistant
+                # - everyone else = user
+                role_for_llm = 'assistant' if msg_sid == 'kitty' else 'user'
+                transcript.append({'role': role_for_llm, 'content': msg_content_full})
+                logger.info(f"       -> INCLUDED as role={role_for_llm} (sid={msg_sid})")
+            else:
+                logger.info(f"       -> SKIPPED (type != 'chat')")
+        logger.info(f"=== END FILTERING: {len(transcript)} messages included ===")
 
 
 
@@ -309,9 +354,9 @@ You like to purr when happy or do 'kitty paws'.
         # this may change to inventory stuff
         tools = await atlantis.client_command("/dir")
         logger.info(f"Received {len(tools) if tools else 0} tools")
-        logger.info("=== TOOLS ===")
-        logger.info(format_json_log(tools))
-        logger.info("=== END TOOLS ===")
+        #logger.info("=== TOOLS ===")
+        #logger.info(format_json_log(tools))
+        #logger.info("=== END TOOLS ===")
 
         await atlantis.client_command("/silent off")
 
@@ -385,16 +430,18 @@ You like to purr when happy or do 'kitty paws'.
                             ]
                         },
                         # Model-specific reasoning control
+                        "thinking": {
+                            "type": "disabled"
+                        },
                         "reasoning": {
-                            "enabled": False  # GLM 4.5 format
-                            # "exclude": True  # DeepSeek R1 format (when using deepseek)
+                            "effort": "none"
                         }
                     },
                     messages=typed_transcript,
                     tools=typed_tools,
                     tool_choice="auto",
                     stream=True,
-                    max_tokens=512,
+                    max_tokens=6,
                     temperature=0.9
                 )
                 logger.info("OpenRouter API call successful!")
@@ -403,6 +450,8 @@ You like to purr when happy or do 'kitty paws'.
 
                 reasoning = ""
                 chunk_count = 0
+                streamed_count = 0  # Track how many chunks we've actually streamed
+                max_stream_chunks = 10  # Abort after this many (max_tokens is broken on some models)
                 tasks = []
                 tool_calls_accumulator = {}  # Store partial tool calls by index
                 content_started = False  # Track if we've sent any non-whitespace content yet
@@ -419,10 +468,17 @@ You like to purr when happy or do 'kitty paws'.
 
 
 
-                        # Check for both content and reasoning
+                        # Debug: log what's in each delta
+                        logger.info(f"CHUNK {chunk_count} delta: content={repr(getattr(delta, 'content', None))}, reasoning={repr(getattr(delta, 'reasoning', None))}, role={repr(getattr(delta, 'role', None))}, tool_calls={repr(getattr(delta, 'tool_calls', None))}")
+
+                        # Check for content OR reasoning - stream whichever has data
+                        content_to_send = None
                         if hasattr(delta, 'content') and delta.content:
                             content_to_send = delta.content
+                        elif hasattr(delta, 'reasoning') and delta.reasoning:
+                            content_to_send = delta.reasoning
 
+                        if content_to_send:
                             # Strip leading whitespace only if we haven't started sending content yet
                             if not content_started:
                                 stripped_content = content_to_send.lstrip()
@@ -434,11 +490,17 @@ You like to purr when happy or do 'kitty paws'.
 
                             # Only send if there's content after potential stripping
                             if content_to_send:
-                                content_task = asyncio.create_task(atlantis.stream(content_to_send, streamTalkId))
-                                #tasks.append(content_task)
-                                #logger.info(f"STREAMING CONTENT: {repr(content_to_send)}")
-                                # IMPORTANT - Yield control to event loop otherwise stuff won't run in parallel
-                                await asyncio.sleep(0)
+                                # Actually await each stream message to ensure sequential delivery
+                                await atlantis.stream(content_to_send, streamTalkId)
+                                streamed_count += 1
+                                logger.info(f"STREAMING CONTENT [{streamed_count}/{max_stream_chunks}]: {repr(content_to_send)}")
+                                # Debug delay - adjust or remove once streaming is working
+                                await asyncio.sleep(0.3)  # 300ms delay between chunks
+
+                                # Abort if we've streamed enough (max_tokens is broken on some models)
+                                if streamed_count >= max_stream_chunks:
+                                    logger.warning(f"Aborting stream after {streamed_count} chunks (max_stream_chunks limit)")
+                                    break
 
 
                         # Check for tool calls
@@ -530,9 +592,9 @@ You like to purr when happy or do 'kitty paws'.
                             # Break out of stream loop to make another API call with updated transcript
                             break
 
-                        # Log if none of the above
-                        if not ((hasattr(delta, 'content') and delta.content) or reasoning or (hasattr(delta, 'tool_calls') and delta.tool_calls)):
-                            logger.info(format_json_log(chunk.model_dump()))
+                        # Log if none of the above (commented out - too noisy)
+                        #if not ((hasattr(delta, 'content') and delta.content) or reasoning or (hasattr(delta, 'tool_calls') and delta.tool_calls)):
+                        #    logger.info(format_json_log(chunk.model_dump()))
 
                     else:
                         pass

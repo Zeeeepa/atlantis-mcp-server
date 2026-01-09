@@ -3,7 +3,7 @@ import inspect # Ensure inspect is imported
 import asyncio # Added for Lock
 from typing import Callable, Optional, Any, List # Added List
 from utils import client_log as util_client_log # For client_log, client_image, client_html
-from utils import execute_client_command_awaitable, format_json_log # For client_command
+from utils import execute_client_command_awaitable, execute_stream_awaitable, format_json_log # For client_command and streaming
 import uuid
 import os
 import os.path
@@ -49,6 +49,13 @@ _click_callbacks: dict = {}
 
 # upload callback lookup table - maps upload keys to callback functions
 _upload_callbacks: dict = {}
+
+# Flags to control whether streaming calls wait for acknowledgment
+# Set to True to enable awaitable streaming (helps fix streaming issues)
+# Set to False for fire-and-forget streaming (original behavior)
+AWAIT_STREAM_START_ACK: bool = True   # Wait for ack on stream_start
+AWAIT_STREAM_MSG_ACK: bool = True     # Wait for ack on each stream message
+AWAIT_STREAM_END_ACK: bool = True     # Wait for ack on stream_end
 
 
 
@@ -497,17 +504,34 @@ async def stream_start(sid: str, who: str) -> str:
     try:
         message_data = {"status": "started", "sid":sid, "who": who}
 
-        await util_client_log(
-            seq_num=current_seq_to_send, # Pass the obtained sequence number
-            message=message_data,
-            level="INFO",
-            logger_name=caller_name,
-            request_id=request_id,
-            client_id_for_routing=actual_client_id, # Route using actual client_id
-            entry_point_name=entry_point_name,
-            message_type='stream_start',
-            stream_id=stream_id_to_send # Pass the generated stream_id separately
-        )
+        # Use awaitable pattern if AWAIT_STREAM_START_ACK is enabled
+        if AWAIT_STREAM_START_ACK:
+            logger.info(f"🌊 stream_start: AWAIT_STREAM_START_ACK is True, calling execute_stream_awaitable...")
+            ack_result = await execute_stream_awaitable(
+                client_id_for_routing=actual_client_id,
+                request_id=request_id,
+                message_type='stream_start',
+                message=message_data,
+                stream_id=stream_id_to_send,
+                seq_num=current_seq_to_send,
+                entry_point_name=entry_point_name,
+                level="INFO",
+                logger_name=caller_name
+            )
+            logger.info(f"🌊 stream_start ack received: {ack_result}")
+        else:
+            # Original fire-and-forget behavior
+            await util_client_log(
+                seq_num=current_seq_to_send, # Pass the obtained sequence number
+                message=message_data,
+                level="INFO",
+                logger_name=caller_name,
+                request_id=request_id,
+                client_id_for_routing=actual_client_id, # Route using actual client_id
+                entry_point_name=entry_point_name,
+                message_type='stream_start',
+                stream_id=stream_id_to_send # Pass the generated stream_id separately
+            )
         return stream_id_to_send # Return the generated stream_id to the caller
     except Exception as e:
         logger.error(f"Failed during async stream_start call: {e}")
@@ -538,17 +562,34 @@ async def stream(message: str, stream_id_param: str):
     current_seq_to_send = await get_and_increment_stream_seq_num(stream_id_param)
 
     try:
-        result = await util_client_log(
-            seq_num=current_seq_to_send, # Pass the obtained sequence number
-            message=message,
-            level="INFO",
-            logger_name=caller_name,
-            request_id=request_id,
-            client_id_for_routing=actual_client_id, # Route using actual client_id
-            entry_point_name=entry_point_name,
-            message_type='stream',
-            stream_id=stream_id_param # Pass the provided stream_id separately
-        )
+        # Use awaitable pattern if AWAIT_STREAM_MSG_ACK is enabled
+        if AWAIT_STREAM_MSG_ACK:
+            logger.debug(f"🌊 stream: AWAIT_STREAM_MSG_ACK is True, calling execute_stream_awaitable for seq {current_seq_to_send}...")
+            result = await execute_stream_awaitable(
+                client_id_for_routing=actual_client_id,
+                request_id=request_id,
+                message_type='stream',
+                message=message,
+                stream_id=stream_id_param,
+                seq_num=current_seq_to_send,
+                entry_point_name=entry_point_name,
+                level="INFO",
+                logger_name=caller_name
+            )
+            logger.debug(f"🌊 stream ack received for seq {current_seq_to_send}: {result}")
+        else:
+            # Original fire-and-forget behavior
+            result = await util_client_log(
+                seq_num=current_seq_to_send, # Pass the obtained sequence number
+                message=message,
+                level="INFO",
+                logger_name=caller_name,
+                request_id=request_id,
+                client_id_for_routing=actual_client_id, # Route using actual client_id
+                entry_point_name=entry_point_name,
+                message_type='stream',
+                stream_id=stream_id_param # Pass the provided stream_id separately
+            )
         return result
     except Exception as e:
         logger.error(f"Failed during async stream call: {e}")
@@ -579,17 +620,34 @@ async def stream_end(stream_id_param: str):
     current_seq_to_send = await get_and_increment_stream_seq_num(stream_id_param)
 
     try:
-        result = await util_client_log(
-            seq_num=current_seq_to_send, # Pass the obtained sequence number
-            message="",
-            level="INFO",
-            logger_name=caller_name,
-            request_id=request_id,
-            client_id_for_routing=actual_client_id, # Route using actual client_id
-            entry_point_name=entry_point_name,
-            message_type='stream_end',
-            stream_id=stream_id_param # Pass the provided stream_id separately
-        )
+        # Use awaitable pattern if AWAIT_STREAM_END_ACK is enabled
+        if AWAIT_STREAM_END_ACK:
+            logger.info(f"🌊 stream_end: AWAIT_STREAM_END_ACK is True, calling execute_stream_awaitable...")
+            result = await execute_stream_awaitable(
+                client_id_for_routing=actual_client_id,
+                request_id=request_id,
+                message_type='stream_end',
+                message="",
+                stream_id=stream_id_param,
+                seq_num=current_seq_to_send,
+                entry_point_name=entry_point_name,
+                level="INFO",
+                logger_name=caller_name
+            )
+            logger.info(f"🌊 stream_end ack received: {result}")
+        else:
+            # Original fire-and-forget behavior
+            result = await util_client_log(
+                seq_num=current_seq_to_send, # Pass the obtained sequence number
+                message="",
+                level="INFO",
+                logger_name=caller_name,
+                request_id=request_id,
+                client_id_for_routing=actual_client_id, # Route using actual client_id
+                entry_point_name=entry_point_name,
+                message_type='stream_end',
+                stream_id=stream_id_param # Pass the provided stream_id separately
+            )
         return result
     except Exception as e:
         logger.error(f"Failed during async stream_end call: {e}")

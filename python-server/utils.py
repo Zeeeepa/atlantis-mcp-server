@@ -257,6 +257,68 @@ async def execute_client_command_awaitable(
         # Server layer already logged with command context, just re-raise
         raise
 
+async def execute_stream_awaitable(
+    client_id_for_routing: str,
+    request_id: str,
+    message_type: str,  # 'stream_start', 'stream', or 'stream_end'
+    message: Any,
+    stream_id: str,
+    seq_num: Optional[int] = None,
+    entry_point_name: Optional[str] = None,
+    level: str = "INFO",
+    logger_name: Optional[str] = None
+    ) -> Any:
+    """
+    Sends a stream message to a specific client via the server and waits for acknowledgment.
+    This is the awaitable version of stream operations for when AWAIT_STREAM_ACK is enabled.
+
+    Args:
+        client_id_for_routing: The ID of the client to send the stream message to.
+        request_id: The original MCP request ID, for client-side context.
+        message_type: The type of stream message ('stream_start', 'stream', or 'stream_end').
+        message: The message content to send.
+        stream_id: The unique identifier for this stream.
+        seq_num: Optional sequence number for client-side ordering.
+        entry_point_name: Optional name of the entry point function for logging.
+        level: Log level (default "INFO").
+        logger_name: Optional name to identify the logger source.
+
+    Returns:
+        The acknowledgment result from the client.
+
+    Raises:
+        McpError: If the server call fails, client response times out, or client returns an error.
+        RuntimeError: If the server instance is not available or doesn't support awaitable streams.
+    """
+    global _server_instance
+    if _server_instance is None:
+        logger.error("❌ Cannot execute awaitable stream: server instance not set.")
+        raise RuntimeError("Server instance not available for awaitable stream.")
+
+    if not hasattr(_server_instance, 'send_awaitable_stream'):
+        logger.error("❌ Server instance does not have 'send_awaitable_stream' method. This is required for awaitable streams.")
+        raise RuntimeError("Server instance is outdated or incorrect for awaitable streams.")
+
+    try:
+        logger.info(f"🌊 Utils: Relaying awaitable stream '{message_type}' to server for client {client_id_for_routing}, stream_id={stream_id}, seq_num={seq_num}")
+        result = await _server_instance.send_awaitable_stream(
+            client_id_for_routing=client_id_for_routing,
+            request_id=request_id,
+            message_type=message_type,
+            message=message,
+            stream_id=stream_id,
+            seq_num=seq_num,
+            entry_point_name=entry_point_name,
+            level=level,
+            logger_name=logger_name
+        )
+        logger.info(f"✅ Utils: Received ack for awaitable stream '{message_type}' (stream_id={stream_id}): {result}")
+        return result
+    except Exception as e:
+        logger.error(f"❌ Utils: Exception in execute_stream_awaitable: {type(e).__name__}: {e}")
+        # Server layer already logged, just re-raise
+        raise
+
 # --- JSON Formatting Utility --- #
 
 def format_json_log(data: dict | list, colored: bool = True) -> str:

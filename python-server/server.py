@@ -613,6 +613,137 @@ class DynamicAdditionServer(Server):
                  logger.warning(f"🧹 Final cleanup: Future for {correlation_id} was still in awaitable_requests.")
                  self.awaitable_requests.pop(correlation_id, None)
 
+    async def send_awaitable_stream(self,
+                                    client_id_for_routing: str,
+                                    request_id: str,
+                                    message_type: str,  # 'stream_start', 'stream', or 'stream_end'
+                                    message: Any,
+                                    stream_id: str,
+                                    seq_num: Optional[int] = None,
+                                    entry_point_name: Optional[str] = None,
+                                    level: str = "INFO",
+                                    logger_name: Optional[str] = None
+                                    ) -> Any:
+        """Sends a stream message to a specific client and waits for acknowledgment.
+
+        This is similar to send_awaitable_client_command but specifically for stream operations
+        (stream_start, stream, stream_end). The client must respond with notifications/streamAck.
+
+        Args:
+            client_id_for_routing: The ID of the client to send the stream message to.
+            request_id: The original MCP request ID, for client-side context.
+            message_type: Type of stream message ('stream_start', 'stream', or 'stream_end').
+            message: The message content to send.
+            stream_id: The unique identifier for this stream.
+            seq_num: Optional sequence number for client-side ordering.
+            entry_point_name: Optional name of the entry point function for logging.
+            level: Log level (default "INFO").
+            logger_name: Optional name to identify the logger source.
+
+        Returns:
+            The acknowledgment result from the client.
+
+        Raises:
+            McpError: If the client response times out or the client returns an error.
+        """
+        correlation_id = str(uuid.uuid4())
+        future = asyncio.get_event_loop().create_future()
+        self.awaitable_requests[correlation_id] = future
+
+        logger.info(f"🌊 Server: Preparing awaitable stream '{message_type}' for client {client_id_for_routing} (correlationId: {correlation_id}, stream_id: {stream_id})")
+
+        # Build notification params - same structure as regular client_log but with correlationId
+        notification_params = {
+            "correlationId": correlation_id,
+            "messageType": message_type,
+            "data": message,  # Use "data" to match the standard format
+            "streamId": stream_id,
+            "requestId": request_id,
+            "level": level
+        }
+
+        if seq_num is not None:
+            notification_params["seqNum"] = seq_num
+        if entry_point_name is not None:
+            notification_params["entryPoint"] = entry_point_name
+        if logger_name is not None:
+            notification_params["loggerName"] = logger_name
+
+        global client_connections
+
+        if not client_id_for_routing or client_id_for_routing not in client_connections:
+            self.awaitable_requests.pop(correlation_id, None)
+            logger.error(f"❌ Cannot send awaitable stream: Client ID '{client_id_for_routing}' not found or invalid.")
+            error_data = ErrorData(
+                code=-32602,
+                message=f"Client ID '{client_id_for_routing}' not found for awaitable stream."
+            )
+            raise McpError(error_data)
+
+        client_info = client_connections[client_id_for_routing]
+        client_type = client_info.get("type")
+        connection = client_info.get("connection")
+
+        try:
+            if client_type == "websocket" and connection:
+                # WebSocket clients get the notification directly
+                payload = {
+                    "jsonrpc": "2.0",
+                    "method": "notifications/awaitableStream",
+                    "params": notification_params
+                }
+                await connection.send_text(json.dumps(payload))
+                logger.info(f"🌊 Server: Sent awaitable stream '{message_type}' to WebSocket client {client_id_for_routing}")
+
+            elif client_type == "cloud" and connection and hasattr(connection, 'is_connected') and connection.is_connected:
+                # Cloud clients get it wrapped in notifications/message structure
+                cloud_wrapper_payload = {
+                    "jsonrpc": "2.0",
+                    "method": "notifications/message",
+                    "params": notification_params
+                }
+                logger.info(f"🌊 Server: CLOUD STREAM PAYLOAD:\n{format_json_log(cloud_wrapper_payload)}")
+                await connection.send_message('mcp_notification', cloud_wrapper_payload)
+                logger.info(f"🌊 Server: Sent awaitable stream '{message_type}' to cloud client {client_id_for_routing} (correlationId: {correlation_id})")
+
+            else:
+                self.awaitable_requests.pop(correlation_id, None)
+                logger.error(f"❌ Cannot send awaitable stream: Client '{client_id_for_routing}' has no valid/active connection.")
+                error_data = ErrorData(
+                    code=-32602,
+                    message=f"Client '{client_id_for_routing}' has no active connection for awaitable stream."
+                )
+                raise McpError(error_data)
+
+            # Wait for the acknowledgment
+            logger.info(f"⏳ Server: Waiting for stream ack (correlationId: {correlation_id}) timeout: {self.awaitable_request_timeout}s")
+            result = await asyncio.wait_for(future, timeout=self.awaitable_request_timeout)
+            logger.info(f"✅ Server: Received ack for awaitable stream '{message_type}' (correlationId: {correlation_id}): {result}")
+            return result
+
+        except asyncio.TimeoutError:
+            logger.error(f"⏰ Timeout waiting for stream ack (correlationId {correlation_id}) from client {client_id_for_routing}")
+            self.awaitable_requests.pop(correlation_id, None)
+            error_data = ErrorData(
+                code=-32000,
+                message=f"Timeout waiting for stream acknowledgment (correlationId: {correlation_id})"
+            )
+            raise McpError(error_data)
+
+        except Exception as e:
+            logger.error(f"❌ Error during awaitable stream '{message_type}' (correlationId {correlation_id}): {type(e).__name__} - {e}")
+            self.awaitable_requests.pop(correlation_id, None)
+            if isinstance(e, McpError):
+                raise
+            else:
+                enhanced_message = f"Stream '{message_type}' failed: {str(e)}"
+                raise Exception(enhanced_message) from e
+
+        finally:
+            if correlation_id in self.awaitable_requests:
+                logger.warning(f"🧹 Final cleanup: Future for stream {correlation_id} was still in awaitable_requests.")
+                self.awaitable_requests.pop(correlation_id, None)
+
     async def _create_tools_from_app_mappings(self) -> list[Tool]:
         """Create tools from app-specific function mappings, showing all function variants"""
         tools_list = []
@@ -3795,7 +3926,7 @@ class ServiceClient:
         # Service message event
         @self.sio.event(namespace=self.namespace)
         async def service_message(data):
-            logger.info(f"☁️ RAW RECEIVED SERVICE MESSAGE:\n{format_json_log(data) if isinstance(data, dict) else data}")
+            #logger.info(f"☁️ RAW RECEIVED SERVICE MESSAGE:\n{format_json_log(data) if isinstance(data, dict) else data}")
 
             # --- Handle Awaitable Command Responses from Cloud Client ---
             if isinstance(data, dict) and \
