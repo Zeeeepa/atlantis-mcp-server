@@ -316,6 +316,11 @@ You like to purr when happy or do 'kitty paws'.
         # Filter transcript to only include chat messages, removing type and sid fields
         logger.info("=== FILTERING TRANSCRIPT ===")
         transcript = []
+
+        # Always start with the system message for OpenRouter
+        transcript.append({'role': 'system', 'content': CATGIRL_SYSTEM_MESSAGE['content']})
+        logger.info(f"  [sys] Injected catgirl system message ({len(CATGIRL_SYSTEM_MESSAGE['content'])} chars)")
+
         for i, msg in enumerate(rawTranscript):
             msg_type = msg.get('type')
             msg_sid = msg.get('sid')
@@ -380,7 +385,7 @@ You like to purr when happy or do 'kitty paws'.
 
         # Model options:
         # model = "deepseek/deepseek-r1-0528"  # DeepSeek R1 reasoning model
-        model = "z-ai/glm-4.6"  # GLM 4.5 MoE model
+        model = "z-ai/glm-4.7"  # GLM 4.5 MoE model
         logger.info(f"Using model: {model}")
 
 
@@ -425,77 +430,79 @@ You like to purr when happy or do 'kitty paws'.
                     model=model,
                     extra_body={
                         "provider": {
-                            "quantizations": [
-                                "fp8"
-                            ]
+                            "quantizations": ["fp8"]
                         },
-                        # Model-specific reasoning control
-                        "thinking": {
-                            "type": "disabled"
-                        },
-                        "reasoning": {
-                            "effort": "none"
-                        }
+                        "reasoning": {"enabled": False},  # OpenRouter format to disable reasoning
                     },
                     messages=typed_transcript,
                     tools=typed_tools,
                     tool_choice="auto",
                     stream=True,
-                    max_tokens=6,
+                    max_completion_tokens=512,
                     temperature=0.9
                 )
                 logger.info("OpenRouter API call successful!")
                 if turn_count == 1:
                     await atlantis.owner_log("OpenRouter API call successful, starting stream")
 
-                reasoning = ""
+                reasoning_buffer = ""  # Accumulate reasoning tokens (consumed silently)
+                max_reasoning_chars = 1024  # Cut off reasoning after this many chars
                 chunk_count = 0
                 streamed_count = 0  # Track how many chunks we've actually streamed
-                max_stream_chunks = 10  # Abort after this many (max_tokens is broken on some models)
+                max_stream_chunks = 128  # Abort after this many (max_tokens is broken on some models)
                 tasks = []
                 tool_calls_accumulator = {}  # Store partial tool calls by index
-                content_started = False  # Track if we've sent any non-whitespace content yet
+                streaming_content = False  # Becomes True once we start getting content tokens
                 tool_call_made = False  # Track if we made a tool call this turn
 
                 logger.info("Beginning to process stream chunks...")
 
                 for chunk in stream:
                     chunk_count += 1
-                    #logger.info(f"CHUNK {chunk_count} RECEIVED AT: {datetime.now().isoformat()}")
+                    logger.info(f"📥 OPENROUTER RECV [{chunk_count}] at {datetime.now().isoformat()}")
 
                     if chunk.choices and len(chunk.choices) > 0:
                         delta = chunk.choices[0].delta
 
-
-
                         # Debug: log what's in each delta
-                        logger.info(f"CHUNK {chunk_count} delta: content={repr(getattr(delta, 'content', None))}, reasoning={repr(getattr(delta, 'reasoning', None))}, role={repr(getattr(delta, 'role', None))}, tool_calls={repr(getattr(delta, 'tool_calls', None))}")
+                        content_preview = repr(getattr(delta, 'content', None))[:30] if getattr(delta, 'content', None) else 'None'
+                        reasoning_preview = repr(getattr(delta, 'reasoning', None))[:30] if getattr(delta, 'reasoning', None) else 'None'
+                        logger.info(f"📥 OPENROUTER DATA [{chunk_count}]: content={content_preview}, reasoning={reasoning_preview}")
 
-                        # Check for content OR reasoning - stream whichever has data
-                        content_to_send = None
-                        if hasattr(delta, 'content') and delta.content:
-                            content_to_send = delta.content
-                        elif hasattr(delta, 'reasoning') and delta.reasoning:
-                            content_to_send = delta.reasoning
+                        # New approach: consume reasoning silently, stream content only
+                        has_reasoning = hasattr(delta, 'reasoning') and delta.reasoning
+                        has_content = hasattr(delta, 'content') and delta.content
 
-                        if content_to_send:
-                            # Strip leading whitespace only if we haven't started sending content yet
-                            if not content_started:
-                                stripped_content = content_to_send.lstrip()
-                                if stripped_content:  # If there's content after stripping
-                                    content_started = True
-                                    content_to_send = stripped_content
-                                else:  # If it's all whitespace, skip this chunk
-                                    content_to_send = ""
+                        if has_reasoning:
+                            # Accumulate reasoning silently
+                            reasoning_buffer += delta.reasoning
+                            logger.info(f"🧠 REASONING [{chunk_count}] ({len(reasoning_buffer)}/{max_reasoning_chars}): {repr(delta.reasoning)[:50]}")
 
-                            # Only send if there's content after potential stripping
+                            # Cut off if reasoning goes too long
+                            if len(reasoning_buffer) >= max_reasoning_chars:
+                                logger.warning(f"✂️ Reasoning cutoff reached ({len(reasoning_buffer)} chars), sending fallback")
+                                await atlantis.stream("(not paying attention)", streamTalkId)
+                                streamed_count += 1
+                                break
+
+                            # If we were streaming content and got reasoning, abort - only accept one content block
+                            if streaming_content:
+                                logger.warning("🛑 Content->Reasoning flip detected, aborting (only one content block allowed)")
+                                break
+
+                        if has_content:
+                            # Start or continue streaming content
+                            if not streaming_content:
+                                logger.info(f"▶️ Starting content stream (after {len(reasoning_buffer)} chars of reasoning)")
+                                streaming_content = True
+
+                            content_to_send = delta.content.lstrip() if streamed_count == 0 else delta.content
+
                             if content_to_send:
-                                # Actually await each stream message to ensure sequential delivery
+                                logger.info(f"📤 CLOUD SEND [{streamed_count + 1}] starting: {repr(content_to_send)}")
                                 await atlantis.stream(content_to_send, streamTalkId)
                                 streamed_count += 1
-                                logger.info(f"STREAMING CONTENT [{streamed_count}/{max_stream_chunks}]: {repr(content_to_send)}")
-                                # Debug delay - adjust or remove once streaming is working
-                                await asyncio.sleep(0.3)  # 300ms delay between chunks
+                                logger.info(f"📤 CLOUD SEND [{streamed_count}] complete")
 
                                 # Abort if we've streamed enough (max_tokens is broken on some models)
                                 if streamed_count >= max_stream_chunks:
