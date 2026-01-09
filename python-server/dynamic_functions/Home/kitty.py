@@ -215,12 +215,7 @@ def find_last_chat_entry(transcript):
 @public
 @chat
 async def kitty():
-    """
-    Main chat function
-
-    Note: Concurrent calls are automatically queued by the server,
-    so each invocation runs sequentially without manual busy flag management.
-    """
+    """Main chat function"""
     logger.info("=== CHAT FUNCTION STARTING ===")
     sessionId = atlantis.get_session_id()
     logger.info(f"Session ID: {sessionId}")
