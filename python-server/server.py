@@ -480,6 +480,8 @@ class DynamicAdditionServer(Server):
         #     self._command_counts_per_context[tracking_key] = {"command": command_key, "count": 1}
         #     logger.debug(f"🔍 DEBUG: Tracking new command '{command_key}' for context {tracking_key}")
 
+        # correlationId = unique per-command (for matching response to this specific call)
+        # requestId = same for entire tool execution (for client-side context)
         correlation_id = str(uuid.uuid4())
         future = asyncio.get_event_loop().create_future()
         self.awaitable_requests[correlation_id] = future
@@ -3833,8 +3835,22 @@ class ServiceClient:
         async def welcome(data): # Ensure handler is async
             logger.info(f"☁️ Received welcome message:\n{format_json_log(data)}")
             # Parse owner usernames from welcome data
-            if isinstance(data, list):
-                # New format: array of usernames
+            if isinstance(data, dict):
+                # New format: JSON object with usernames and genericRequestId
+                owner_usernames = data.get('usernames', [])
+                generic_request_id = data.get('genericRequestId')
+                atlantis._set_owner_usernames(owner_usernames)
+                atlantis._set_owner(owner_usernames[0] if owner_usernames else self.email)
+                if generic_request_id:
+                    # genericRequestId = cloud-assigned ID used as requestId for pseudo tool calls
+                    # (pseudo tools originate locally so they don't have their own MCP requestId)
+                    logger.info(f"☁️ Generic request ID: {generic_request_id}")
+                    self.generic_request_id = generic_request_id
+                else:
+                    logger.error(f"🚨🚨🚨 CRITICAL: No genericRequestId in welcome message! Local proxy tools will NOT work! 🚨🚨🚨")
+                    logger.error(f"🚨 Welcome data received: {format_json_log(data)}")
+            elif isinstance(data, list):
+                # Legacy format: array of usernames
                 owner_usernames = data
                 atlantis._set_owner_usernames(owner_usernames)
                 atlantis._set_owner(owner_usernames[0] if owner_usernames else self.email)

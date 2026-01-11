@@ -124,15 +124,56 @@ def get_consolidated_full_name(tool: ToolT) -> str:
     return '*'.join(parts)
 
 
+def parse_tool_params(tool_str: str) -> ToolSchemaT:
+    """
+    Parse tool string like "barf (sleepTime:number, name:string)" into a JSON schema.
+    """
+    schema: ToolSchemaT = {'type': 'object', 'properties': {}, 'required': []}
+
+    # Extract params from parentheses
+    import re
+    match = re.search(r'\(([^)]*)\)', tool_str)
+    if not match:
+        return schema
+
+    params_str = match.group(1).strip()
+    if not params_str:
+        return schema
+
+    # Parse each param like "sleepTime:number"
+    for param in params_str.split(','):
+        param = param.strip()
+        if ':' in param:
+            name, ptype = param.split(':', 1)
+            name = name.strip()
+            ptype = ptype.strip().lower()
+
+            # Map types to JSON schema types
+            type_map = {
+                'string': 'string',
+                'number': 'number',
+                'integer': 'integer',
+                'boolean': 'boolean',
+                'object': 'object',
+                'array': 'array',
+            }
+            json_type = type_map.get(ptype, 'string')
+
+            schema['properties'][name] = {'type': json_type}
+            schema['required'].append(name)
+
+    return schema
+
+
 def convert_tools_for_llm(
-    tools: List[ToolT],
+    tools: List[Dict[str, Any]],
     show_hidden: bool = False
 ) -> Tuple[List[TranscriptToolT], List[SimpleToolT]]:
     """
-    Convert cloud tool records to LLM-compatible format.
+    Convert /dir tool records to LLM-compatible format.
 
     Args:
-        tools: List of ToolT records from the cloud
+        tools: List of tool records from /dir command
         show_hidden: If False, skip tools starting with '_'
 
     Returns:
@@ -141,37 +182,47 @@ def convert_tools_for_llm(
     out_tools: List[TranscriptToolT] = []
     out_tools_simple: List[SimpleToolT] = []
 
+    logger.info(f"convert_tools_for_llm: Processing {len(tools) if tools else 0} tools")
+
     for tool in tools:
+        search_term = tool.get('searchTerm', '')
+        tool_str = tool.get('tool', '')
+        description = tool.get('description', '')
+        chat_status = tool.get('chatStatus', '')
+
+        # Extract function name from searchTerm (last part after **)
+        # e.g., "brickhouse*kanger*InWork.Test**barf" -> "barf"
+        func_name = search_term.split('**')[-1] if '**' in search_term else search_term.split('*')[-1]
+
         # Skip hidden tools unless show_hidden is True
-        tool_name = tool.get('tool_name', '')
-        if not show_hidden and tool_name.startswith('_'):
+        if not show_hidden and func_name.startswith('_'):
+            logger.info(f"  SKIP (hidden): {func_name}")
             continue
 
-        # Skip chat, tick, and session tools
-        if tool.get('is_chat') or tool.get('is_tick') or tool.get('is_session'):
+        # Skip tick tools (⏰ emoji in chatStatus)
+        if '⏰' in chat_status:
+            logger.info(f"  SKIP (tick): {func_name}")
             continue
 
-        # Only process function, internal, or mcp_tool types
-        tool_type = tool.get('tool_type', '')
-        if tool_type not in ('function', 'internal', 'mcp_tool'):
+        # Skip tools that aren't connected
+        if not tool.get('is_connected'):
+            logger.info(f"  SKIP (disconnected): {func_name}")
             continue
 
-        # Parse the input schema
-        input_schema_str = tool.get('input_schema', '{}')
-        try:
-            schema = cast(ToolSchemaT, json.loads(input_schema_str))
-        except json.JSONDecodeError:
-            schema: ToolSchemaT = {'type': 'object', 'properties': {}, 'required': []}
+        logger.info(f"  INCLUDE: {func_name}")
 
-        # Get consolidated name
-        consolidated_name = get_consolidated_full_name(tool)
+        # Parse parameters from tool string
+        schema = parse_tool_params(tool_str)
+
+        # Use searchTerm as the full tool name for LLM
+        full_name = search_term
 
         # Build the output tool
         out_tool: TranscriptToolT = {
             'type': 'function',
             'function': {
-                'name': consolidated_name,
-                'description': tool.get('tool_description', ''),
+                'name': full_name,
+                'description': description,
                 'parameters': schema
             }
         }
@@ -181,11 +232,12 @@ def convert_tools_for_llm(
         # Build the simple version
         out_tools_simple.append({
             'type': 'function',
-            'name': consolidated_name,
-            'description': tool.get('tool_description', ''),
+            'name': full_name,
+            'description': description,
             'parameters': schema
         })
 
+    logger.info(f"convert_tools_for_llm: Returning {len(out_tools)} tools (from {len(tools) if tools else 0} input)")
     return out_tools, out_tools_simple
 
 # Load and test the foo.jinja template
@@ -353,10 +405,10 @@ You like to purr when happy or do 'kitty paws'.
         logger.info("Fetching available tools...")
         # this may change to inventory stuff
         tools = await atlantis.client_command("/dir")
-        logger.info(f"Received {len(tools) if tools else 0} tools")
-        #logger.info("=== TOOLS ===")
-        #logger.info(format_json_log(tools))
-        #logger.info("=== END TOOLS ===")
+        logger.info(f"Received {len(tools) if tools else 0} tools from /dir")
+        logger.info("=== RAW TOOLS FROM /dir ===")
+        logger.info(format_json_log(tools))
+        logger.info("=== END RAW TOOLS ===")
 
         await atlantis.client_command("/silent off")
 
@@ -395,6 +447,20 @@ You like to purr when happy or do 'kitty paws'.
             streamTalkId = await atlantis.stream_start("kitty","Kitty")
             logger.info(f"Stream started with ID: {streamTalkId}")
 
+            # Convert tools from cloud format to OpenAI-compatible format (once, before loop)
+            converted_tools, _ = convert_tools_for_llm(tools)
+            typed_tools = cast(List[ChatCompletionToolParam], converted_tools)
+
+            # Big red warning if no tools available
+            if not typed_tools:
+                logger.error("\x1b[91m" + "=" * 60 + "\x1b[0m")
+                logger.error("\x1b[91m🚨 ERROR: NO TOOLS AVAILABLE FOR LLM! 🚨\x1b[0m")
+                logger.error("\x1b[91m" + "=" * 60 + "\x1b[0m")
+                logger.error(f"\x1b[91mRaw tools from /dir: {len(tools) if tools else 0}\x1b[0m")
+                logger.error(f"\x1b[91mConverted tools: 0\x1b[0m")
+                logger.error("\x1b[91mCheck that /dir returns tools with correct format\x1b[0m")
+                logger.error("\x1b[91m" + "=" * 60 + "\x1b[0m")
+
             # Outer loop for multi-turn tool calling
             while turn_count < max_turns:
                 turn_count += 1
@@ -404,13 +470,8 @@ You like to purr when happy or do 'kitty paws'.
                 if turn_count == 1:
                     await atlantis.owner_log(f"Attempting to call open router: {model}")
 
-                # Cast transcript and tools to proper types for OpenAI client
-                logger.info("Casting transcript and tools to proper types...")
+                # Cast transcript to proper type for OpenAI client
                 typed_transcript = cast(List[ChatCompletionMessageParam], transcript)
-
-                # Convert tools from cloud format to OpenAI-compatible format
-                converted_tools, _ = convert_tools_for_llm(tools)
-                typed_tools = cast(List[ChatCompletionToolParam], converted_tools)
 
                 # Log what we're actually sending to OpenRouter
                 logger.info(f"=== SENDING TO OPENROUTER (turn {turn_count}) ===")
