@@ -704,9 +704,9 @@ class DynamicAdditionServer(Server):
                     "method": "notifications/message",
                     "params": notification_params
                 }
-                logger.info(f"🌊 Server: CLOUD STREAM PAYLOAD:\n{format_json_log(cloud_wrapper_payload)}")
+                #logger.info(f"🌊 Server: CLOUD STREAM PAYLOAD:\n{format_json_log(cloud_wrapper_payload)}")
                 await connection.send_message('mcp_notification', cloud_wrapper_payload)
-                logger.info(f"🌊 Server: Sent awaitable stream '{message_type}' to cloud client {client_id_for_routing} (correlationId: {correlation_id})")
+                #logger.info(f"🌊 Server: Sent awaitable stream '{message_type}' to cloud client {client_id_for_routing} (correlationId: {correlation_id})")
 
             else:
                 self.awaitable_requests.pop(correlation_id, None)

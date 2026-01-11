@@ -587,7 +587,12 @@ You like to purr when happy or do 'kitty paws'.
                                 if tool_call.function.name:
                                     tool_calls_accumulator[index]['name'] = tool_call.function.name
                                 if tool_call.function.arguments:
-                                    tool_calls_accumulator[index]['arguments'] += tool_call.function.arguments
+                                    # Skip appending empty object "{}" if we already have arguments
+                                    # (some providers send "{}" as a placeholder/completion chunk)
+                                    if tool_call.function.arguments.strip() == "{}" and tool_calls_accumulator[index]['arguments']:
+                                        logger.info(f"Skipping empty object placeholder for tool call {index} (already have {len(tool_calls_accumulator[index]['arguments'])} chars)")
+                                    else:
+                                        tool_calls_accumulator[index]['arguments'] += tool_call.function.arguments
 
                                 logger.info(f"Accumulated tool call {index}: id={tool_calls_accumulator[index]['id']}, name={tool_calls_accumulator[index]['name']}, args_len={len(tool_calls_accumulator[index]['arguments'])}")
 
@@ -647,10 +652,10 @@ You like to purr when happy or do 'kitty paws'.
                                 except json.JSONDecodeError as e:
                                     logger.error(f"Error parsing tool call arguments: {e}")
                                     logger.error(f"Failed arguments_str (length {len(arguments_str) if arguments_str else 0}): {repr(arguments_str)}")
-                                    await atlantis.client_log(f"Error parsing tool call arguments: {e}\nFailed data: {repr(arguments_str)}", level="ERROR")
+                                    raise ValueError(f"Failed to parse tool arguments for '{function_name}': {e}. Raw data: {repr(arguments_str)}") from e
                                 except Exception as e:
                                     logger.error(f"Error executing tool call: {e}")
-                                    await atlantis.client_log(f"Error executing tool call: {e}", level="ERROR")
+                                    raise RuntimeError(f"Failed to execute tool '{function_name}': {e}") from e
 
                             # Break out of stream loop to make another API call with updated transcript
                             break
