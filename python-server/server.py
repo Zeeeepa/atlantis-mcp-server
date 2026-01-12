@@ -2831,9 +2831,11 @@ async def index():
                 try:
                     # Dynamic functions are directly handled by name matching
                     # Add detailed logging to show exactly what we're receiving from the cloud
-                    logger.info(f"RECEIVED FROM CLOUD: Tool: '{name}', Type: {type(args)}, Raw Args:\n{format_json_log(args) if isinstance(args, dict) else args!r}")
-                    if user:
-                        logger.info(f"Call made by user: {user}")
+                    logger.info(f"RECEIVED FROM CLOUD: Tool: '{name}', Type: {type(args)}, User: {user}")
+                    if isinstance(args, dict):
+                        logger.info(f"Args:\n{format_json_log(args, colored=True)}")
+                    else:
+                        logger.info(f"Args: {args!r}")
                     logger.debug(f"---> Calling dynamic: function_call for '{actual_function_name}' with args: {args} and client_id: {client_id} and request_id: {request_id}, user: {user}") # Log args and client_id separately
                     # Pass arguments, client_id, user, and session_id distinctly
                     # Pass parsed app name for proper function routing
