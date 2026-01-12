@@ -124,6 +124,39 @@ def get_consolidated_full_name(tool: ToolT) -> str:
     return '*'.join(parts)
 
 
+def coerce_args_to_schema(args: Dict[str, Any], schema: ToolSchemaT) -> Dict[str, Any]:
+    """
+    Coerce argument values to match the expected types from the schema.
+    LLMs often return everything as strings, so we need to convert them.
+    """
+    if not schema or 'properties' not in schema:
+        return args
+
+    coerced = {}
+    for key, value in args.items():
+        prop_schema = schema['properties'].get(key, {})
+        expected_type = prop_schema.get('type', 'string')
+
+        try:
+            if expected_type == 'number':
+                coerced[key] = float(value) if isinstance(value, str) else value
+            elif expected_type == 'integer':
+                coerced[key] = int(float(value)) if isinstance(value, str) else int(value)
+            elif expected_type == 'boolean':
+                if isinstance(value, str):
+                    coerced[key] = value.lower() in ('true', '1', 'yes')
+                else:
+                    coerced[key] = bool(value)
+            else:
+                # string, object, array - keep as-is
+                coerced[key] = value
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Failed to coerce {key}={value} to {expected_type}: {e}")
+            coerced[key] = value  # Keep original on failure
+
+    return coerced
+
+
 def parse_tool_params(tool_str: str) -> ToolSchemaT:
     """
     Parse tool string like "barf (sleepTime:number, name:string)" into a JSON schema.
@@ -475,11 +508,11 @@ You like to purr when happy or do 'kitty paws'.
 
                 # Log what we're actually sending to OpenRouter
                 logger.info(f"=== SENDING TO OPENROUTER (turn {turn_count}) ===")
-                logger.info(f"Messages ({len(typed_transcript)} entries):")
-                logger.info(format_json_log(typed_transcript))
-                logger.info(f"Tools ({len(typed_tools)} entries):")
-                logger.info(format_json_log(typed_tools))
-                logger.info("=== END OPENROUTER PAYLOAD ===")
+                #logger.info(f"Messages ({len(typed_transcript)} entries):")
+                #logger.info(format_json_log(typed_transcript))
+                #logger.info(f"Tools ({len(typed_tools)} entries):")
+                #logger.info(format_json_log(typed_tools))
+                #logger.info("=== END OPENROUTER PAYLOAD ===")
 
                 logger.info("Creating streaming completion request...")
                 stream = client.chat.completions.create(
@@ -515,7 +548,7 @@ You like to purr when happy or do 'kitty paws'.
 
                 for chunk in stream:
                     chunk_count += 1
-                    logger.info(f"📥 OPENROUTER RECV [{chunk_count}] at {datetime.now().isoformat()}")
+                    #logger.info(f"📥 OPENROUTER RECV [{chunk_count}] at {datetime.now().isoformat()}")
 
                     if chunk.choices and len(chunk.choices) > 0:
                         delta = chunk.choices[0].delta
@@ -523,7 +556,7 @@ You like to purr when happy or do 'kitty paws'.
                         # Debug: log what's in each delta
                         content_preview = repr(getattr(delta, 'content', None))[:30] if getattr(delta, 'content', None) else 'None'
                         reasoning_preview = repr(getattr(delta, 'reasoning', None))[:30] if getattr(delta, 'reasoning', None) else 'None'
-                        logger.info(f"📥 OPENROUTER DATA [{chunk_count}]: content={content_preview}, reasoning={reasoning_preview}")
+                        #logger.info(f"📥 OPENROUTER DATA [{chunk_count}]: content={content_preview}, reasoning={reasoning_preview}")
 
                         # New approach: consume reasoning silently, stream content only
                         has_reasoning = hasattr(delta, 'reasoning') and delta.reasoning
@@ -555,10 +588,10 @@ You like to purr when happy or do 'kitty paws'.
                             content_to_send = delta.content.lstrip() if streamed_count == 0 else delta.content
 
                             if content_to_send:
-                                logger.info(f"📤 CLOUD SEND [{streamed_count + 1}] starting: {repr(content_to_send)}")
+                                #logger.info(f"📤 CLOUD SEND [{streamed_count + 1}] starting: {repr(content_to_send)}")
                                 await atlantis.stream(content_to_send, streamTalkId)
                                 streamed_count += 1
-                                logger.info(f"📤 CLOUD SEND [{streamed_count}] complete")
+                                #logger.info(f"📤 CLOUD SEND [{streamed_count}] complete")
 
                                 # Abort if we've streamed enough (max_tokens is broken on some models)
                                 if streamed_count >= max_stream_chunks:
@@ -568,7 +601,8 @@ You like to purr when happy or do 'kitty paws'.
 
                         # Check for tool calls
                         if hasattr(delta, 'tool_calls') and delta.tool_calls:
-                            logger.info(f"TOOL CALLS DETECTED: {format_json_log(chunk.model_dump())}")
+                            # these are just partial chunks, print the final accumulation below
+                            #logger.info(f"CHUNK TOOL CALLS DETECTED: {format_json_log(chunk.model_dump())}")
 
                             for tool_call in delta.tool_calls:
                                 index = tool_call.index
@@ -594,7 +628,7 @@ You like to purr when happy or do 'kitty paws'.
                                     else:
                                         tool_calls_accumulator[index]['arguments'] += tool_call.function.arguments
 
-                                logger.info(f"Accumulated tool call {index}: id={tool_calls_accumulator[index]['id']}, name={tool_calls_accumulator[index]['name']}, args_len={len(tool_calls_accumulator[index]['arguments'])}")
+                                # logger.info(f"Accumulated tool call {index}: id={tool_calls_accumulator[index]['id']}, name={tool_calls_accumulator[index]['name']}, args_len={len(tool_calls_accumulator[index]['arguments'])}")
 
                         # Check if stream is ending (finish_reason is set)
                         finish_reason = chunk.choices[0].finish_reason if chunk.choices else None
@@ -607,17 +641,49 @@ You like to purr when happy or do 'kitty paws'.
                                 function_name = accumulated_call['name']
                                 arguments_str = accumulated_call['arguments']
 
+                                # Log the final accumulated tool call details
+                                logger.info(f"=== FINAL TOOL CALL {index} ===")
+                                logger.info(f"  ID: {call_id}")
+                                logger.info(f"  Function: {function_name}")
+                                logger.info(f"  Raw arguments: {arguments_str}")
+
                                 try:
                                     # Parse the complete arguments JSON
                                     arguments = json.loads(arguments_str) if arguments_str else {}
 
-                                    #await atlantis.client_log(f"Executing tool call: {function_name} with args: {arguments}")
+                                    # Look up the tool's schema from the original tools list
+                                    # to coerce argument types (LLMs often return strings for numbers)
+                                    tool_schema = None
+                                    for tool in tools:
+                                        if tool.get('searchTerm') == function_name:
+                                            tool_str = tool.get('tool', '')
+                                            tool_schema = parse_tool_params(tool_str)
+                                            logger.info(f"  Found tool schema: {tool_str}")
+                                            break
+
+                                    # Coerce arguments to match schema types
+                                    if tool_schema and arguments:
+                                        logger.info(f"  Pre-coercion arguments: {format_json_log(arguments)}")
+                                        arguments = coerce_args_to_schema(arguments, tool_schema)
+                                        logger.info(f"  Post-coercion arguments: {format_json_log(arguments)}")
+
+                                    # Log the parsed arguments and what we're about to send
+                                    # Show expected wire format (what server.py will actually send)
+                                    wire_format_preview = {
+                                        "messageType": "command",
+                                        "command": f"%{function_name}",
+                                        "data": arguments,
+                                        "note": "(requestId, correlationId, seqNum added by server)"
+                                    }
+                                    logger.info(f"=== SENDING TOOL CALL TO CLOUD ===")
+                                    logger.info(f"  Wire format preview:\n{format_json_log(wire_format_preview)}")
+                                    logger.info(f"=== END TOOL CALL {index} ===")
 
                                     # Execute the tool call through atlantis client command
 
                                     await atlantis.client_command("/silent on")
                                     # use '%' prefix instead of '@' in call to ignore any working path / force absolute path
-                                    tool_result = await atlantis.client_command(f"%{function_name}", data=arguments)
+                                    tool_result = await atlantis.client_command(f"@{function_name}", data=arguments)
                                     await atlantis.client_command("/silent off")
 
                                     logger.info(f"Tool result: {tool_result}")

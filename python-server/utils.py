@@ -300,7 +300,7 @@ async def execute_stream_awaitable(
         raise RuntimeError("Server instance is outdated or incorrect for awaitable streams.")
 
     try:
-        logger.info(f"🌊 Utils: Relaying awaitable stream '{message_type}' to server for client {client_id_for_routing}, stream_id={stream_id}, seq_num={seq_num}")
+        #logger.info(f"🌊 Utils: Relaying awaitable stream '{message_type}' to server for client {client_id_for_routing}, stream_id={stream_id}, seq_num={seq_num}")
         result = await _server_instance.send_awaitable_stream(
             client_id_for_routing=client_id_for_routing,
             request_id=request_id,
@@ -312,7 +312,7 @@ async def execute_stream_awaitable(
             level=level,
             logger_name=logger_name
         )
-        logger.info(f"✅ Utils: Received ack for awaitable stream '{message_type}' (stream_id={stream_id}): {result}")
+        #logger.info(f"✅ Utils: Received ack for awaitable stream '{message_type}' (stream_id={stream_id}): {result}")
         return result
     except Exception as e:
         logger.error(f"❌ Utils: Exception in execute_stream_awaitable: {type(e).__name__}: {e}")

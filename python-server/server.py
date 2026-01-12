@@ -483,7 +483,9 @@ class DynamicAdditionServer(Server):
         # correlationId = unique per-command (for matching response to this specific call)
         # requestId = same for entire tool execution (for client-side context)
         correlation_id = str(uuid.uuid4())
-        future = asyncio.get_event_loop().create_future()
+        # NOTE: Use get_running_loop(), NOT get_event_loop() - the latter is deprecated in Python 3.10+
+        # and can return a different loop, causing await to not block properly (multiple commands in flight)
+        future = asyncio.get_running_loop().create_future()
         self.awaitable_requests[correlation_id] = future
 
         logger.info(f"⏳ Preparing awaitable command '{command}' for client {client_id_for_routing} (correlationId: {correlation_id}, MCP_reqId: {request_id})")
@@ -558,6 +560,11 @@ class DynamicAdditionServer(Server):
                     "method": "notifications/message",
                     "params": cloud_notification_params
                 }
+                # Extra distinctive logging for tool calls (commands starting with %)
+                if command.startswith('%'):
+                    logger.info(f"🔧🔧🔧 CLOUD TOOL CALL WIRE FORMAT 🔧🔧🔧")
+                    logger.info(f"🔧 Full cloud_notification_params:\n{format_json_log(cloud_notification_params)}")
+                    logger.info(f"🔧🔧🔧 END WIRE FORMAT 🔧🔧🔧")
                 logger.info(f"☁️ About to send cloud payload with params:\n{format_json_log(cloud_notification_params)}")
                 await connection.send_message('mcp_notification', cloud_wrapper_payload)
                 logger.info(f"☁️ Sent awaitable command '{command}' (as flat notifications/message) to cloud client {client_id_for_routing} (correlationId: {correlation_id}) via 'mcp_notification' event")
@@ -649,10 +656,11 @@ class DynamicAdditionServer(Server):
             McpError: If the client response times out or the client returns an error.
         """
         correlation_id = str(uuid.uuid4())
-        future = asyncio.get_event_loop().create_future()
+        # NOTE: Use get_running_loop(), NOT get_event_loop() - see send_awaitable_client_command
+        future = asyncio.get_running_loop().create_future()
         self.awaitable_requests[correlation_id] = future
 
-        logger.info(f"🌊 Server: Preparing awaitable stream '{message_type}' for client {client_id_for_routing} (correlationId: {correlation_id}, stream_id: {stream_id})")
+        #logger.info(f"🌊 Server: Preparing awaitable stream '{message_type}' for client {client_id_for_routing} (correlationId: {correlation_id}, stream_id: {stream_id})")
 
         # Build notification params - same structure as regular client_log but with correlationId
         notification_params = {
@@ -695,7 +703,7 @@ class DynamicAdditionServer(Server):
                     "params": notification_params
                 }
                 await connection.send_text(json.dumps(payload))
-                logger.info(f"🌊 Server: Sent awaitable stream '{message_type}' to WebSocket client {client_id_for_routing}")
+                #logger.info(f"🌊 Server: Sent awaitable stream '{message_type}' to WebSocket client {client_id_for_routing}")
 
             elif client_type == "cloud" and connection and hasattr(connection, 'is_connected') and connection.is_connected:
                 # Cloud clients get it wrapped in notifications/message structure
@@ -718,9 +726,9 @@ class DynamicAdditionServer(Server):
                 raise McpError(error_data)
 
             # Wait for the acknowledgment
-            logger.info(f"⏳ Server: Waiting for stream ack (correlationId: {correlation_id}) timeout: {self.awaitable_request_timeout}s")
+            #logger.info(f"⏳ Server: Waiting for stream ack (correlationId: {correlation_id}) timeout: {self.awaitable_request_timeout}s")
             result = await asyncio.wait_for(future, timeout=self.awaitable_request_timeout)
-            logger.info(f"✅ Server: Received ack for awaitable stream '{message_type}' (correlationId: {correlation_id}): {result}")
+            #logger.info(f"✅ Server: Received ack for awaitable stream '{message_type}' (correlationId: {correlation_id}): {result}")
             return result
 
         except asyncio.TimeoutError:
@@ -2889,23 +2897,33 @@ async def index():
                     logger.warning(f"⚠️ Tool '{name}' returned non-standard type {type(result_raw)}. Converting to string: {result_str}")
                     final_result = [TextContent(type="text", text=result_str)]
 
-            # ---> ADDED: Log final result before returning
-            # Pretty print the actual text content for better readability in logs
+            # ---> ADDED: Log final result before returning with prominent banner
+            # Extract the result text/value for clear logging
+            result_display = None
             if final_result and isinstance(final_result, list) and len(final_result) > 0:
                 first_item = final_result[0]
                 if isinstance(first_item, TextContent) and hasattr(first_item, 'text'):
                     # Try to parse and colorize the JSON if it's valid JSON
                     try:
                         parsed_json = json.loads(first_item.text)
-                        colored_output = format_json_log(parsed_json, colored=True)
-                        logger.debug(f"<--- _execute_tool RETURNING final result with text:\n{colored_output}")
+                        result_display = format_json_log(parsed_json, colored=True)
                     except (json.JSONDecodeError, TypeError):
-                        # Not JSON or can't parse, just log as-is
-                        logger.debug(f"<--- _execute_tool RETURNING final result with text:\n{first_item.text}")
+                        result_display = first_item.text
                 else:
-                    logger.debug(f"<--- _execute_tool RETURNING final result:\n{format_json_log(final_result) if isinstance(final_result, dict) else final_result!r}")
+                    result_display = format_json_log(final_result, colored=True) if isinstance(final_result, (dict, list)) else repr(final_result)
             else:
-                logger.debug(f"<--- _execute_tool RETURNING final result:\n{format_json_log(final_result) if isinstance(final_result, dict) else final_result!r}")
+                result_display = format_json_log(final_result, colored=True) if isinstance(final_result, (dict, list)) else repr(final_result)
+
+            # Prominent banner that stands out from all the debug noise
+            # Using bright cyan (96) for visibility
+            CYAN = "\x1b[96m"
+            RESET = "\x1b[0m"
+            logger.info(f"")
+            logger.info(f"{CYAN}{'='*60}{RESET}")
+            logger.info(f"{CYAN}✅ TOOL RESULT: {name}{RESET}")
+            logger.info(f"{CYAN}{'='*60}{RESET}")
+            logger.info(f"{CYAN}{result_display}{RESET}")
+            logger.info(f"{CYAN}{'='*60}{RESET}")
 
             # --- Log successful tool call ---
             if should_log_call:
@@ -3959,7 +3977,7 @@ class ServiceClient:
                     future = self.mcp_server.awaitable_requests.pop(correlation_id, None)
                     if future and not future.done():
                         if "result" in params:
-                            logger.info(f"✅☁️ Received cloud result for awaitable command (correlationId: {correlation_id})")
+                            #logger.info(f"✅☁️ Received cloud result for awaitable command (correlationId: {correlation_id})")
 
                             # Extract result with priority: structuredContent > result > content[0].text
                             raw_result = params["result"]
@@ -3981,29 +3999,29 @@ class ServiceClient:
                                 # Unwrap arrays that were wrapped with {"result": [...]} per MCP convention
                                 if isinstance(structured, dict) and "result" in structured and len(structured) == 1:
                                     extracted_result = structured["result"]
-                                    logger.info(f"☁️ Unwrapped array from structuredContent.result")
+                                    #logger.info(f"☁️ Unwrapped array from structuredContent.result")
                                 else:
                                     extracted_result = structured
-                                    logger.info(f"☁️ Using structuredContent (modern MCP format)")
-                                logger.info(f"☁️ Final result type: {type(extracted_result)}")
+                                    #logger.info(f"☁️ Using structuredContent (modern MCP format)")
+                                #logger.info(f"☁️ Final result type: {type(extracted_result)}")
                                 future.set_result(extracted_result)
                             # Fall back to direct result field (raw data pass-through)
                             elif not isinstance(raw_result, dict) or "content" not in raw_result:
                                 extracted_result = raw_result
-                                logger.info(f"☁️ Using raw result field (legacy format)")
-                                logger.info(f"☁️ Final result type: {type(extracted_result)}")
+                                #logger.info(f"☁️ Using raw result field (legacy format)")
+                                #logger.info(f"☁️ Final result type: {type(extracted_result)}")
                                 future.set_result(extracted_result)
                             # Last resort: parse content[0].text (stringified JSON)
                             elif isinstance(raw_result, dict) and "content" in raw_result:
                                 try:
                                     text_content = raw_result["content"][0]["text"]
                                     extracted_result = json.loads(text_content)
-                                    logger.info(f"☁️ Parsed content[0].text as JSON (fallback)")
+                                    #logger.info(f"☁️ Parsed content[0].text as JSON (fallback)")
                                 except (json.JSONDecodeError, KeyError, IndexError):
                                     # If parsing fails, use the text as-is
                                     extracted_result = text_content if 'text_content' in locals() else raw_result
-                                    logger.debug(f"☁️ Could not parse content as JSON, using as-is")
-                                logger.info(f"☁️ Final result type: {type(extracted_result)}")
+                                    #logger.debug(f"☁️ Could not parse content as JSON, using as-is")
+                                #logger.info(f"☁️ Final result type: {type(extracted_result)}")
                                 future.set_result(extracted_result)
                         elif "error" in params:
                             client_error_details = params["error"] # This could be a string or dict from the cloud
@@ -4023,7 +4041,7 @@ class ServiceClient:
                         else:
                             # treat as result
                             future.set_result(None)
-                        logger.debug(f"📥☁️ Handled notifications/commandResult for {correlation_id} from cloud. Returning from service_message.")
+                        #logger.debug(f"📥☁️ Handled notifications/commandResult for {correlation_id} from cloud. Returning from service_message.")
                         return # IMPORTANT: Return early, this message is handled.
                     elif future and future.done():
                         logger.warning(f"⚠️☁️ Received cloud commandResult for {correlation_id}, but future was already done. Ignoring.")
@@ -4043,7 +4061,10 @@ class ServiceClient:
                     await self.send_message('mcp_response', response)
             else:
                 # Ignore non-JSON-RPC messages or log a warning
-                logger.warning(f"⚠️ Received non-JSON-RPC message, ignoring: {data}")
+                if isinstance(data, (dict, list)):
+                    logger.warning(f"⚠️ Received non-JSON-RPC message, ignoring:\n{format_json_log(data, colored=True)}")
+                else:
+                    logger.warning(f"⚠️ Received non-JSON-RPC message, ignoring: {data}")
 
     async def _process_mcp_request(self, request: dict) -> Union[dict, None]:
         """Process an MCP JSON-RPC request from the cloud server by manually routing
@@ -4142,6 +4163,16 @@ class ServiceClient:
             if data.get('method') == 'notifications/message':
                 pass
                 #logger.info(f"☁️ SENDING CLIENT LOG/COMMAND via {event}: {data.get('params', {}).get('command', data.get('method'))}")
+            elif event == 'mcp_response':
+                # Log tool call responses prominently so we can verify they were sent
+                YELLOW = "\x1b[93m"
+                RESET = "\x1b[0m"
+                logger.info(f"")
+                logger.info(f"{YELLOW}{'='*60}{RESET}")
+                logger.info(f"{YELLOW}📤 SENDING MCP_RESPONSE TO CLOUD{RESET}")
+                logger.info(f"{YELLOW}{'='*60}{RESET}")
+                logger.info(f"{YELLOW}{format_json_log(data, colored=True)}{RESET}")
+                logger.info(f"{YELLOW}{'='*60}{RESET}")
             else:
                 #logger.debug(f"☁️ SENDING MCP MESSAGE via {event}:\n{format_json_log(data) if isinstance(data, dict) else data}")
                 pass

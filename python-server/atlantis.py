@@ -41,7 +41,7 @@ _log_tasks_var: contextvars.ContextVar[Optional[List[asyncio.Task]]] = contextva
 # Per-stream sequence numbers - each stream_id gets its own counter
 _stream_seq_counters: dict = {}
 
-# Per-request sequence numbers - each request_id gets its own counter
+# Per-request sequence numbers - each (request_id, shell_path) gets its own counter
 _request_seq_counters: dict = {}
 
 # Click callback lookup table - maps click keys to callback functions
@@ -118,8 +118,8 @@ async def get_and_increment_stream_seq_num(stream_id: str) -> int:
 async def get_and_increment_seq_num(context_name: str = "operation") -> int:
     """Get and increment the sequence number in a thread-safe way.
 
-    Sequence numbers are tracked per request_id to ensure uniqueness across
-    function hops within the same request.
+    Sequence numbers are tracked per (request_id, shell_path) to ensure uniqueness
+    across function hops within the same request and shell path.
 
     Args:
         context_name: Name of the calling context for error reporting
@@ -137,11 +137,15 @@ async def get_and_increment_seq_num(context_name: str = "operation") -> int:
         logger.error(f"{context_name} - request_id is None. Cannot get sequence number.")
         return -1
 
-    if request_id not in _request_seq_counters:
-        _request_seq_counters[request_id] = 0
+    shell_path = _shell_path_var.get()
+    # Use composite key of (request_id, shell_path) for per-shell sequencing
+    counter_key = (request_id, shell_path)
 
-    current_seq = _request_seq_counters[request_id]
-    _request_seq_counters[request_id] += 1
+    if counter_key not in _request_seq_counters:
+        _request_seq_counters[counter_key] = 0
+
+    current_seq = _request_seq_counters[counter_key]
+    _request_seq_counters[counter_key] += 1
     return current_seq
 
 # --- Accessor Functions ---
@@ -506,7 +510,7 @@ async def stream_start(sid: str, who: str) -> str:
 
         # Use awaitable pattern if AWAIT_STREAM_START_ACK is enabled
         if AWAIT_STREAM_START_ACK:
-            logger.info(f"🌊 stream_start: AWAIT_STREAM_START_ACK is True, calling execute_stream_awaitable...")
+            #logger.info(f"🌊 stream_start: AWAIT_STREAM_START_ACK is True, calling execute_stream_awaitable...")
             ack_result = await execute_stream_awaitable(
                 client_id_for_routing=actual_client_id,
                 request_id=request_id,
@@ -518,7 +522,7 @@ async def stream_start(sid: str, who: str) -> str:
                 level="INFO",
                 logger_name=caller_name
             )
-            logger.info(f"🌊 stream_start ack received: {ack_result}")
+            #logger.info(f"🌊 stream_start ack received: {ack_result}")
         else:
             # Original fire-and-forget behavior
             await util_client_log(
@@ -564,7 +568,7 @@ async def stream(message: str, stream_id_param: str):
     try:
         # Use awaitable pattern if AWAIT_STREAM_MSG_ACK is enabled
         if AWAIT_STREAM_MSG_ACK:
-            logger.debug(f"🌊 stream: AWAIT_STREAM_MSG_ACK is True, calling execute_stream_awaitable for seq {current_seq_to_send}...")
+            #logger.debug(f"🌊 stream: AWAIT_STREAM_MSG_ACK is True, calling execute_stream_awaitable for seq {current_seq_to_send}...")
             result = await execute_stream_awaitable(
                 client_id_for_routing=actual_client_id,
                 request_id=request_id,
@@ -576,7 +580,7 @@ async def stream(message: str, stream_id_param: str):
                 level="INFO",
                 logger_name=caller_name
             )
-            logger.debug(f"🌊 stream ack received for seq {current_seq_to_send}: {result}")
+            #logger.debug(f"🌊 stream ack received for seq {current_seq_to_send}: {result}")
         else:
             # Original fire-and-forget behavior
             result = await util_client_log(
@@ -622,7 +626,7 @@ async def stream_end(stream_id_param: str):
     try:
         # Use awaitable pattern if AWAIT_STREAM_END_ACK is enabled
         if AWAIT_STREAM_END_ACK:
-            logger.info(f"🌊 stream_end: AWAIT_STREAM_END_ACK is True, calling execute_stream_awaitable...")
+            #logger.info(f"🌊 stream_end: AWAIT_STREAM_END_ACK is True, calling execute_stream_awaitable...")
             result = await execute_stream_awaitable(
                 client_id_for_routing=actual_client_id,
                 request_id=request_id,
@@ -634,7 +638,7 @@ async def stream_end(stream_id_param: str):
                 level="INFO",
                 logger_name=caller_name
             )
-            logger.info(f"🌊 stream_end ack received: {result}")
+            #logger.info(f"🌊 stream_end ack received: {result}")
         else:
             # Original fire-and-forget behavior
             result = await util_client_log(
@@ -671,6 +675,17 @@ async def client_command(command: str, data: Any = None) -> Any:
         RuntimeError: If context variables (client_id, request_id) are not set.
         McpError: Propagated from underlying calls if timeouts or client-side errors occur.
     """
+    # === ENTRY POINT LOGGING - ALWAYS LOG ===
+    logger.warning(f"🚨🚨🚨 CLIENT_COMMAND ENTERED 🚨🚨🚨")
+    logger.warning(f"🚨 Command: '{command}'")
+    logger.warning(f"🚨 First char: '{command[0] if command else 'EMPTY'}' (ord: {ord(command[0]) if command else 'N/A'})")
+    logger.warning(f"🚨 Starts with %: {command.startswith('%') if command else False}")
+    if isinstance(data, (dict, list)):
+        logger.warning(f"🚨 Data:\n{format_json_log(data, colored=True)}")
+    else:
+        logger.warning(f"🚨 Data: {data}")
+    logger.warning(f"🚨🚨🚨 END ENTRY LOG 🚨🚨🚨")
+
     # Get necessary context for routing and correlation
     client_id = _client_id_var.get()
     request_id = _request_id_var.get()
@@ -678,6 +693,8 @@ async def client_command(command: str, data: Any = None) -> Any:
     user = _user_var.get()  # Who's calling
     session_id = _session_id_var.get()  # Which session
     shell_path = _shell_path_var.get()  # Where in the command tree
+
+    logger.warning(f"🚨 Context: client_id={client_id}, request_id={request_id}, entry_point={entry_point_name}, user={user}, session={session_id}, shell={shell_path}")
 
     if not client_id or not request_id:
         # This should ideally not happen if called within a proper request context
@@ -688,13 +705,26 @@ async def client_command(command: str, data: Any = None) -> Any:
         # Get current sequence number and increment it for the next call
         # Using the helper function for consistent sequence number management
         current_seq_to_send = await get_and_increment_seq_num(context_name="client_command")
+        logger.warning(f"🚨 Got seq_num: {current_seq_to_send}")
 
+        # Extra distinctive logging for tool calls (commands starting with %)
+        if command.startswith('%'):
+            logger.warning(f"🔧🔧🔧 TOOL CALL DETECTED (% prefix) 🔧🔧🔧")
+            logger.warning(f"🔧 Command: {command}")
+            logger.warning(f"🔧 Client: {client_id}")
+            logger.warning(f"🔧 Request: {request_id}")
+            logger.warning(f"🔧 Seq: {current_seq_to_send}")
+            logger.warning(f"🔧 Data: {format_json_log(data) if isinstance(data, dict) else data}")
+            logger.warning(f"🔧🔧🔧 END TOOL CALL INFO 🔧🔧🔧")
+
+        logger.warning(f"🚨 About to call execute_client_command_awaitable...")
         logger.info(f"Atlantis: Sending awaitable command '{command}' for client {client_id}, request {request_id}, seq {current_seq_to_send}")
         if isinstance(data, dict):
             logger.info(f"Atlantis: Command data type: {type(data)}, data:\n{format_json_log(data)}")
         else:
             logger.info(f"Atlantis: Command data type: {type(data)}, data: {data}")
         # Call the dedicated utility function for awaitable commands
+        logger.warning(f"🚨 Calling execute_client_command_awaitable with command='{command}'")
         result = await execute_client_command_awaitable(
             client_id_for_routing=client_id,
             request_id=request_id,
@@ -706,11 +736,16 @@ async def client_command(command: str, data: Any = None) -> Any:
             session_id=session_id,  # Pass session_id for unique request tracking
             shell_path=shell_path  # Pass shell_path for unique request tracking
         )
-        #logger.info(f"Atlantis: Received result for awaitable command '{command}': {result}")
+        logger.warning(f"🚨 execute_client_command_awaitable RETURNED for command='{command}'")
+        if isinstance(result, (dict, list)):
+            logger.warning(f"🚨 Result type: {type(result)}, value:\n{format_json_log(result, colored=True)}")
+        else:
+            logger.warning(f"🚨 Result type: {type(result)}, value: {result}")
         logger.info(f"Atlantis: Received result for awaitable command '{command}', type: {type(result)}")
 
         return result
     except Exception as e:
+        logger.warning(f"🚨 EXCEPTION in client_command for '{command}': {type(e).__name__}: {e}")
         # Server layer already logged with enhanced error message including command context
         # Just re-raise to let the dynamic function manager handle final logging
         raise
@@ -944,11 +979,17 @@ async def invoke_click_callback(key: str) -> Any:
         # Callback runs in the current context, which should have client_log available
         if inspect.iscoroutinefunction(callback):
             result = await callback()
-            logger.info(f"DEBUG: Callback executed, result: {result}")
+            if isinstance(result, (dict, list)):
+                logger.info(f"DEBUG: Callback executed, result:\n{format_json_log(result, colored=True)}")
+            else:
+                logger.info(f"DEBUG: Callback executed, result: {result}")
             return result
         else:
             result = callback()
-            logger.info(f"DEBUG: Callback executed, result: {result}")
+            if isinstance(result, (dict, list)):
+                logger.info(f"DEBUG: Callback executed, result:\n{format_json_log(result, colored=True)}")
+            else:
+                logger.info(f"DEBUG: Callback executed, result: {result}")
             return result
     else:
         logger.info(f"DEBUG: No callback found for key '{key}'")
@@ -988,7 +1029,10 @@ async def invoke_click_callback_with_context(key: str, bound_client_log) -> Any:
                 result = await callback()
             else:
                 result = callback()
-            logger.info(f"DEBUG: Callback executed with context, result: {result}")
+            if isinstance(result, (dict, list)):
+                logger.info(f"DEBUG: Callback executed with context, result:\n{format_json_log(result, colored=True)}")
+            else:
+                logger.info(f"DEBUG: Callback executed with context, result: {result}")
             return result
         finally:
             # Restore original client_log
