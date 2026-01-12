@@ -26,7 +26,7 @@ import traceback
 from collections import defaultdict
 
 # Version
-SERVER_VERSION = "3.3.2"
+SERVER_VERSION = "3.4.0"
 
 # Tool list display column widths
 COL_WIDTH_APP = 30
@@ -4167,9 +4167,10 @@ class ServiceClient:
                 # Log tool call responses prominently so we can verify they were sent
                 YELLOW = "\x1b[93m"
                 RESET = "\x1b[0m"
+                resp_request_id = data.get('id', 'unknown')
                 logger.info(f"")
                 logger.info(f"{YELLOW}{'='*60}{RESET}")
-                logger.info(f"{YELLOW}📤 SENDING MCP_RESPONSE TO CLOUD{RESET}")
+                logger.info(f"{YELLOW}📤 SENDING MCP_RESPONSE TO CLOUD (request_id: {resp_request_id}){RESET}")
                 logger.info(f"{YELLOW}{'='*60}{RESET}")
                 logger.info(f"{YELLOW}{format_json_log(data, colored=True)}{RESET}")
                 logger.info(f"{YELLOW}{'='*60}{RESET}")
