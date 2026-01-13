@@ -13,11 +13,12 @@ async def game():
 
     await atlantis.client_command("/silent on")
 
-    # get user id
+    # get user id ('brickhouse')
     user_id = atlantis.get_caller()
     logger.info(f"Game started for user: {user_id}")
 
     owner_id = atlantis.get_owner()
+    await atlantis.client_log(f"Owner ID: {owner_id}")  # TEMP
 
     await atlantis.client_command("/chat set " + owner_id + "*kitty")
 

@@ -559,13 +559,14 @@ You like to purr when happy or do 'kitty paws'.
                         #logger.info(f"📥 OPENROUTER DATA [{chunk_count}]: content={content_preview}, reasoning={reasoning_preview}")
 
                         # New approach: consume reasoning silently, stream content only
-                        has_reasoning = hasattr(delta, 'reasoning') and delta.reasoning
+                        reasoning_content = getattr(delta, 'reasoning', None)
+                        has_reasoning = reasoning_content is not None
                         has_content = hasattr(delta, 'content') and delta.content
 
                         if has_reasoning:
                             # Accumulate reasoning silently
-                            reasoning_buffer += delta.reasoning
-                            logger.info(f"🧠 REASONING [{chunk_count}] ({len(reasoning_buffer)}/{max_reasoning_chars}): {repr(delta.reasoning)[:50]}")
+                            reasoning_buffer += reasoning_content
+                            logger.info(f"🧠 REASONING [{chunk_count}] ({len(reasoning_buffer)}/{max_reasoning_chars}): {repr(reasoning_content)[:50]}")
 
                             # Cut off if reasoning goes too long
                             if len(reasoning_buffer) >= max_reasoning_chars:
@@ -585,7 +586,7 @@ You like to purr when happy or do 'kitty paws'.
                                 logger.info(f"▶️ Starting content stream (after {len(reasoning_buffer)} chars of reasoning)")
                                 streaming_content = True
 
-                            content_to_send = delta.content.lstrip() if streamed_count == 0 else delta.content
+                            content_to_send = (delta.content or "").lstrip() if streamed_count == 0 else (delta.content or "")
 
                             if content_to_send:
                                 #logger.info(f"📤 CLOUD SEND [{streamed_count + 1}] starting: {repr(content_to_send)}")
@@ -618,15 +619,19 @@ You like to purr when happy or do 'kitty paws'.
                                 # Accumulate the chunks
                                 if tool_call.id:
                                     tool_calls_accumulator[index]['id'] = tool_call.id
-                                if tool_call.function.name:
-                                    tool_calls_accumulator[index]['name'] = tool_call.function.name
-                                if tool_call.function.arguments:
-                                    # Skip appending empty object "{}" if we already have arguments
-                                    # (some providers send "{}" as a placeholder/completion chunk)
-                                    if tool_call.function.arguments.strip() == "{}" and tool_calls_accumulator[index]['arguments']:
-                                        logger.info(f"Skipping empty object placeholder for tool call {index} (already have {len(tool_calls_accumulator[index]['arguments'])} chars)")
-                                    else:
-                                        tool_calls_accumulator[index]['arguments'] += tool_call.function.arguments
+                                func = tool_call.function
+                                if not func:
+                                    logger.warning(f"tool_call.function is None for tool_call index {index}! Full tool_call: {tool_call}")
+                                else:
+                                    if func.name:
+                                        tool_calls_accumulator[index]['name'] = func.name
+                                    if func.arguments:
+                                        # Skip appending empty object "{}" if we already have arguments
+                                        # (some providers send "{}" as a placeholder/completion chunk)
+                                        if func.arguments.strip() == "{}" and tool_calls_accumulator[index]['arguments']:
+                                            logger.info(f"Skipping empty object placeholder for tool call {index} (already have {len(tool_calls_accumulator[index]['arguments'])} chars)")
+                                        else:
+                                            tool_calls_accumulator[index]['arguments'] += func.arguments
 
                                 # logger.info(f"Accumulated tool call {index}: id={tool_calls_accumulator[index]['id']}, name={tool_calls_accumulator[index]['name']}, args_len={len(tool_calls_accumulator[index]['arguments'])}")
 
@@ -761,20 +766,25 @@ You like to purr when happy or do 'kitty paws'.
 
             # Extract detailed error info from OpenAI/OpenRouter APIError
             error_details = str(e)
-            if hasattr(e, 'body') and e.body:
-                logger.error(f"Error body: {e.body}")
-                error_details = f"{error_details} | Body: {e.body}"
-            if hasattr(e, 'code') and e.code:
-                logger.error(f"Error code: {e.code}")
-            if hasattr(e, 'type') and e.type:
-                logger.error(f"Error type attr: {e.type}")
-            if hasattr(e, 'param') and e.param:
-                logger.error(f"Error param: {e.param}")
-            if hasattr(e, 'response') and e.response:
+            err_body = getattr(e, 'body', None)
+            err_code = getattr(e, 'code', None)
+            err_type = getattr(e, 'type', None)
+            err_param = getattr(e, 'param', None)
+            err_response = getattr(e, 'response', None)
+            if err_body:
+                logger.error(f"Error body: {err_body}")
+                error_details = f"{error_details} | Body: {err_body}"
+            if err_code:
+                logger.error(f"Error code: {err_code}")
+            if err_type:
+                logger.error(f"Error type attr: {err_type}")
+            if err_param:
+                logger.error(f"Error param: {err_param}")
+            if err_response:
                 try:
-                    logger.error(f"Response status: {e.response.status_code}")
-                    logger.error(f"Response text: {e.response.text}")
-                    error_details = f"{error_details} | Status: {e.response.status_code} | Response: {e.response.text}"
+                    logger.error(f"Response status: {err_response.status_code}")
+                    logger.error(f"Response text: {err_response.text}")
+                    error_details = f"{error_details} | Status: {err_response.status_code} | Response: {err_response.text}"
                 except:
                     pass
 
