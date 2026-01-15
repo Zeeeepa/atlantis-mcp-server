@@ -1241,7 +1241,7 @@ class DynamicAdditionServer(Server):
                 },
                 annotations=ToolAnnotations(title="_public_click", decorators=["public"])
             ),
-            Tool( # Add definition for _public_upload
+            Tool( # Add definition for _public_upload DEPRECATED
                 name="_public_upload",
                 description="Handles upload calls from the client UI. Requires a valid callback key for security.",
                 inputSchema={
@@ -2581,6 +2581,7 @@ class DynamicAdditionServer(Server):
 
             elif actual_function_name == "_public_upload":
                 # Handle uploads by invoking stored callbacks as dynamic functions
+                # DEPRECATED
                 key = args.get("key")
                 filename = args.get("filename")
                 filetype = args.get("filetype")

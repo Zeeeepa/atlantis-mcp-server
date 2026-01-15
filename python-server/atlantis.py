@@ -922,6 +922,9 @@ async def owner_log(message: str):
 
     entries.append(log_entry)
 
+    # Echo to console so owner_log is visible in server output
+    logger.info(f"📋 OWNER_LOG [{invoking_tool_name}] ({username}): {message}")
+
     try:
         with open(log_file_path, 'w', encoding='utf-8') as f:
             json.dump(entries, f, indent=4)
