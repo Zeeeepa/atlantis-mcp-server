@@ -198,7 +198,8 @@ async def execute_client_command_awaitable(
     user: Optional[str] = None, # User who initiated the request
     session_id: Optional[str] = None, # Session ID for request isolation
     shell_path: Optional[str] = None, # Shell path for request isolation
-    message_type: str = "command" # Message type for the protocol (default "command" for backwards compat)
+    message_type: str = "command", # Message type for the protocol (default "command" for backwards compat)
+    is_private: bool = True # If False, cloud should broadcast to all clients
     ) -> Any:
     """
     Sends a command to a specific client via the server and waits for a dedicated response.
@@ -249,7 +250,8 @@ async def execute_client_command_awaitable(
             user=user,
             session_id=session_id,
             shell_path=shell_path,
-            message_type=message_type
+            message_type=message_type,
+            is_private=is_private
         )
         logger.info(f"✅ Utils: Received result for dedicated awaitable command '{command}' from server.")
         logger.info(f"   📥 Result type: {type(result)}, length: {len(str(result)) if result else 0}")

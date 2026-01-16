@@ -427,7 +427,8 @@ class DynamicAdditionServer(Server):
                                       user: Optional[str] = None, # User who initiated the request
                                       session_id: Optional[str] = None, # Session ID for request isolation
                                       shell_path: Optional[str] = None, # Shell path in command tree for request isolation
-                                      message_type: str = "command" # Message type for the protocol (default "command" for backwards compat)
+                                      message_type: str = "command", # Message type for the protocol (default "command" for backwards compat)
+                                      is_private: bool = True # If False, cloud should broadcast to all clients
                                       ) -> Any:
         """Sends a command to a specific client and waits for a response with a correlation ID.
 
@@ -526,6 +527,7 @@ class DynamicAdditionServer(Server):
                 # Cloud clients get it wrapped in a 'notifications/message' structure, sent via 'mcp_notification' event
                 cloud_notification_params = {
                     "messageType": message_type,
+                    "isPrivate": is_private,       # If False, cloud should broadcast to all clients
                     "requestId": request_id,       # Original MCP request_id for cloud client context
                     "correlationId": correlation_id, # The ID for awaiting the response
                     "command": command,            # The actual command string
