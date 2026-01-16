@@ -233,7 +233,7 @@ async def tool_result(name: str, result: Any):
     """Sends a tool call result back to the requesting client to be added to the transcript.
     This allows the LLM to see tool results in the next conversation turn.
     """
-    return await client_log(f"Tool {name} result: {result}", level="INFO", message_type="tool")
+    return await client_command("tool", {"name": name, "result": result}, message_type="tool")
 
 # --- Other Accessors ---
 # this is established by the tool caller
@@ -379,9 +379,8 @@ async def client_image(image_path: str, image_format: Optional[str] = None):
     # Format as proper data URL
     prefixed_data = f"data:{image_format};base64,{base64_data}"
 
-    # Send to client_log with appropriate message_type
-    # client_log is now async and returns a result
-    result = await client_log(prefixed_data, level="INFO", message_type=image_format)
+    # Send via client_command with appropriate message_type for awaitable behavior
+    result = await client_command("image", {"content": prefixed_data}, message_type=image_format)
     return result
 
 def image_to_base64(image_path: str) -> str:
@@ -440,8 +439,8 @@ async def client_video(video_path: str, video_format: Optional[str] = None):
     # Convert video to base64
     base64_data = video_to_base64(video_path)
 
-    # Send to client_log with appropriate message_type (same as client_image)
-    result = await client_log(base64_data, level="INFO", message_type=video_format)
+    # Send via client_command with appropriate message_type for awaitable behavior
+    result = await client_command("video", {"content": base64_data}, message_type=video_format)
     return result
 
 def video_to_base64(video_path: str) -> str:
@@ -658,7 +657,7 @@ async def stream_end(stream_id_param: str):
         raise
 
 
-async def client_command(command: str, data: Any = None) -> Any:
+async def client_command(command: str, data: Any = None, message_type: str = "command") -> Any:
     """Sends a command message to the client and waits for a specific acknowledgment and result.
 
     This function is for commands that require the server to wait for completion
@@ -667,6 +666,7 @@ async def client_command(command: str, data: Any = None) -> Any:
     Args:
         command: The command string identifier.
         data: Optional JSON-serializable data associated with the command.
+        message_type: The message type for the protocol (default "command").
 
     Returns:
         The result returned by the client for the command.
@@ -734,7 +734,8 @@ async def client_command(command: str, data: Any = None) -> Any:
             entry_point_name=entry_point_name,  # Pass the entry point name for logging
             user=user,  # Pass user for unique request tracking
             session_id=session_id,  # Pass session_id for unique request tracking
-            shell_path=shell_path  # Pass shell_path for unique request tracking
+            shell_path=shell_path,  # Pass shell_path for unique request tracking
+            message_type=message_type  # Pass message_type for the protocol
         )
         logger.warning(f"🚨 execute_client_command_awaitable RETURNED for command='{command}'")
         if isinstance(result, (dict, list)):
@@ -756,9 +757,8 @@ async def client_html(content: str):
     Args:
         content: The HTML content to send
     """
-    # Send to client_log with message_type set to 'html'
-    # client_log is now async and returns a result
-    result = await client_log(content, level="INFO", message_type="html")
+    # Use client_command for awaitable response
+    result = await client_command("html", {"content": content})
     return result
 
 async def client_script(content: str, is_private: bool = True):
@@ -769,9 +769,8 @@ async def client_script(content: str, is_private: bool = True):
         is_private: If True (default), script only runs on the requesting client.
                    If False, script broadcasts to all connected clients.
     """
-    # Send to client_log with message_type set to 'script'
-    # client_log is now async and returns a result
-    result = await client_log(content, level="INFO", message_type="script", is_private=is_private)
+    # Use client_command for awaitable response
+    result = await client_command("script", {"content": content, "is_private": is_private})
     return result
 
 async def set_background(image_path: str):
@@ -783,7 +782,7 @@ async def set_background(image_path: str):
     # Convert image to base64
     base64_data = image_to_base64(image_path)
 
-    result = await client_log(base64_data, message_type="background")
+    result = await client_command("background", {"content": base64_data}, message_type="background")
     return result
 
 async def client_markdown(content: str):
@@ -792,9 +791,8 @@ async def client_markdown(content: str):
     Args:
         content: The Markdown content to send
     """
-    # Send to client_log with message_type set to 'html'
-    # client_log is now async and returns a result
-    result = await client_log(content, level="INFO", message_type="md")
+    # Send via client_command with message_type for awaitable behavior
+    result = await client_command("md", {"content": content}, message_type="md")
     return result
 
 async def client_data(description: str, data: Any, column_formatter: Optional[dict] = None):
@@ -826,8 +824,8 @@ async def client_data(description: str, data: Any, column_formatter: Optional[di
         # Try to serialize the data to JSON to verify it's valid
         json_str = json.dumps(wrapped_data)
 
-        # Send the serialized data with message_type set to 'data'
-        result = await client_log(json_str, level="INFO", message_type="data")
+        # Send via client_command with message_type for awaitable behavior
+        result = await client_command("data", {"content": json_str}, message_type="data")
         return result
     except TypeError as e:
         logger.error(f"Failed to serialize data to JSON: {e}")
@@ -946,8 +944,8 @@ async def client_onclick(key: str, callback: Callable):
     _click_callbacks[key] = callback
     #await client_log(f"DEBUG: Stored callback for key '{key}', total callbacks: {len(_click_callbacks)}")
 
-    # Send registration message to client
-    await client_log(key, message_type="onclick_register")
+    # Send registration message to client via awaitable client_command
+    await client_command("onclick_register", {"key": key}, message_type="onclick_register")
 
 async def client_upload(key: str, callback: Callable):
     """Registers an upload handler
@@ -959,8 +957,8 @@ async def client_upload(key: str, callback: Callable):
     # Store the callback in the global lookup table
     _upload_callbacks[key] = callback
 
-    # Send registration message to client
-    await client_log(key, message_type="upload_register")
+    # Send registration message to client via awaitable client_command
+    await client_command("upload_register", {"key": key}, message_type="upload_register")
 
 
 # possibly obsolete

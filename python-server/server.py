@@ -426,7 +426,8 @@ class DynamicAdditionServer(Server):
                                       local_pseudo_call: bool = False, # True if this is a pseudo tool call from local client
                                       user: Optional[str] = None, # User who initiated the request
                                       session_id: Optional[str] = None, # Session ID for request isolation
-                                      shell_path: Optional[str] = None # Shell path in command tree for request isolation
+                                      shell_path: Optional[str] = None, # Shell path in command tree for request isolation
+                                      message_type: str = "command" # Message type for the protocol (default "command" for backwards compat)
                                       ) -> Any:
         """Sends a command to a specific client and waits for a response with a correlation ID.
 
@@ -524,7 +525,7 @@ class DynamicAdditionServer(Server):
             elif client_type == "cloud" and connection and hasattr(connection, 'is_connected') and connection.is_connected:
                 # Cloud clients get it wrapped in a 'notifications/message' structure, sent via 'mcp_notification' event
                 cloud_notification_params = {
-                    "messageType": "command",
+                    "messageType": message_type,
                     "requestId": request_id,       # Original MCP request_id for cloud client context
                     "correlationId": correlation_id, # The ID for awaiting the response
                     "command": command,            # The actual command string
