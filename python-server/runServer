@@ -1,5 +1,9 @@
   #!/bin/bash
 
+# WARNING BE SURE TO PROPERLY END LINES WITH SLASH
+# OR ALL YOUR PARAMS WILL BE DROPPED AND YOU WILL GET
+# ALL SORTS OF STRANGE ERRORS
+
 # Auto-restart loop for server
 while true; do
   echo "Starting server..."
