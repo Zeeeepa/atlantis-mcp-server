@@ -1216,9 +1216,91 @@ async def {name}():
         # NEW: Also invalidate function mapping cache
         await self.invalidate_function_mapping_cache()
 
+    def _find_skipped_function(self, name: str, app: Optional[str] = None) -> Optional[dict]:
+        '''
+        Find a function in the skipped functions list (functions without visibility decorators).
+        Returns the skipped function info dict if found, None otherwise.
+        '''
+        app_path = self._app_name_to_path(app) if app else None
+
+        for skipped in self._skipped_functions:
+            if skipped['name'] == name:
+                # If app specified, must match
+                if app_path is not None:
+                    if skipped.get('app') == app_path:
+                        return skipped
+                else:
+                    # No app specified - return first match
+                    return skipped
+        return None
+
+    def _get_function_ast_info(self, name: str, file_path: str) -> tuple:
+        '''
+        Read a file, parse AST, and find a function by name.
+        Returns (source, lines, func_node) tuple.
+        Raises IOError for file issues, ValueError for parse/lookup issues.
+        '''
+        # Read the file
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                source = f.read()
+        except Exception as e:
+            raise IOError(f"Failed to read file {file_path}: {e}")
+
+        # Parse AST
+        try:
+            tree = ast.parse(source)
+        except SyntaxError as e:
+            raise ValueError(f"Syntax error in {file_path}: {e}")
+
+        # Find the function definition
+        func_node = None
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.name == name:
+                    func_node = node
+                    break
+
+        if not func_node:
+            raise ValueError(f"Function '{name}' not found in {file_path}")
+
+        lines = source.splitlines(keepends=True)
+        return source, lines, func_node
+
+    async def _add_visible_decorator(self, name: str, file_path: str) -> bool:
+        '''
+        Add @visible decorator to an existing function that has no decorators.
+        Returns True on success.
+        '''
+        source, lines, func_node = self._get_function_ast_info(name, file_path)
+
+        # Insert @visible before the function definition
+        insert_index = func_node.lineno - 1  # Convert to 0-indexed
+
+        # Determine indentation from the function definition line
+        func_line = lines[insert_index]
+        indent = len(func_line) - len(func_line.lstrip())
+        indent_str = func_line[:indent]
+
+        # Insert @visible decorator with same indentation
+        decorator_line = f"{indent_str}@visible\n"
+        lines.insert(insert_index, decorator_line)
+
+        new_source = ''.join(lines)
+
+        # Write back
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(new_source)
+            logger.info(f"Added @visible decorator to function '{name}' in {file_path}")
+            return True
+        except Exception as e:
+            raise IOError(f"Failed to write file {file_path}: {e}")
+
     async def function_add(self, name: str, code: Optional[str] = None, app: Optional[str] = None, location: Optional[str] = None) -> bool:
         '''
-        Creates a new function file.
+        Creates a new function or re-enables a hidden one.
+        If the function exists but has no decorators (was "removed"), adds @visible to re-enable it.
         If code is provided, it saves it. Otherwise, generates and saves a stub.
         If app is provided, creates the function in the app-specific subdirectory (supports dot notation).
         If location is provided, adds @location() decorator to the generated stub.
@@ -1240,13 +1322,25 @@ async def {name}():
             logger.error(f"Create failed: 'Internal' is a reserved app name")
             raise ValueError("'Internal' is a reserved app name and cannot be used for creating functions")
 
-        # Check if function already exists using the function file mapping (not file existence)
+        # Ensure mapping is up to date
+        await self._build_function_file_mapping()
+
+        # Check if function already exists and is visible
         existing_file = await self._find_file_containing_function(secure_name, app)
         if existing_file:
             error_msg = f"Function '{secure_name}' already exists in {existing_file}"
             logger.warning(f"Create failed: {error_msg}")
             raise ValueError(error_msg)
 
+        # Check if function exists but is hidden (no decorators)
+        skipped = self._find_skipped_function(secure_name, app)
+        if skipped:
+            # Function exists but was hidden - re-enable it by adding @visible
+            file_path = os.path.join(self.functions_dir, skipped['file'])
+            logger.info(f"Function '{secure_name}' exists but is hidden, re-enabling with @visible")
+            return await self._add_visible_decorator(secure_name, file_path)
+
+        # Function doesn't exist anywhere - create new
         try:
             code_to_save = code if code is not None else self._code_generate_stub(secure_name, location)
             if await self._fs_add_code(secure_name, code_to_save, app):
@@ -1267,10 +1361,50 @@ async def {name}():
 
     async def function_remove(self, name: str, app: Optional[str] = None) -> bool:
         '''
-        Removes a function from a file.
-        NOTE: Not yet implemented for main.py-based functions.
+        "Removes" a function by stripping all its decorators, making it invisible to the tool system.
+        The function code remains but won't be picked up as a tool.
+
+        Args:
+            name: Function name to remove
+            app: Optional app name to disambiguate if multiple functions have the same name
+
+        Returns:
+            True on success, raises ValueError on failure.
         '''
-        raise NotImplementedError("function_remove is not yet implemented. Functions now live in main.py files and require selective removal logic.")
+        secure_name = utils.clean_filename(name)
+        if not secure_name:
+            raise ValueError(f"Invalid function name '{name}'")
+
+        # Find the file containing this function
+        function_file = await self._find_file_containing_function(secure_name, app)
+        if not function_file:
+            if app:
+                raise ValueError(f"Function '{secure_name}' not found in app '{app}'")
+            else:
+                raise ValueError(f"Function '{secure_name}' not found")
+
+        source, lines, func_node = self._get_function_ast_info(secure_name, function_file)
+
+        # If no decorators, nothing to strip
+        if not func_node.decorator_list:
+            logger.info(f"Function '{secure_name}' has no decorators to strip")
+            return True
+
+        # Get line numbers of decorators to remove (AST line numbers are 1-indexed)
+        decorator_lines = set(dec.lineno - 1 for dec in func_node.decorator_list)
+
+        # Remove decorator lines (rebuild file without them)
+        new_lines = [line for i, line in enumerate(lines) if i not in decorator_lines]
+        new_source = ''.join(new_lines)
+
+        # Write back
+        try:
+            with open(function_file, 'w', encoding='utf-8') as f:
+                f.write(new_source)
+            logger.info(f"Stripped {len(decorator_lines)} decorator(s) from function '{secure_name}' in {function_file}")
+            return True
+        except Exception as e:
+            raise IOError(f"Failed to write file {function_file}: {e}")
 
     async def _write_error_log(self, name: str, error_message: str) -> None: # Made it async to match caller, added self
         '''
