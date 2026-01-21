@@ -1406,6 +1406,138 @@ async def {name}():
         except Exception as e:
             raise IOError(f"Failed to write file {function_file}: {e}")
 
+    async def function_move(
+        self,
+        source_name: str,
+        source_app: Optional[str],
+        dest_app: str,
+        dest_name: Optional[str] = None,
+        dest_location: Optional[str] = None
+    ) -> str:
+        '''
+        Moves a function from one location to another.
+        Extracts the function code (with decorators) from source, adds to destination, removes from source.
+
+        Args:
+            source_name: Function name to move
+            source_app: Optional source app name (if not specified, searches all apps)
+            dest_app: Destination app name
+            dest_name: Optional new name for the function (defaults to source_name)
+            dest_location: Optional location decorator value to add/update
+
+        Returns:
+            Success message string
+
+        Raises:
+            ValueError: If function not found or destination already has it
+            IOError: If file operations fail
+        '''
+        secure_source_name = utils.clean_filename(source_name)
+        if not secure_source_name:
+            raise ValueError(f"Invalid function name '{source_name}'")
+
+        # Use source name if dest_name not provided
+        final_name = dest_name if dest_name else secure_source_name
+        secure_dest_name = utils.clean_filename(final_name)
+        if not secure_dest_name:
+            raise ValueError(f"Invalid destination function name '{final_name}'")
+
+        # Find source file
+        source_file = await self._find_file_containing_function(secure_source_name, source_app)
+        if not source_file:
+            if source_app:
+                raise ValueError(f"Function '{secure_source_name}' not found in app '{source_app}'")
+            else:
+                raise ValueError(f"Function '{secure_source_name}' not found")
+
+        source_file_path = os.path.join(self.functions_dir, source_file)
+
+        # Check destination doesn't already have this function
+        dest_file = await self._find_file_containing_function(secure_dest_name, dest_app)
+        if dest_file:
+            raise ValueError(f"Function '{secure_dest_name}' already exists in destination app '{dest_app}'")
+
+        # Extract function code from source using AST
+        source_code, lines, func_node = self._get_function_ast_info(secure_source_name, source_file_path)
+
+        # Get the function's line range (including decorators)
+        if func_node.decorator_list:
+            start_line = func_node.decorator_list[0].lineno - 1  # 0-indexed
+        else:
+            start_line = func_node.lineno - 1
+
+        end_line = func_node.end_lineno  # end_lineno is 1-indexed but we want exclusive
+
+        # Extract function lines
+        func_lines = lines[start_line:end_line]
+        func_code = ''.join(func_lines)
+
+        # If renaming, update the function name in the code
+        if secure_dest_name != secure_source_name:
+            # Replace function definition name
+            func_code = re.sub(
+                rf'(async\s+)?def\s+{re.escape(secure_source_name)}\s*\(',
+                rf'\1def {secure_dest_name}(',
+                func_code,
+                count=1
+            )
+
+        # Handle @location decorator
+        if dest_location:
+            # Check if there's already a @location decorator
+            location_pattern = r'@location\s*\([^)]*\)\s*\n'
+            if re.search(location_pattern, func_code):
+                # Update existing @location
+                func_code = re.sub(location_pattern, f'@location("{dest_location}")\n', func_code)
+            else:
+                # Add @location decorator before the function def
+                func_code = re.sub(
+                    r'((?:async\s+)?def\s+)',
+                    f'@location("{dest_location}")\n\\1',
+                    func_code,
+                    count=1
+                )
+
+        # Add to destination
+        dest_file_path = await self._fs_add_code(secure_dest_name, func_code, dest_app)
+        if not dest_file_path:
+            raise IOError(f"Failed to add function to destination app '{dest_app}'")
+
+        # Remove from source by deleting those lines
+        new_lines = lines[:start_line] + lines[end_line:]
+
+        # Clean up extra blank lines that might result
+        new_source = ''.join(new_lines)
+        # Remove excessive blank lines (more than 2 consecutive)
+        new_source = re.sub(r'\n{3,}', '\n\n', new_source)
+
+        # Write back source file (or delete if empty)
+        new_source_stripped = new_source.strip()
+        if not new_source_stripped:
+            # File is empty, delete it
+            os.remove(source_file_path)
+            logger.info(f"Deleted empty source file {source_file_path}")
+        else:
+            with open(source_file_path, 'w', encoding='utf-8') as f:
+                f.write(new_source)
+            logger.info(f"Removed function '{secure_source_name}' from {source_file}")
+
+        # Rebuild mapping
+        await self._build_function_file_mapping()
+
+        # Determine source display name
+        if source_app:
+            source_display = source_app
+        else:
+            # Extract from file path
+            source_display = os.path.dirname(source_file) or "root"
+
+        # Build result message
+        if secure_dest_name != secure_source_name:
+            return f"Function '{secure_source_name}' moved from '{source_display}' to '{dest_app}' as '{secure_dest_name}'"
+        else:
+            return f"Function '{secure_source_name}' moved from '{source_display}' to '{dest_app}'"
+
     async def _write_error_log(self, name: str, error_message: str) -> None: # Made it async to match caller, added self
         '''
         Write an error message to a function-specific log file in the dynamic_functions folder.

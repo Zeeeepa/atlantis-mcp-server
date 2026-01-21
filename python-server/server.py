@@ -1068,6 +1068,22 @@ class DynamicAdditionServer(Server):
                 annotations=ToolAnnotations(title="_function_add")
             ),
             Tool(
+                name="_function_move",
+                description="Moves a function from one app to another. Gets the function code from source, adds it to destination, and removes it from source.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "source_name": {"type": "string", "description": "The name of the function to move"},
+                        "source_app": {"type": "string", "description": "Optional: The source app name to target a specific function when multiple exist with the same name"},
+                        "dest_app": {"type": "string", "description": "The destination app name to move the function to"},
+                        "dest_name": {"type": "string", "description": "Optional: New name for the function (defaults to source_name)"},
+                        "dest_location": {"type": "string", "description": "Optional: Adds @location() decorator with the specified location value"}
+                    },
+                    "required": ["source_name", "dest_app"]
+                },
+                annotations=ToolAnnotations(title="_function_move")
+            ),
+            Tool(
                 name="_function_history",
                 description="Gets the tool call history for a specific function. Requires both app and function name since multiple apps can have functions with the same name.",
                 inputSchema={
@@ -2255,6 +2271,35 @@ class DynamicAdditionServer(Server):
                     else:
                         success_msg = f"Empty function '{func_name}' created successfully in root."
                     result_raw = [TextContent(type="text", text=success_msg)]
+
+            elif actual_function_name == "_function_move":
+                # Move function from one app to another
+                logger.debug(f"---> Calling built-in: function_move with args:\n{format_json_log(args)}")
+
+                source_name = args.get("source_name")
+                source_app = args.get("source_app")
+                dest_app = args.get("dest_app")
+                dest_name = args.get("dest_name")
+                dest_location = args.get("dest_location")
+
+                if not source_name:
+                    raise ValueError("Missing required parameter: source_name")
+                if not dest_app:
+                    raise ValueError("Missing required parameter: dest_app")
+
+                try:
+                    result_msg = await self.function_manager.function_move(
+                        source_name, source_app, dest_app, dest_name, dest_location
+                    )
+                    # Notify for both old and new name if renamed
+                    final_name = dest_name or source_name
+                    await self._notify_tool_list_changed(change_type="updated", tool_name=final_name)
+                    result_raw = [TextContent(type="text", text=result_msg)]
+                except (ValueError, IOError) as e:
+                    error_annotations = {
+                        "tool_error": {"tool_name": name, "message": str(e)}
+                    }
+                    result_raw = [TextContent(type="text", text=str(e), annotations=error_annotations)]
 
             elif actual_function_name == "_server_get":
                 svc_name = args.get("name")
