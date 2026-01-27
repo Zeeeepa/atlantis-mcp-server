@@ -19,6 +19,7 @@ import secrets
 from utils import clean_filename, format_json_log
 from PIDManager import PIDManager
 from typing import Any, Callable, Dict, List, Optional, Union
+from dataclasses import dataclass
 import datetime
 import humanize
 import subprocess
@@ -71,6 +72,23 @@ from mcp.shared.exceptions import McpError # <--- ADD THIS IMPORT
 class ToolAnnotations(McpToolAnnotations):
     """Custom ToolAnnotations that allows extra fields to avoid Pydantic warnings."""
     model_config = ConfigDict(extra='allow')
+
+
+@dataclass
+class ToolResult:
+    """Intermediate result from tool execution before MCP response formatting.
+
+    Per MCP spec 2025-11-25, tool results should include:
+    - content: List of content items (TextContent, etc.) for backwards compatibility
+    - structuredContent: Raw JSON data (dict/list) at top level
+
+    This dataclass captures the raw value so _handle_tools_call() can build
+    both fields in ONE place.
+    """
+    value: Any                          # Raw return value from the tool
+    is_error: bool = False              # Tool execution error (not protocol error)
+    error_message: Optional[str] = None # Human-readable error if is_error=True
+
 
 # Monkey patch websockets to support larger message sizes globally
 import websockets.asyncio.server
@@ -1977,6 +1995,7 @@ class DynamicAdditionServer(Server):
 
                 elif client_type == "cloud" and connection and hasattr(connection, 'is_connected') and connection.is_connected:
                     try:
+                        logger.info(f"☁️ Sending to cloud - seqNum={params.get('seqNum')}, entryPoint={params.get('entryPoint')}, data preview={str(params.get('data', ''))[:50]}")
                         await connection.send_message('mcp_notification', notification)
                         #logger.debug(f"☁️ Sent notification to cloud client: {client_id}")
                     except Exception as e:
@@ -1992,8 +2011,12 @@ class DynamicAdditionServer(Server):
             logger.debug(f"Log notification error details: {traceback.format_exc()}")
             # We intentionally don't re-raise here
 
-    async def _execute_tool(self, name: str, args: dict, client_id: str = None, request_id: str = None, user: str = None, session_id: str = None, command_seq: int = None, shell_path: str = None) -> list[TextContent]:
-        """Core logic to handle a tool call. Ensures result is List[TextContent(type='text')]"""
+    async def _execute_tool(self, name: str, args: dict, client_id: str = None, request_id: str = None, user: str = None, session_id: str = None, command_seq: int = None, shell_path: str = None) -> ToolResult:
+        """Core logic to handle a tool call. Returns ToolResult with raw value.
+
+        MCP response formatting (content + structuredContent) happens in
+        _handle_tools_call() - the ONE place for all MCP formatting.
+        """
         logger.info(f"🔧 EXECUTING TOOL: {name}")
         logger.debug(f"WITH ARGUMENTS: {args}")
         if user:
@@ -2201,10 +2224,7 @@ class DynamicAdditionServer(Server):
                         error_message = f"Function '{func_name}' does not exist in app '{app_name}'."
                     else:
                         error_message = f"Function '{func_name}' does not exist."
-                    error_annotations = {
-                        "tool_error": {"tool_name": name, "message": error_message}
-                    }
-                    result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
+                    result_raw = error_message
                 else:
                     # Function exists, continue with removing it
                     await self.function_manager.function_remove(func_name, app_name)
@@ -2212,7 +2232,7 @@ class DynamicAdditionServer(Server):
                         await self._notify_tool_list_changed(change_type="removed", tool_name=func_name) # Pass params
                     except Exception as e:
                         logger.error(f"Error sending tool notification after removing {func_name}: {str(e)}")
-                    result_raw = [TextContent(type="text", text=f"Function '{func_name}' removed successfully.")] # <-- Success message
+                    result_raw = f"Function '{func_name}' removed successfully."
 
             elif actual_function_name == "_function_add":
                 # Add empty function
@@ -2254,10 +2274,7 @@ class DynamicAdditionServer(Server):
                             error_message = f"Function '{func_name}' already exists in: {locations_list}. Specify an app parameter."
                     else:
                         error_message = f"Function '{func_name}' already exists."
-                    error_annotations = {
-                        "tool_error": {"tool_name": name, "message": error_message}
-                    }
-                    result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
+                    result_raw = error_message
                 else:
                     # Function doesn't exist, create it
                     await self.function_manager.function_add(func_name, None, app_name, location_value)
@@ -2267,10 +2284,9 @@ class DynamicAdditionServer(Server):
                         logger.error(f"Error sending tool notification after adding {func_name}: {str(e)}")
                     # Show app in success message
                     if app_name:
-                        success_msg = f"Empty function '{func_name}' created successfully in app '{app_name}'."
+                        result_raw = f"Empty function '{func_name}' created successfully in app '{app_name}'."
                     else:
-                        success_msg = f"Empty function '{func_name}' created successfully in root."
-                    result_raw = [TextContent(type="text", text=success_msg)]
+                        result_raw = f"Empty function '{func_name}' created successfully in root."
 
             elif actual_function_name == "_function_move":
                 # Move function from one app to another
@@ -2294,12 +2310,9 @@ class DynamicAdditionServer(Server):
                     # Notify for both old and new name if renamed
                     final_name = dest_name or source_name
                     await self._notify_tool_list_changed(change_type="updated", tool_name=final_name)
-                    result_raw = [TextContent(type="text", text=result_msg)]
+                    result_raw = result_msg
                 except (ValueError, IOError) as e:
-                    error_annotations = {
-                        "tool_error": {"tool_name": name, "message": str(e)}
-                    }
-                    result_raw = [TextContent(type="text", text=str(e), annotations=error_annotations)]
+                    result_raw = str(e)
 
             elif actual_function_name == "_server_get":
                 svc_name = args.get("name")
@@ -2319,9 +2332,9 @@ class DynamicAdditionServer(Server):
                         await self._notify_tool_list_changed(change_type="added", tool_name=svc_name)
                     except Exception as e:
                         logger.error(f"Error sending tool notification after adding server {svc_name}: {str(e)}")
-                    result_raw = [TextContent(type="text", text=f"MCP '{svc_name}' added successfully.")]
+                    result_raw = f"MCP '{svc_name}' added successfully."
                 else:
-                    result_raw = [TextContent(type="text", text=f"Failed to add MCP '{svc_name}'.")]
+                    result_raw = f"Failed to add MCP '{svc_name}'."
             elif actual_function_name == "_server_remove":
                 svc_name = args.get("name")
                 if not svc_name:
@@ -2333,9 +2346,9 @@ class DynamicAdditionServer(Server):
                         await self._notify_tool_list_changed(change_type="removed", tool_name=svc_name)
                     except Exception as e:
                         logger.error(f"Error sending tool notification after removing server {svc_name}: {str(e)}")
-                    result_raw = [TextContent(type="text", text=f"Server '{svc_name}' removed successfully.")]
+                    result_raw = f"Server '{svc_name}' removed successfully."
                 else:
-                    result_raw = [TextContent(type="text", text=f"Failed to remove server '{svc_name}'.")]
+                    result_raw = f"Failed to remove server '{svc_name}'."
             elif actual_function_name == "_server_set":
                 logger.debug(f"---> Calling built-in: server_set with args:\n{format_json_log(args)}")
                 # Extract the config from the args dictionary
@@ -2526,7 +2539,7 @@ class DynamicAdditionServer(Server):
                 logger.info(f"🔄 ADMIN RESTART requested by owner: {user or 'unknown'}")
 
                 # Send response first before terminating
-                result_raw = [TextContent(type="text", text="Server restart initiated. The process will terminate and should be restarted by wrapper script.")]
+                result_raw = "Server restart initiated. The process will terminate and should be restarted by wrapper script."
 
                 # Schedule termination after a brief delay to allow response to be sent
                 async def delayed_shutdown():
@@ -2566,7 +2579,7 @@ class DynamicAdditionServer(Server):
                         if result.stdout:
                             success_msg += f"\n\nOutput:\n{result.stdout}"
                         logger.info(f"📦 Package '{package}' installed successfully")
-                        result_raw = [TextContent(type="text", text=success_msg)]
+                        result_raw = success_msg
                     else:
                         error_msg = f"❌ Failed to install package: {package}"
                         if result.stderr:
@@ -2574,16 +2587,16 @@ class DynamicAdditionServer(Server):
                         if result.stdout:
                             error_msg += f"\n\nStdout:\n{result.stdout}"
                         logger.error(f"📦 Failed to install package '{package}': {result.stderr}")
-                        result_raw = [TextContent(type="text", text=error_msg)]
+                        result_raw = error_msg
 
                 except subprocess.TimeoutExpired:
                     timeout_msg = f"⏰ Pip install timed out after 5 minutes for package: {package}"
                     logger.error(f"📦 Pip install timeout for package '{package}'")
-                    result_raw = [TextContent(type="text", text=timeout_msg)]
+                    result_raw = timeout_msg
                 except Exception as e:
                     error_msg = f"💥 Error during pip install for package '{package}': {str(e)}"
                     logger.error(f"📦 Pip install error for package '{package}': {str(e)}")
-                    result_raw = [TextContent(type="text", text=error_msg)]
+                    result_raw = error_msg
 
             elif actual_function_name == "_public_click":
                 # Handle click events by invoking stored callbacks as dynamic functions
@@ -2624,8 +2637,7 @@ class DynamicAdditionServer(Server):
                             delattr(atlantis, wrapper_name)
                 else:
                     logger.info(f"🖱️ No callback found for key '{key}'")
-                    click_msg = f"🖱️ Click received for key '{key}' but no callback registered"
-                    result_raw = [TextContent(type="text", text=click_msg)]
+                    result_raw = f"🖱️ Click received for key '{key}' but no callback registered"
 
             elif actual_function_name == "_public_upload":
                 # Handle uploads by invoking stored callbacks as dynamic functions
@@ -2677,8 +2689,7 @@ class DynamicAdditionServer(Server):
                             delattr(atlantis, wrapper_name)
                 else:
                     logger.info(f"🖱️ No callback found for key '{key}'")
-                    upload_msg = f"🖱️ Upload received for key '{key}' but no callback registered"
-                    result_raw = [TextContent(type="text", text=upload_msg)]
+                    result_raw = f"🖱️ Upload received for key '{key}' but no callback registered"
 
             elif actual_function_name == "_admin_app_create":
                 # Create a new app directory with main.py containing empty index() function
@@ -2727,7 +2738,7 @@ async def index():
                     await self._notify_tool_list_changed(change_type="added", tool_name=function_name)
                 except Exception as e:
                     logger.error(f"Error sending tool notification after adding {function_name}: {str(e)}")
-                result_raw = [TextContent(type="text", text=f"✅ Successfully created app '{app_name}' with main.py containing {function_name}() function")]
+                result_raw = f"✅ Successfully created app '{app_name}' with main.py containing {function_name}() function"
 
             elif actual_function_name == "_admin_git_update":
                 # Update server code by running git fetch and git merge
@@ -2748,7 +2759,7 @@ async def index():
                     if fetch_result.returncode != 0:
                         error_msg = f"❌ Git fetch failed: {fetch_result.stderr.strip()}"
                         logger.error(f"🔄 Git fetch error: {error_msg}")
-                        result_raw = [TextContent(type="text", text=error_msg)]
+                        result_raw = error_msg
                     else:
                         # Run git merge
                         merge_result = subprocess.run(
@@ -2761,26 +2772,22 @@ async def index():
                         if merge_result.returncode != 0:
                             error_msg = f"❌ Git merge failed: {merge_result.stderr.strip()}"
                             logger.error(f"🔄 Git merge error: {error_msg}")
-                            result_raw = [TextContent(type="text", text=error_msg)]
+                            result_raw = error_msg
                         else:
                             success_msg = f"✅ Successfully updated from {remote}/{branch}"
                             if merge_result.stdout.strip():
                                 success_msg += f"\n{merge_result.stdout.strip()}"
                             logger.info(f"🔄 Git update successful: {success_msg}")
-                            result_raw = [TextContent(type="text", text=success_msg)]
+                            result_raw = success_msg
 
                 except Exception as e:
                     error_msg = f"❌ Git update failed with exception: {str(e)}"
                     logger.error(f"🔄 Git update exception: {error_msg}")
-                    result_raw = [TextContent(type="text", text=error_msg)]
+                    result_raw = error_msg
 
             elif actual_function_name.startswith('_function') or actual_function_name.startswith('_server') or actual_function_name.startswith('_admin') or actual_function_name.startswith('_public'):
                 # Catch-all for invalid internal functions (only _function*, _server*, _admin*, and _public* are internal)
-                error_message = f"Invalid internal function: '{actual_function_name}'. Check available internal functions."
-                error_annotations = {
-                    "tool_error": {"tool_name": actual_function_name, "message": error_message}
-                }
-                result_raw = [TextContent(type="text", text=error_message, annotations=error_annotations)]
+                result_raw = f"Invalid internal function: '{actual_function_name}'. Check available internal functions."
 
             # Handle MCP tool calls (check actual_function_name after asterisk parsing to avoid false positives from dots in app names)
             elif '.' in actual_function_name or ' ' in actual_function_name:
@@ -2833,21 +2840,31 @@ async def index():
                     logger.info(f"✅ PROXY response received from '{server_alias}'")
                     logger.debug(f"Raw Proxy Response: {proxy_response}") # proxy_response is CallToolResult
 
-                    # Directly use the content from the proxied result if it's a list.
-                    # The isError flag from proxy_response is implicitly handled by the caller
-                    # receiving our server's CallToolResult (which we don't explicitly build here,
-                    # the framework does it based on the returned content list and exceptions).
-                    if proxy_response.content and isinstance(proxy_response.content, list):
-                         final_result = proxy_response.content
-                         logger.debug(f"Using content list directly from proxied response: {final_result}")
-                         logger.debug(f"<--- _execute_tool RETURNING proxied result directly.")
-                         return final_result
+                    # Extract value from proxied result - prefer structuredContent if available
+                    proxy_value = None
+                    if hasattr(proxy_response, 'structuredContent') and proxy_response.structuredContent is not None:
+                        proxy_value = proxy_response.structuredContent
+                        logger.debug(f"Using structuredContent from proxied response")
+                    elif proxy_response.content and isinstance(proxy_response.content, list):
+                        # Fall back to extracting text from content
+                        if len(proxy_response.content) == 1 and hasattr(proxy_response.content[0], 'text'):
+                            # Try to parse as JSON
+                            try:
+                                proxy_value = json.loads(proxy_response.content[0].text)
+                            except (json.JSONDecodeError, TypeError):
+                                proxy_value = proxy_response.content[0].text
+                        else:
+                            # Multiple content items - return as list of texts
+                            proxy_value = [getattr(c, 'text', str(c)) for c in proxy_response.content]
+                        logger.debug(f"Extracted value from proxied content: {type(proxy_value)}")
                     else:
-                        # Fallback: If content is missing or not a list - THIS is an error in proxy process.
-                        error_message = f"Proxied server '{server_alias}' returned unexpected content format (expected list): {proxy_response.content}"
+                        error_message = f"Proxied server '{server_alias}' returned unexpected content format: {proxy_response.content}"
                         logger.error(error_message)
-                        # Raise an exception, which the framework will turn into an error response
                         raise ValueError(error_message)
+
+                    is_error = getattr(proxy_response, 'isError', False)
+                    logger.debug(f"<--- _execute_tool RETURNING proxied result as ToolResult.")
+                    return ToolResult(value=proxy_value, is_error=is_error)
 
                 except McpError as mcp_err:
                     logger.error(f"❌ MCPError proxying tool call '{name}' to '{server_alias}': {mcp_err}", exc_info=True)
@@ -2901,74 +2918,10 @@ async def index():
                 logger.error(f"❓ Unknown or unhandled tool name: {name}")
                 raise ValueError(f"Unknown or unhandled tool name: {name}")
 
-            # ---> ADDED: Process raw result into final_result format (List[TextContent]) with June 2025 MCP spec support
-            if isinstance(result_raw, str):
-                final_result = [TextContent(type="text", text=result_raw)]
-            elif isinstance(result_raw, dict):
-                # Support new June 2025 MCP spec: provide both serialized JSON and structuredContent
-                logger.debug(f"<--- Creating structured content result for tool '{name}' (June 2025 MCP spec).")
-                try:
-                    # Use plain JSON for the text field (actual data sent to cloud)
-                    json_string = json.dumps(result_raw, indent=2)
-                    # Create TextContent with both text and structured content for backwards compatibility
-                    annotations = {
-                        "sourceType": "json",
-                        "structuredContent": result_raw  # New June 2025 spec feature
-                    }
-                    result_content = [TextContent(type="text", text=json_string, annotations=annotations)]
-                except TypeError as e:
-                    logger.error(f"Error serializing dictionary result to JSON for tool '{name}': {e}")
-                    result_content = [TextContent(type="error", text=f"Error serializing result: {e}")]
-                final_result = result_content
-            elif isinstance(result_raw, list) and all(isinstance(item, TextContent) for item in result_raw):
-                final_result = result_raw
-            elif result_raw is None:
-                final_result = [] # Assign a default empty list
-            else:
-                # Convert any other result to string with structured content support
-                try:
-                    # Try to serialize as JSON first for structured content
-                    # Check if result_raw is a list of dicts (like history entries)
-                    if isinstance(result_raw, list) and result_raw and all(isinstance(item, dict) for item in result_raw):
-                        # Pretty format list of dicts
-                        result_str = json.dumps(result_raw, indent=2, default=str)
-                    elif isinstance(result_raw, dict):
-                        # Pretty format dict
-                        result_str = json.dumps(result_raw, indent=2, default=str)
-                    else:
-                        # Use standard compact formatting for other types
-                        result_str = json.dumps(result_raw)
-                    annotations = {
-                        "sourceType": "json",
-                        "structuredContent": result_raw  # New June 2025 spec feature
-                    }
-                    final_result = [TextContent(type="text", text=result_str, annotations=annotations)]
-                except TypeError:
-                    result_str = str(result_raw) # Fallback to plain string conversion
-                    logger.warning(f"⚠️ Tool '{name}' returned non-standard type {type(result_raw)}. Converting to string: {result_str}")
-                    final_result = [TextContent(type="text", text=result_str)]
-
-            # ---> ADDED: Log final result before returning with prominent banner
-            # Extract the result text/value for clear logging
-            result_display = None
-            if final_result and isinstance(final_result, list) and len(final_result) > 0:
-                first_item = final_result[0]
-                if isinstance(first_item, TextContent) and hasattr(first_item, 'text'):
-                    # Try to parse and colorize the JSON if it's valid JSON
-                    try:
-                        parsed_json = json.loads(first_item.text)
-                        result_display = format_json_log(parsed_json, colored=True)
-                    except (json.JSONDecodeError, TypeError):
-                        result_display = first_item.text
-                else:
-                    result_display = format_json_log(final_result, colored=True) if isinstance(final_result, (dict, list)) else repr(final_result)
-            else:
-                result_display = format_json_log(final_result, colored=True) if isinstance(final_result, (dict, list)) else repr(final_result)
-
-            # Prominent banner that stands out from all the debug noise
-            # Using bright cyan (96) for visibility
+            # Log result before returning
             CYAN = "\x1b[96m"
             RESET = "\x1b[0m"
+            result_display = format_json_log(result_raw, colored=True) if isinstance(result_raw, (dict, list)) else repr(result_raw)
             logger.info(f"")
             logger.info(f"{CYAN}{'='*60}{RESET}")
             logger.info(f"{CYAN}✅ TOOL RESULT: {name}{RESET}")
@@ -2979,13 +2932,7 @@ async def index():
             # --- Log successful tool call ---
             if should_log_call:
                 try:
-                    caller_identity = "unknown_caller"
-                    if user:
-                        caller_identity = user
-                    elif client_id:
-                        caller_identity = f"client:{client_id}"
-
-                    # Calculate elapsed time in milliseconds
+                    caller_identity = user if user else (f"client:{client_id}" if client_id else "unknown_caller")
                     call_end_datetime = datetime.datetime.now(datetime.timezone.utc)
                     elapsed_ms = round((call_end_datetime - call_start_datetime).total_seconds() * 1000, 2)
 
@@ -3005,7 +2952,7 @@ async def index():
                 except Exception as log_e:
                     logger.error(f"Failed to write success log to {TOOL_CALL_LOG_PATH}: {log_e}")
 
-            return final_result
+            return ToolResult(value=result_raw)
 
         except Exception as e:
             # Error already logged with full context at source, just continue with error logging to file
@@ -3198,7 +3145,7 @@ async def index():
 
         try:
             # Execute the tool (cloud connections only reach here)
-            result_list = await self._execute_tool(
+            tool_result: ToolResult = await self._execute_tool(
                 name=tool_name,
                 args=tool_args,
                 client_id=client_id,
@@ -3209,68 +3156,11 @@ async def index():
                 shell_path=shell_path
             )
 
-            logger.info(f"🎯 Tool '{tool_name}' execution completed with {len(result_list)} content items")
+            logger.info(f"🎯 Tool '{tool_name}' execution completed")
 
-            # Format response based on client type
-            if for_cloud:
-                # Cloud client expects "contents" format
-                try:
-                    contents_list = []
-                    for content in result_list:
-                        try:
-                            if hasattr(content, 'model_dump'):
-                                content_data = content.model_dump()
-                                contents_list.append(content_data)
-                            else:
-                                # Handle non-pydantic objects
-                                logger.warning(f"⚠️ Non-pydantic content object: {type(content)}")
-                                if hasattr(content, 'to_dict'):
-                                    contents_list.append(content.to_dict())
-                                else:
-                                    # Fallback for simple objects
-                                    contents_list.append({"type": "text", "text": str(content)})
-                        except Exception as e:
-                            logger.error(f"❌ Error serializing content result: {e}")
-                            # Add simple text content as fallback
-                            contents_list.append({"type": "text", "text": str(content)})
-
-                    return {
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "result": {"contents": contents_list}
-                    }
-
-                except Exception as e:
-                    logger.error(f"❌ Error constructing cloud response: {e}")
-                    return {
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "error": {"code": -32000, "message": "Internal server error during response formatting"}
-                    }
-            else:
-                # Standard MCP client expects direct content format
-                try:
-                    contents_list = []
-                    for item in result_list:
-                        if hasattr(item, 'model_dump'):
-                            contents_list.append(item.model_dump())
-                        else:
-                            logger.warning(f"⚠️ Non-pydantic result item: {type(item)}")
-                            contents_list.append({"type": "text", "text": str(item)})
-
-                    return {
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "result": {"content": contents_list}
-                    }
-
-                except Exception as e:
-                    logger.error(f"❌ Error constructing MCP response: {e}")
-                    return {
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "error": {"code": -32000, "message": "Internal server error during response formatting"}
-                    }
+            # Format MCP response - THE ONE PLACE for all formatting
+            # Per MCP spec 2025-11-25: result has content (array) and optionally structuredContent
+            return self._format_mcp_response(tool_result, request_id, for_cloud)
 
         except Exception as e:
             logger.error(f"❌ Error executing tool '{tool_name}': {str(e)}")
@@ -3281,6 +3171,74 @@ async def index():
             }
             logger.debug(f"📤 Returning error response:\n{format_json_log(error_response)}")
             return error_response
+
+    def _format_mcp_response(self, result: ToolResult, request_id: str, for_cloud: bool = False) -> dict:
+        """Build MCP-compliant response with content + structuredContent.
+
+        Per MCP spec 2025-11-25, tool results should include:
+        - content: List of content items (TextContent, etc.) for backwards compatibility
+        - structuredContent: Raw JSON data (dict/list) at top level (optional)
+        - isError: Boolean flag for tool execution errors
+
+        This is THE ONE PLACE where all MCP response formatting happens.
+        """
+        value = result.value
+        is_error = result.is_error
+
+        # Build content array and determine structuredContent
+        # Use a sentinel to distinguish "no structuredContent" from "structuredContent is null"
+        _NO_STRUCTURED = object()
+        content_list = []
+        structured_content = _NO_STRUCTURED
+
+        if is_error:
+            # Error case - just text content, no structuredContent
+            error_text = result.error_message or str(value) or "Unknown error"
+            content_list = [{"type": "text", "text": error_text}]
+        elif isinstance(value, str):
+            # String value - text content + structuredContent to preserve type
+            content_list = [{"type": "text", "text": value}]
+            structured_content = value
+        elif isinstance(value, (dict, list)):
+            # Structured value - serialize to JSON for content, include as structuredContent
+            try:
+                json_string = json.dumps(value, indent=2, default=str)
+                content_list = [{"type": "text", "text": json_string}]
+                structured_content = value
+            except TypeError as e:
+                logger.error(f"Error serializing result to JSON: {e}")
+                content_list = [{"type": "text", "text": str(value)}]
+        elif value is None:
+            # Null value - include as structuredContent to preserve null type
+            content_list = [{"type": "text", "text": "null"}]
+            structured_content = None
+        else:
+            # Other types (int, float, bool) - include as structuredContent to preserve type
+            content_list = [{"type": "text", "text": str(value)}]
+            structured_content = value
+
+        # Build the result object
+        if for_cloud:
+            # Cloud client expects "contents" key (plural)
+            mcp_result = {"contents": content_list}
+        else:
+            # Standard MCP client expects "content" key (singular)
+            mcp_result = {"content": content_list}
+
+        # Add structuredContent for all non-error cases (per MCP spec 2025-11-25)
+        # This preserves the actual type (int, float, bool, null) instead of stringifying
+        if structured_content is not _NO_STRUCTURED:
+            mcp_result["structuredContent"] = structured_content
+
+        # Add isError flag if this was an error
+        if is_error:
+            mcp_result["isError"] = True
+
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": mcp_result
+        }
 
     async def _notify_tool_list_changed(self, change_type: str, tool_name: str):
         """Send a 'notifications/tools/list_changed' notification with details to all connected clients."""

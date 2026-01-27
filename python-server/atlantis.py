@@ -109,7 +109,7 @@ async def get_and_increment_stream_seq_num(stream_id: str) -> int:
         The current sequence number for this stream before incrementing
     """
     if stream_id not in _stream_seq_counters:
-        _stream_seq_counters[stream_id] = 0
+        _stream_seq_counters[stream_id] = 1
 
     current_seq = _stream_seq_counters[stream_id]
     _stream_seq_counters[stream_id] += 1
@@ -142,7 +142,7 @@ async def get_and_increment_seq_num(context_name: str = "operation") -> int:
     counter_key = (request_id, shell_path)
 
     if counter_key not in _request_seq_counters:
-        _request_seq_counters[counter_key] = 0
+        _request_seq_counters[counter_key] = 1
 
     current_seq = _request_seq_counters[counter_key]
     _request_seq_counters[counter_key] += 1
