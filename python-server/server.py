@@ -68,14 +68,33 @@ from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from mcp.shared.exceptions import McpError # <--- ADD THIS IMPORT
 
-# Custom ToolAnnotations class that allows extra fields
+# ╔════════════════════════════════════════════════════════════════════════════╗
+# ║  ⚠️⚠️⚠️  WARNING: DO NOT ADD EXPLICIT FIELDS TO THIS CLASS  ⚠️⚠️⚠️           ║
+# ║                                                                            ║
+# ║  This class uses extra='allow' to dynamically accept ANY kwargs like:      ║
+# ║    - decorators, validationStatus, runningStatus, sourceFile, app, etc.    ║
+# ║                                                                            ║
+# ║  Adding explicit field definitions (e.g. `decorators: Optional[list] = None`) ║
+# ║  WILL BREAK serialization and cause decorators/@game/@chat to stop working ║
+# ║  when sending tools to the cloud!                                          ║
+# ║                                                                            ║
+# ║  Pydantic's model_dump() behaves differently for explicit fields vs extra  ║
+# ║  fields. Just leave this class alone - extra='allow' handles everything.   ║
+# ╚════════════════════════════════════════════════════════════════════════════╝
 class ToolAnnotations(McpToolAnnotations):
-    """Custom ToolAnnotations that allows extra fields to avoid Pydantic warnings."""
+    """Custom ToolAnnotations that allows extra fields to avoid Pydantic warnings.
+
+    ⛔ DO NOT ADD EXPLICIT FIELD DEFINITIONS TO THIS CLASS! ⛔
+
+    This class MUST only use extra='allow' to handle custom attributes dynamically.
+    Adding explicit fields like `decorators: Optional[list[str]] = None` will break
+    serialization and cause decorators (@game, @chat, etc.) to not be sent to the cloud.
+
+    Custom attributes (decorators, validationStatus, runningStatus, sourceFile, app,
+    location, etc.) are passed as kwargs and stored via Pydantic's extra='allow' mechanism.
+    """
     model_config = ConfigDict(extra='allow')
-    # Custom fields used by Atlantis
-    decorators: Optional[list[str]] = None
-    validationStatus: Optional[str] = None
-    runningStatus: Optional[str] = None
+    # ⛔ NO FIELDS HERE - SERIOUSLY, DON'T DO IT ⛔
 
 
 @dataclass
