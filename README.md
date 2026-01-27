@@ -5,7 +5,9 @@ Meow! Ideally, you may want to create an account first at www.projectatlantis.ai
 
 Basically we have a distributed linux-style system that provides tool infra for bots. Tools are arranged in folders for easy management across functions and teams. Teams can call each other's functions directly or of course the bots can just do things themselves. Under the covers is an MCP-compliant system but we support hotloading etc. without some of the clunky overhead of constantly updating MCP tools.
 
-To get started, clone the repo, do the Python env stuff, set up your OPENROUTER API KEY (or whatever) in Home/chat.py and connect this local Python server to the main server (see runServer). We give you all the source code to build your own tool-calling chatbot just like Claude or whatever
+To get started, clone the repo, do the Python env stuff, set up your OPENROUTER API KEY (or whatever) in Home/kitty.py and connect this local Python server to the main server (see runServer). We give you all the source code to build your own tool-calling chatbot just like Claude or whatever
+
+*note that Home/game.py is run whenenver a new chat is created and will set the default chat tool to Home/kitty.py
 
 
 ## Project Atlantis Network
@@ -137,8 +139,8 @@ Dynamic functions are organized into apps using **folder structure**. Simply pla
 
 ```
 dynamic_functions/
-├── Home/                    # App: "Chat"
-│   └── chat.py
+├── Home/                    # App: "Home"
+│   └── kitty.py
 ├── Accounting/              # App: "Accounting"
 │   ├── accounting.py
 │   └── foo.py
@@ -146,7 +148,7 @@ dynamic_functions/
     └── qwen_image_edit_local.py
 ```
 
-**The folder name IS the app name.** Functions in `Home/chat.py` are automatically assigned to the "Chat" app.
+**The folder name IS the app name.** Functions in `Home` folder are assigned accordingly
 
 #### Nested Apps (Subfolders)
 

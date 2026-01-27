@@ -22,7 +22,7 @@ Create Python functions that become MCP tools automatically. Put `.py` files in 
 
 ```
 dynamic_functions/
-├── chat.py              # Single function
+├── chat.py              # Single function (or kitty.py)
 ├── math_operations.py   # Multiple functions
 ├── user_management.py   # Related functions grouped
 └── OLD/                 # Automatic backups
