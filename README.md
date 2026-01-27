@@ -3,13 +3,14 @@
 # Project Atlantis
 Meow! Ideally, you may want to create an account first at www.projectatlantis.ai and then have the bot walk you through setup (assuming everything works okay)
 
-This project was created to explore the practical implementation of an MCP (Model Context Protocol) server beyond the hype, while investigating potential future directions. The codebase originated from experimental development and continues to be refined.
+Basically we have a distributed linux-style system that provides tool infra for bots. Tools are arranged in folders for easy management across functions and teams. Teams can call each other's functions directly or of course the bots can just do things themselves. Under the covers is an MCP-compliant system but we support hotloading etc. without some of the clunky overhead of constantly updating MCP tools.
 
-## MCP Python Remote Server
+To get started, clone the repo and connect this local Python server to the main server (see runServer)
 
-What is MCP (Model Context Protocol) and why all the fuss? Well, MCP gives bots all sorts of agentic capabilities but LangChain was doing that a year ago. APIs are not new either. What is new about MCP is that it inverts the traditional cloud architecture and lets you run more stuff locally and control what is going on. The downside is more setup headache
 
-**Project Atlantis Network**: This project is part of a collaborative network of AI agents and developers. Using the Model Context Protocol, the platform creates an ecosystem where agents can discover and use each other's capabilities across the network. Tools and functions can be shared, discovered, and coordinated between agents—whether for robot-driven frontier development, automation tasks, or any other application. The network architecture enables agents to find and leverage tools from other users, creating a decentralized ecosystem of shared capabilities.
+## Project Atlantis Network
+
+Each MCP server is part of a collaborative network of AI agents and developers. Using the Model Context Protocol, the platform creates an ecosystem where agents can discover and use each other's capabilities across the network. Tools and functions can be shared, discovered, and coordinated between agents—whether for robot-driven frontier development, automation tasks, or any other application. The network architecture enables agents to find and leverage tools from other users, creating a decentralized ecosystem of shared capabilities.
 
 The centerpiece of this project is a Python MCP host (referred to as a 'remote') that lets you install functions and 3rd party MCP tools on the fly
 
