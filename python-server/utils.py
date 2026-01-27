@@ -75,11 +75,11 @@ def get_server_instance():
 async def client_log(
     message: Any,
     level: str = "info",
-    logger_name: str = None,
-    request_id: str = None,
-    client_id_for_routing: str = None,
-    seq_num: int = None,
-    entry_point_name: str = None,
+    logger_name: Optional[str] = None,
+    request_id: Optional[str] = None,
+    client_id_for_routing: Optional[str] = None,
+    seq_num: Optional[int] = None,
+    entry_point_name: Optional[str] = None,
     message_type: str = "text",
     stream_id: Optional[str] = None,
     is_private: bool = True

@@ -289,6 +289,7 @@ class DynamicFunctionManager:
         # Determine target directory based on app
         if app:
             app_path = self._app_name_to_path(app)
+            assert app_path is not None  # app is truthy so path won't be None
             target_dir = os.path.join(self.functions_dir, app_path)
             location_display = f"{app_path}/main.py"
         else:
@@ -418,7 +419,7 @@ class DynamicFunctionManager:
         Designed to be resilient to minor syntax errors. Returns {'name': ..., 'description': ...}.
         Values can be None if not found.
         """
-        metadata = {'name': None, 'description': None}
+        metadata: Dict[str, Optional[str]] = {'name': None, 'description': None}
         if not code_buffer or not isinstance(code_buffer, str):
             return metadata
 
@@ -1626,7 +1627,7 @@ async def {name}():
 
             return self._function_queues[function_key]
 
-    async def function_call(self, name: str, client_id: str, request_id: str, user: str = None, **kwargs) -> Any:
+    async def function_call(self, name: str, client_id: str, request_id: str, user: Optional[str] = None, **kwargs) -> Any:
         """
         Public API for calling a dynamic function.
         Directly executes the function (bypassing queue for now).
@@ -1635,7 +1636,7 @@ async def {name}():
         """
         return await self._execute_function(name, client_id, request_id, user, **kwargs)
 
-    async def function_call_queued(self, name: str, client_id: str, request_id: str, user: str = None, **kwargs) -> Any:
+    async def function_call_queued(self, name: str, client_id: str, request_id: str, user: Optional[str] = None, **kwargs) -> Any:
         """
         Queued version of function_call. Automatically queues the call
         so that each function's invocations run sequentially (one at a time).
@@ -1679,7 +1680,7 @@ async def {name}():
         logger.debug(f"Received result from queue processor for {function_key} - request_id: {request_id}, type: {type(result)}")
         return result
 
-    async def _execute_function(self, name: str, client_id: str, request_id: str, user: str = None, **kwargs) -> Any:
+    async def _execute_function(self, name: str, client_id: str, request_id: str, user: Optional[str] = None, **kwargs) -> Any:
         """
         Internal method that actually executes a dynamic function.
         This is called by the queue processor to run functions sequentially.
@@ -1715,8 +1716,7 @@ async def {name}():
                         entry_point_name=actual_function_name,
                         message_type=message_type,
                         message=message,
-                        level=level,
-                        caller_name=actual_function_name
+                        level=level
                     ),
                     request_id=request_id,
                     client_id=client_id,
@@ -2018,14 +2018,14 @@ async def {name}():
             # Return the detailed error message
             return {'valid': False, 'error': error_message, 'function_info': None}
 
-    async def function_set(self, args: Dict[str, Any], server: Any) -> Tuple[Optional[str], List[TextContent]]:
+    async def function_set(self, args: Dict[str, Any], server: Any) -> Tuple[Optional[str], Any]:
         """
         Handles the _function_set tool call.
         Updates an EXISTING function's file with complete code.
         The function must already exist in the mapping.
         Extracts all function names using AST parsing, uses the first one to find the file.
         Supports optional app parameter for app-specific function targeting.
-        Returns the function name (if successful) and a status message.
+        Returns the function name (if successful) and a status message (string or dict).
         Does *not* perform full syntax validation before saving.
         """
         logger.info("⚙️ Handling _function_set call (using AST parsing for all functions)")
@@ -2034,8 +2034,8 @@ async def {name}():
 
         if not code_buffer or not isinstance(code_buffer, str):
             logger.warning("⚠️ function_set: Missing or invalid 'code' parameter.")
-            # Return None for name, and the error message
-            return None, [TextContent(type="text", text="Error: Missing or invalid 'code' parameter.")]
+            # Return None for name, and the error message (plain string, MCP formatting in _format_mcp_response)
+            return None, "Error: Missing or invalid 'code' parameter."
 
         # 1. Extract ALL function names using AST parsing
         is_valid, error_message, functions_info = self._code_validate_syntax(code_buffer)
@@ -2043,12 +2043,12 @@ async def {name}():
         if not is_valid:
             error_response = f"Error: Could not parse function code: {error_message}"
             logger.warning(f"⚠️ function_set: Failed to parse code via AST.")
-            return None, [TextContent(type="text", text=error_response)]
+            return None, error_response
 
         if not functions_info:
             error_response = "Error: Could not extract any function names from the provided code. Ensure it contains at least one function definition."
             logger.warning(f"⚠️ function_set: No functions found in code.")
-            return None, [TextContent(type="text", text=error_response)]
+            return None, error_response
 
         # Extract function names
         function_names = [func_info['name'] for func_info in functions_info]
@@ -2069,7 +2069,7 @@ async def {name}():
         if not existing_file or not matched_func_name:
             error_response = f"Cannot update functions - none of the functions ({', '.join(function_names)}) found in mapping. Use function_add to create new functions."
             logger.error(f"❌ function_set: {error_response}")
-            return None, [TextContent(type="text", text=error_response)]
+            return None, error_response
 
         logger.info(f"⚙️ Updating existing file: {existing_file}")
 
@@ -2080,7 +2080,7 @@ async def {name}():
             error_response = f"Error saving functions to file '{existing_file}'."
             logger.error(f"❌ function_set: {error_response}")
             # Return matched function name, but with error message
-            return matched_func_name, [TextContent(type="text", text=error_response)]
+            return matched_func_name, error_response
 
         logger.info(f"💾 Functions saved successfully to {saved_path}")
 
@@ -2108,30 +2108,27 @@ async def {name}():
         # Calculate relative path for display
         rel_path = os.path.relpath(saved_path, self.functions_dir)
 
-        annotations = None # Default to no annotations
         if syntax_error:
-            # If validation failed, add structured error to annotations
-            #validation_status = f"WARNING: Validation failed."
-            response_message = f"Function saved to {rel_path}" # Keep text informative
-            annotations = {
+            # If validation failed, return dict with message and validation info
+            response_message = f"Function saved to {rel_path}"
+            logger.warning(f"⚠️ {response_message}")
+            return matched_func_name, {
+                "message": response_message,
                 "validationStatus": "ERROR",
                 "validationMessage": syntax_error
             }
-            logger.warning(f"⚠️ {response_message}")
         else:
-            # If validation succeeded
+            # If validation succeeded, return plain string
             response_message = f"Function saved to {rel_path}"
             logger.info(f"✅ {response_message}")
-
-        # Return TextContent with text and potentially annotations
-        return matched_func_name, [TextContent(type="text", text=response_message, annotations=annotations)]
+            return matched_func_name, response_message
 
     # Function to get code for a dynamic function
-    async def get_function_code(self, args, mcp_server) -> list[TextContent]:
+    async def get_function_code(self, args, mcp_server) -> str:
         """
         Get the source code for a dynamic function by name using function-to-file mapping.
         Supports optional app parameter for app-specific function targeting.
-        Returns the code as a TextContent object.
+        Returns the code as a plain string (MCP formatting happens in _format_mcp_response).
         """
         # Get function name and optional app name
         name = args.get("name")
@@ -2150,6 +2147,6 @@ async def {name}():
         if not code:
             raise ValueError(f"Function '{name}' file is empty")
 
-        # Return the code as text content
-        return [TextContent(type="text", text=code)]
+        # Return the code as plain string
+        return code
 

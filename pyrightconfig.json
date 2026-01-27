@@ -18,7 +18,6 @@
 
   "reportMissingImports": "warning",
   "reportUndefinedVariable": "error",
-  "reportSyntaxErrors": "error",
 
   "reportOptionalMemberAccess": "none",
   "reportOptionalCall": "none",
@@ -27,13 +26,13 @@
   "reportOptionalContextManager": "none",
   "reportOptionalOperand": "none",
 
-  "reportGeneralTypeIssues": "none",
-  "reportArgumentType": "none",
+  "reportGeneralTypeIssues": "error",
+  "reportArgumentType": "error",
   "reportAttributeAccessIssue": "none",
-  "reportIndexIssue": "none",
-  "reportCallIssue": "none",
-  "reportReturnType": "none",
-  "reportAssignmentType": "none",
+  "reportIndexIssue": "warning",
+  "reportCallIssue": "error",
+  "reportReturnType": "error",
+  "reportAssignmentType": "error",
 
   "reportUnusedImport": "none",
   "reportUnusedVariable": "none",

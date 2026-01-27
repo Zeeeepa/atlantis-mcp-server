@@ -270,6 +270,8 @@ class DynamicServerManager:
         # Get the server config (for temporary connection or for starting the server)
         logger.debug(f"get_server_tools: Loading config for '{name}'")
         config_txt = await self.server_get(name)
+        if not config_txt:
+            raise ValueError(f"No config found for server '{name}'")
 
         # convert config txt to json and store in full_config
         full_config: Dict[str, Any] = json.loads(config_txt)
@@ -366,13 +368,12 @@ class DynamicServerManager:
 
         return running_servers
 
-    async def server_set(self, name: str, content: str) -> List[TextContent]:
+    async def server_set(self, name: str, content: str) -> str:
         # Save the content directly without any validation or processing
         result = await self._fs_save_server(name, content)
 
-        # Simple success message - only return the TextContent list
-        success_msg = f"Server '{name}' configuration saved."
-        return [TextContent(type="text", text=success_msg)]
+        # Simple success message - return plain string (MCP formatting happens in _format_mcp_response)
+        return f"Server '{name}' configuration saved."
 
     async def server_validate(self, name: str) -> Dict[str, Any]:
         config_txt = await self.server_get(name)
@@ -719,7 +720,7 @@ class DynamicServerManager:
 
     # --- 4. Server Start/Stop Methods ---
 
-    async def server_start(self, args: Dict[str, Any], server) -> List[TextContent]:
+    async def server_start(self, args: Dict[str, Any], server) -> str:
         name = args.get('name')
         logger.info(f"▶️ server_start: Starting server '{name}'...")
         if not name or not isinstance(name, str):
@@ -729,6 +730,8 @@ class DynamicServerManager:
 
         # Load the config using server_get (as in self_test)
         config_txt = await self.server_get(name)
+        if not config_txt:
+            raise ValueError(f"No config found for server '{name}'")
 
         # convert config txt to json and store in full_config
         full_config: Dict[str, Any] = json.loads(config_txt)
@@ -803,10 +806,10 @@ class DynamicServerManager:
         logger.info(f"Starting MCP server '{name}'")
         logger.debug(f"▶️ server_start: Task info recorded for '{name}'. Start time will be added upon session init.")
 
-        # Return success
-        return [TextContent(type='text', text=f"Attempting to start MCP service '{name}'; please check status")]
+        # Return success - plain string (MCP formatting happens in _format_mcp_response)
+        return f"Attempting to start MCP service '{name}'; please check status"
 
-    async def server_stop(self, args: Dict[str, Any], server) -> List[TextContent]:
+    async def server_stop(self, args: Dict[str, Any], server) -> str:
         name = args.get('name')
         if not name or not isinstance(name, str):
             msg = "Missing or invalid parameter: 'name' must be str."
@@ -829,8 +832,8 @@ class DynamicServerManager:
 
         task = task_info['task']
         if task.done():
-            logger.info(f"🧹 Task for server '{name}' alrady stopped. Cleaning up entry.")
-            return [TextContent(type='text', text=f"MCP server '{name}' not running")]
+            logger.info(f"🧹 Task for server '{name}' already stopped. Cleaning up entry.")
+            return f"MCP server '{name}' not running"
         else:
             logger.info(f"Attempting to cancel task for server '{name}'...")
 
@@ -854,4 +857,4 @@ class DynamicServerManager:
                 logger.error(f"❓ Unexpected error while waiting for cancellation of '{name}': {e}")
 
 
-            return [TextContent(type='text', text=f"MCP server '{name}' stopped")]
+            return f"MCP server '{name}' stopped"

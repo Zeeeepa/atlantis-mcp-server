@@ -72,6 +72,10 @@ from mcp.shared.exceptions import McpError # <--- ADD THIS IMPORT
 class ToolAnnotations(McpToolAnnotations):
     """Custom ToolAnnotations that allows extra fields to avoid Pydantic warnings."""
     model_config = ConfigDict(extra='allow')
+    # Custom fields used by Atlantis
+    decorators: Optional[list[str]] = None
+    validationStatus: Optional[str] = None
+    runningStatus: Optional[str] = None
 
 
 @dataclass
@@ -329,7 +333,7 @@ class DynamicConfigEventHandler(FileSystemEventHandler):
         if not event.is_directory:
             self._trigger_reload(event.src_path)
         # Also trigger on directory deletion (removed app directories)
-        elif event.src_path.startswith(FUNCTIONS_DIR + os.sep):
+        elif str(event.src_path).startswith(FUNCTIONS_DIR + os.sep):
             logger.info(f"📁 Directory deleted: {event.src_path}. Triggering reload...")
             self._trigger_reload(event.src_path)
 
@@ -363,7 +367,7 @@ class DynamicAdditionServer(Server):
         self._last_functions_dir_mtime: float = 0.0 # Timestamp for cache invalidation
         self._last_servers_dir_mtime: float = 0.0 # Timestamp for dynamic servers cache invalidation
         self._last_active_server_keys: Optional[set] = None # Store active server keys for cache invalidation
-        self._server_configs: Dict[str, dict] = {} # Store server configurations
+        self._server_configs: Dict[str, Optional[str]] = {} # Store server configurations (JSON strings)
 
         # Track function visibility overrides (can show/hide any function)
         self._temporarily_visible_functions: set = set()
@@ -404,9 +408,9 @@ class DynamicAdditionServer(Server):
             This server uses custom WebSocket handlers that route through _handle_tools_call() instead.
             SDK handlers like this are for stdio transport, which this server doesn't use.
             """
-            # This should never be reached
-            logger.warning(f"⚠️ Unexpected call to SDK handler handle_call_tool for: {name}")
-            return await self._execute_tool(name=name, args=args)
+            # This should never be reached - raise error instead of returning wrong type
+            logger.error(f"❌ Unexpected call to SDK handler handle_call_tool for: {name}")
+            raise NotImplementedError("SDK call_tool handler is not used by this server - use WebSocket handlers instead")
 
     # Initialization for function discovery
     async def initialize(self, params={}):
@@ -436,7 +440,7 @@ class DynamicAdditionServer(Server):
 
     async def send_awaitable_client_command(self,
                                       client_id_for_routing: str,
-                                      request_id: str, # Original MCP request ID for client context
+                                      request_id: Optional[str], # Original MCP request ID for client context
                                       command: str, # The command string for the client
                                       command_data: Optional[Any] = None, # Optional data for the command
                                       seq_num: Optional[int] = None, # Sequence number for client-side ordering
@@ -1896,9 +1900,9 @@ class DynamicAdditionServer(Server):
     async def send_client_log(self,
                               level: str,
                               data: Any,
-                              logger_name: str = None,
-                              request_id: str = None,
-                              client_id: str = None,
+                              logger_name: Optional[str] = None,
+                              request_id: Optional[str] = None,
+                              client_id: Optional[str] = None,
                               seq_num: Optional[int] = None,
                               entry_point_name: Optional[str] = None,
                               message_type: str = "text", # Message content type
@@ -2011,7 +2015,7 @@ class DynamicAdditionServer(Server):
             logger.debug(f"Log notification error details: {traceback.format_exc()}")
             # We intentionally don't re-raise here
 
-    async def _execute_tool(self, name: str, args: dict, client_id: str = None, request_id: str = None, user: str = None, session_id: str = None, command_seq: int = None, shell_path: str = None) -> ToolResult:
+    async def _execute_tool(self, name: str, args: dict, client_id: Optional[str] = None, request_id: Optional[str] = None, user: Optional[str] = None, session_id: Optional[str] = None, command_seq: Optional[int] = None, shell_path: Optional[str] = None) -> ToolResult:
         """Core logic to handle a tool call. Returns ToolResult with raw value.
 
         MCP response formatting (content + structuredContent) happens in
@@ -3007,7 +3011,7 @@ async def index():
             # and construct a proper JSON-RPC error response.
             raise
 
-    async def _handle_tools_call(self, params: dict, client_id: str, request_id: str, for_cloud: bool = False) -> dict:
+    async def _handle_tools_call(self, params: dict, client_id: str, request_id: Optional[str], for_cloud: bool = False) -> dict:
         """Consolidated tools/call handler that works for both cloud and standard MCP clients"""
 
         # Extract required parameters
@@ -3172,7 +3176,7 @@ async def index():
             logger.debug(f"📤 Returning error response:\n{format_json_log(error_response)}")
             return error_response
 
-    def _format_mcp_response(self, result: ToolResult, request_id: str, for_cloud: bool = False) -> dict:
+    def _format_mcp_response(self, result: ToolResult, request_id: Optional[str], for_cloud: bool = False) -> dict:
         """Build MCP-compliant response with content + structuredContent.
 
         Per MCP spec 2025-11-25, tool results should include:
@@ -3184,6 +3188,19 @@ async def index():
         """
         value = result.value
         is_error = result.is_error
+
+        # Unwrap TextContent objects that leaked through from upstream functions
+        # This is a safety net - ideally upstream should return plain strings/dicts
+        if isinstance(value, TextContent):
+            logger.warning(f"⚠️ _format_mcp_response: Unwrapping single TextContent (upstream should return plain string)")
+            value = value.text
+        elif isinstance(value, list) and len(value) > 0 and isinstance(value[0], TextContent):
+            logger.warning(f"⚠️ _format_mcp_response: Unwrapping List[TextContent] (upstream should return plain string)")
+            # If single item, just extract the text; otherwise join them
+            if len(value) == 1:
+                value = value[0].text
+            else:
+                value = "\n".join(item.text for item in value if hasattr(item, 'text'))
 
         # Build content array and determine structuredContent
         # Use a sentinel to distinguish "no structuredContent" from "structuredContent is null"
@@ -3218,12 +3235,13 @@ async def index():
             structured_content = value
 
         # Build the result object
+        mcp_result: Dict[str, Any] = {}
         if for_cloud:
             # Cloud client expects "contents" key (plural)
-            mcp_result = {"contents": content_list}
+            mcp_result["contents"] = content_list
         else:
             # Standard MCP client expects "content" key (singular)
-            mcp_result = {"content": content_list}
+            mcp_result["content"] = content_list
 
         # Add structuredContent for all non-error cases (per MCP spec 2025-11-25)
         # This preserves the actual type (int, float, bool, null) instead of stringifying
@@ -3454,7 +3472,7 @@ class ServiceClient:
 
     Manages the Socket.IO connection to the cloud server's service namespace.
     """
-    def __init__(self, appName:str, server_url: str, namespace: str, email: str, api_key: str, serviceName: str, mcp_server: Server, port: int):
+    def __init__(self, appName:str, server_url: str, namespace: str, email: str, api_key: str, serviceName: str, mcp_server: 'DynamicAdditionServer', port: int):
         self.server_url = server_url
         self.namespace = namespace
         self.email = email
@@ -4311,7 +4329,8 @@ async def handle_websocket(websocket: WebSocket):
                             elif "error" in params:
                                 client_error_details = params["error"]
                                 logger.error(f"❌ Received error from client for awaitable command (correlationId: {correlation_id}): {client_error_details}")
-                                future.set_exception(McpError(f"Client error for command (correlationId: {correlation_id}): {client_error_details}"))
+                                error_data = ErrorData(code=INTERNAL_ERROR, message=f"Client error for command (correlationId: {correlation_id}): {client_error_details}")
+                                future.set_exception(McpError(error_data))
                             else:
                                 # treat as result
                                 future.set_result(None)
