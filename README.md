@@ -7,7 +7,7 @@ Basically we have a distributed linux-style system that provides tool infra for 
 
 To get started, clone the repo, do the Python env stuff, set up your OPENROUTER API KEY (or whatever) in Home/kitty.py and connect this local Python server to the main server (see runServer). We give you all the source code to build your own tool-calling chatbot just like Claude or whatever
 
-*note that Home/game.py is run whenenver a new chat is created and will set the default chat tool to Home/kitty.py
+*note that Home/game.py is run whenever a new chat is created and will set the default chat tool to Home/kitty.py
 
 
 ## Project Atlantis Network
@@ -148,7 +148,7 @@ dynamic_functions/
     └── qwen_image_edit_local.py
 ```
 
-**The folder name IS the app name.** Functions in `Home` folder are assigned accordingly
+**The folder name IS the app name.** Functions in `Home` folder are assigned accordingly.
 
 #### Nested Apps (Subfolders)
 
