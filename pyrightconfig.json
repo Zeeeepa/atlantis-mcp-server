@@ -9,7 +9,7 @@
     "**/.venv",
     "**/dynamic_functions/**"
   ],
-  "pythonVersion": "3.12",
+  "pythonVersion": "3.13",
   "pythonPlatform": "Darwin",
   "venvPath": "python-server",
   "venv": "venv",

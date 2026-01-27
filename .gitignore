@@ -53,8 +53,8 @@ python-server/dynamic_functions/.gitignore
 python-server/dynamic_servers/OLD/
 !python-server/dynamic_servers/weather.json
 python-server/runServerProd
-python-server/runServerFoo
-python-server/runServerBar
+python-server/runServerFoo*
+python-server/runServerBar*
 
 
 python-server2/
@@ -66,3 +66,5 @@ log/
 server.log
 
 python-server/set_OPENROUTER.bat
+
+runServer.log
