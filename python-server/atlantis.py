@@ -724,10 +724,6 @@ async def client_command(command: str, data: Any = None, message_type: str = "co
 
         logger.warning(f"🚨 About to call execute_client_command_awaitable...")
         logger.info(f"Atlantis: Sending awaitable command '{command}' for client {client_id}, request {request_id}, seq {current_seq_to_send}")
-        if isinstance(data, dict):
-            logger.info(f"Atlantis: Command data type: {type(data)}, data:\n{format_json_log(data)}")
-        else:
-            logger.info(f"Atlantis: Command data type: {type(data)}, data: {data}")
         # Call the dedicated utility function for awaitable commands
         logger.warning(f"🚨 Calling execute_client_command_awaitable with command='{command}'")
         result = await execute_client_command_awaitable(
