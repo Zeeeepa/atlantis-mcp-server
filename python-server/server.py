@@ -4060,7 +4060,9 @@ class ServiceClient:
                             # Last resort: parse content[0].text (stringified JSON)
                             elif isinstance(raw_result, dict) and "content" in raw_result:
                                 try:
+                                    logger.warning(f"⚠️ LAST RESORT BRANCH - raw_result:\n{format_json_log(raw_result)}")
                                     text_content = raw_result["content"][0]["text"]
+                                    logger.warning(f"⚠️ text_content type: {type(text_content)}, value: {text_content}")
                                     extracted_result = json.loads(text_content)
                                     #logger.info(f"☁️ Parsed content[0].text as JSON (fallback)")
                                 except (json.JSONDecodeError, KeyError, IndexError):
