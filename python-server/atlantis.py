@@ -739,12 +739,7 @@ async def client_command(command: str, data: Any = None, message_type: str = "co
             message_type=message_type,  # Pass message_type for the protocol
             is_private=is_private  # Pass is_private for broadcast control
         )
-        logger.warning(f"🚨 execute_client_command_awaitable RETURNED for command='{command}'")
-        if isinstance(result, (dict, list)):
-            logger.warning(f"🚨 Result type: {type(result)}, value:\n{format_json_log(result, colored=True)}")
-        else:
-            logger.warning(f"🚨 Result type: {type(result)}, value: {result}")
-        logger.info(f"Atlantis: Received result for awaitable command '{command}', type: {type(result)}")
+        logger.debug(f"Atlantis: Received result for awaitable command '{command}', type: {type(result)}")
 
         return result
     except Exception as e:

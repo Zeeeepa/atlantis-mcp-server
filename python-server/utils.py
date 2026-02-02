@@ -7,7 +7,7 @@ import asyncio
 import re
 import traceback
 from state import logger
-from typing import Any, Optional
+from typing import Any, Optional, TypedDict
 
 # ANSI escape codes for colors
 PINK = "\x1b[95m"  # Added Pink
@@ -58,6 +58,75 @@ def clean_filename(name: str) -> str:
             raise ValueError(f"Invalid function name '{name}': must be a valid Python identifier.")
 
     return name
+
+
+class ParsedSearchTerm(TypedDict):
+    """Parsed components of a compound search term."""
+    owner: Optional[str]        # Remote owner (e.g., "admin")
+    remote: Optional[str]       # Remote name (e.g., "admin")
+    app: str                    # App/folder name (e.g., "Home")
+    location: Optional[str]     # Location identifier
+    function: str               # Function name (e.g., "chat")
+    filename: str               # Derived filename (e.g., "Home/chat.py")
+
+
+def parse_search_term(search_term: str) -> ParsedSearchTerm:
+    """
+    Parse a compound search term into its components.
+
+    Format: "remote_owner*remote_name*app*location*function"
+
+    Examples:
+        "admin*admin*Home**chat" -> {owner: "admin", remote: "admin", app: "Home", location: None, function: "chat", filename: "Home/chat.py"}
+        "**Home**kitty" -> {owner: None, remote: None, app: "Home", location: None, function: "kitty", filename: "Home/kitty.py"}
+
+    Args:
+        search_term: The compound search term to parse
+
+    Returns:
+        ParsedSearchTerm with all components extracted
+
+    Raises:
+        ValueError: If search_term is empty, malformed, or missing required fields (app, function)
+    """
+    if not search_term:
+        raise ValueError("Search term cannot be empty")
+
+    if "*" not in search_term:
+        raise ValueError(f"Invalid search term '{search_term}': must be in compound format (owner*remote*app*location*function)")
+
+    parts = search_term.split("*")
+    if len(parts) < 5:
+        raise ValueError(f"Invalid search term '{search_term}': expected 5 parts (owner*remote*app*location*function), got {len(parts)}")
+
+    # Full format: remote_owner*remote_name*app*location*function
+    owner = parts[0] if parts[0] else None
+    remote = parts[1] if parts[1] else None
+    app = parts[2] if parts[2] else None
+    location = parts[3] if parts[3] else None
+    function = parts[4] if parts[4] else None
+
+    # Validate required fields
+    if not function:
+        raise ValueError(f"Invalid search term '{search_term}': function name is required (5th field)")
+
+    # App is optional - keep None for root-level functions (function lookup expects None)
+
+    # Derive filename from app + function
+    if app:
+        filename = f"{app}/{function}.py"
+    else:
+        filename = f"{function}.py"
+
+    return {
+        'owner': owner,
+        'remote': remote,
+        'app': app,
+        'location': location,
+        'function': function,
+        'filename': filename
+    }
+
 
 # Global server reference to be set at startup
 _server_instance = None
