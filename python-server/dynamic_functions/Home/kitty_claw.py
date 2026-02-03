@@ -481,8 +481,8 @@ You like to purr when happy or do 'kitty paws'.
         client = Anthropic(api_key=api_key)
 
         # Model options:
-        # model = "claude-opus-4-5-20251101"  # Most capable (Opus 4.5)
-        model = "claude-sonnet-4-20250514"  # Good balance
+        model = "claude-opus-4-5-20251101"  # Most capable (Opus 4.5)
+        # model = "claude-sonnet-4-20250514"  # Good balance
         # model = "claude-3-5-sonnet-20241022"  # Previous gen
         logger.info(f"Using model: {model}")
 
