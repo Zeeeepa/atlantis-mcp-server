@@ -3931,7 +3931,7 @@ class ServiceClient:
                 else:
                     pseudo_tools_data = data['pseudoTools']
                     if not pseudo_tools_data:
-                        logger.warning(f"⚠️ pseudoTools array is empty in welcome message - no local proxy tools will be exposed")
+                        logger.error(f"🚨 pseudoTools array is empty in welcome message - no local proxy tools will be exposed")
                     else:
                         parsed_tools = []
                         for t in pseudo_tools_data:
@@ -4478,12 +4478,16 @@ async def process_mcp_request(server, request, client_id=None):
             logger.info(f"🧰 Processing 'tools/list' request via helper for local WebSocket connection")
             # Local WebSocket connections only see pseudo tools (readme, command)
             pseudo_tools_list = get_pseudo_tools_for_response(server)
+            if not pseudo_tools_list:
+                logger.error(f"🚨🚨🚨 EMPTY TOOL LIST being returned for tools/list request (ID: {req_id})! "
+                             f"Cloud has not sent pseudoTools in welcome event. "
+                             f"The MCP client will see zero tools available.")
             response = {
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {"tools": pseudo_tools_list}
             }
-            logger.debug(f"📦 Prepared tools/list response (ID: {req_id}) with {len(pseudo_tools_list)} pseudo tools.")
+            logger.info(f"📦 Prepared tools/list response (ID: {req_id}) with {len(pseudo_tools_list)} pseudo tools.")
             return response
         elif method == "tools/list_all": # Handling for list_all in direct connections
             # get all tools including internal
