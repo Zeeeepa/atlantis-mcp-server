@@ -3925,30 +3925,35 @@ class ServiceClient:
                     raise RuntimeError("Cloud welcome message missing required 'genericRequestId' - cannot continue")
 
                 # Pull pseudo tools from welcome payload (dynamically defined by cloud)
-                pseudo_tools_data = data.get('pseudoTools', [])
-                if pseudo_tools_data:
-                    parsed_tools = []
-                    for t in pseudo_tools_data:
-                        try:
-                            parsed_tools.append(Tool(
-                                name=t['name'],
-                                description=t.get('description', ''),
-                                inputSchema=t.get('inputSchema', {"type": "object", "properties": {}}),
-                            ))
-                        except Exception as e:
-                            logger.error(f"❌ Failed to parse pseudo tool '{t.get('name', '?')}': {e}")
-                    self.mcp_server.pseudo_tools = parsed_tools
-                    logger.info(f"🧰 Received {len(parsed_tools)} pseudo tools from cloud: {[t.name for t in parsed_tools]}")
-                else:
-                    logger.error(f"🚨🚨🚨 CRITICAL: No pseudoTools in welcome message! Local proxy tools will use fallback defaults! 🚨🚨🚨")
+                if 'pseudoTools' not in data:
+                    logger.error(f"🚨🚨🚨 CRITICAL: No pseudoTools field in welcome message! Local proxy tools will not be available! 🚨🚨🚨")
                     logger.error(f"🚨 Welcome data received: {format_json_log(data)}")
+                else:
+                    pseudo_tools_data = data['pseudoTools']
+                    if not pseudo_tools_data:
+                        logger.warning(f"⚠️ pseudoTools array is empty in welcome message - no local proxy tools will be exposed")
+                    else:
+                        parsed_tools = []
+                        for t in pseudo_tools_data:
+                            try:
+                                parsed_tools.append(Tool(
+                                    name=t['name'],
+                                    description=t.get('description', ''),
+                                    inputSchema=t.get('inputSchema', {"type": "object", "properties": {}}),
+                                ))
+                            except Exception as e:
+                                logger.error(f"❌ Failed to parse pseudo tool '{t.get('name', '?')}': {e}")
+                        self.mcp_server.pseudo_tools = parsed_tools
+                        logger.info(f"🧰 Received {len(parsed_tools)} pseudo tools from cloud: {[t.name for t in parsed_tools]}")
             elif isinstance(data, list):
                 # Legacy format: array of usernames
+                logger.warning(f"⚠️ Welcome message using LEGACY format (array of usernames) - missing genericRequestId and pseudoTools!")
                 owner_usernames = data
                 atlantis._set_owner_usernames(owner_usernames)
                 atlantis._set_owner(owner_usernames[0] if owner_usernames else self.email)
             else:
                 # Legacy format: single string (email or username)
+                logger.warning(f"⚠️ Welcome message using LEGACY format (single string) - missing genericRequestId and pseudoTools!")
                 atlantis._set_owner(data)
                 atlantis._set_owner_usernames([data] if data else [])
 
