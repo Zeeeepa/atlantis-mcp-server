@@ -395,6 +395,9 @@ class DynamicAdditionServer(Server):
         # Store cloud client reference for tool reporting
         self.cloud_client: Optional['ServiceClient'] = None
 
+        # Pseudo tools for local MCP clients (populated dynamically from cloud welcome event)
+        self.pseudo_tools: List[Tool] = []
+
         # Initialize the dynamic function and server managers
         self.function_manager = DynamicFunctionManager(FUNCTIONS_DIR)
         self.server_manager = DynamicServerManager(SERVERS_DIR)
@@ -978,35 +981,38 @@ class DynamicAdditionServer(Server):
             has_cloud_connection = any(info.get("type") == "cloud" for info in client_connections.values())
 
             if has_cloud_connection:
-                # Scenario 3: Local client + cloud exists → return only proxy tools
-                logger.info("☁️ Local client request with cloud connection - returning only proxy tools (readme, command)")
-                return [
-                    Tool(
-                        name="readme",
-                        description="Get information about how to use Atlantis commands",
-                        inputSchema={"type": "object", "properties": {}},
-                        annotations=ToolAnnotations(title="readme")
-                    ),
-                    Tool(
-                        name="command",
-                        description="Execute an Atlantis command on the connected cloud",
-                        inputSchema={
-                            "type": "object",
-                            "properties": {
-                                "content": {
-                                    "type": "string",
-                                    "description": "The Atlantis command to execute"
-                                },
-                                "params": {
-                                    "type": "object",
-                                    "description": "Additional params for the Atlantis command as needed"
-                                }
-                            },
-                            "required": ["content"]
-                        },
-                        annotations=ToolAnnotations(title="command")
-                    )
-                ]
+                # Scenario 3: Local client + cloud exists → pseudo tools now come from cloud via welcome event
+                # (cloud already knows about these tools, no need to inject them here)
+                logger.info("☁️ Local client request with cloud connection - pseudo tools handled by cloud welcome event")
+                pass
+                # # OLD: hardcoded pseudo tools (now pulled dynamically from welcome event)
+                # return [
+                #     Tool(
+                #         name="readme",
+                #         description="Get information about how to use Atlantis commands",
+                #         inputSchema={"type": "object", "properties": {}},
+                #         annotations=ToolAnnotations(title="readme")
+                #     ),
+                #     Tool(
+                #         name="command",
+                #         description="Execute an Atlantis command on the connected cloud",
+                #         inputSchema={
+                #             "type": "object",
+                #             "properties": {
+                #                 "content": {
+                #                     "type": "string",
+                #                     "description": "The Atlantis command to execute"
+                #                 },
+                #                 "params": {
+                #                     "type": "object",
+                #                     "description": "Additional params for the Atlantis command as needed"
+                #                 }
+                #             },
+                #             "required": ["content"]
+                #         },
+                #         annotations=ToolAnnotations(title="command")
+                #     )
+                # ]
 
         # Scenarios 1 & 2: Return full local tool list
         # - Cloud requesting tools (for_local_client=False)
@@ -3413,34 +3419,40 @@ async def get_all_tools_for_response(server: 'DynamicAdditionServer', caller_con
     logger.debug(f"Helper: Prepared {len(tools_dict_list)} tool dictionaries.")
     return tools_dict_list
 
-def get_pseudo_tools_for_response() -> List[Dict[str, Any]]:
+def get_pseudo_tools_for_response(server: 'DynamicAdditionServer') -> List[Dict[str, Any]]:
     """
-    Returns pseudo tools for local WebSocket connections.
-    Local connections act as a routing layer and only see these two pseudo tools.
+    Returns pseudo tools for local WebSocket connections as serialized dicts.
+    Tool definitions are pulled dynamically from the cloud welcome event.
     """
-    logger.info(f"🏠 Returning pseudo tools for local WebSocket connection")
-    return [
-        {
-            "name": "readme",
-            "description": "Returns information about this MCP server",
-            "inputSchema": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        },
-        {
-            "name": "command",
-            "description": "Execute a command (placeholder - does nothing for now)",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "cmd": {"type": "string", "description": "The command to execute"}
-                },
-                "required": ["cmd"]
-            }
-        }
-    ]
+    # Use dynamically-loaded pseudo tools from cloud welcome event
+    if server.pseudo_tools:
+        logger.info(f"🏠 Returning {len(server.pseudo_tools)} pseudo tools from cloud welcome event")
+        return [t.model_dump(mode='json') for t in server.pseudo_tools]
+
+    # No pseudo tools received from cloud
+    logger.error(f"🚨 No pseudo tools available - cloud has not sent pseudoTools in welcome event")
+    return []
+
+    # # OLD: hardcoded fallback defaults (now pulled dynamically from welcome event)
+    # fallback_tools = [
+    #     Tool(
+    #         name="readme",
+    #         description="Returns information about this MCP server",
+    #         inputSchema={"type": "object", "properties": {}, "required": []},
+    #     ),
+    #     Tool(
+    #         name="command",
+    #         description="Execute a command (placeholder - does nothing for now)",
+    #         inputSchema={
+    #             "type": "object",
+    #             "properties": {
+    #                 "cmd": {"type": "string", "description": "The command to execute"}
+    #             },
+    #             "required": ["cmd"]
+    #         },
+    #     )
+    # ]
+    # return [t.model_dump(mode='json') for t in fallback_tools]
 
 
 async def get_filtered_tools_for_response(server: 'DynamicAdditionServer', caller_context: str) -> List[Dict[str, Any]]:
@@ -3908,7 +3920,27 @@ class ServiceClient:
                     logger.info(f"☁️ Generic request ID: {generic_request_id}")
                     self.generic_request_id = generic_request_id
                 else:
-                    logger.error(f"🚨🚨🚨 CRITICAL: No genericRequestId in welcome message! Local proxy tools will NOT work! 🚨🚨🚨")
+                    logger.error(f"🚨🚨🚨 FATAL: No genericRequestId in welcome message! Cannot operate without it! 🚨🚨🚨")
+                    logger.error(f"🚨 Welcome data received: {format_json_log(data)}")
+                    raise RuntimeError("Cloud welcome message missing required 'genericRequestId' - cannot continue")
+
+                # Pull pseudo tools from welcome payload (dynamically defined by cloud)
+                pseudo_tools_data = data.get('pseudoTools', [])
+                if pseudo_tools_data:
+                    parsed_tools = []
+                    for t in pseudo_tools_data:
+                        try:
+                            parsed_tools.append(Tool(
+                                name=t['name'],
+                                description=t.get('description', ''),
+                                inputSchema=t.get('inputSchema', {"type": "object", "properties": {}}),
+                            ))
+                        except Exception as e:
+                            logger.error(f"❌ Failed to parse pseudo tool '{t.get('name', '?')}': {e}")
+                    self.mcp_server.pseudo_tools = parsed_tools
+                    logger.info(f"🧰 Received {len(parsed_tools)} pseudo tools from cloud: {[t.name for t in parsed_tools]}")
+                else:
+                    logger.error(f"🚨🚨🚨 CRITICAL: No pseudoTools in welcome message! Local proxy tools will use fallback defaults! 🚨🚨🚨")
                     logger.error(f"🚨 Welcome data received: {format_json_log(data)}")
             elif isinstance(data, list):
                 # Legacy format: array of usernames
@@ -4440,7 +4472,7 @@ async def process_mcp_request(server, request, client_id=None):
         elif method == "tools/list":
             logger.info(f"🧰 Processing 'tools/list' request via helper for local WebSocket connection")
             # Local WebSocket connections only see pseudo tools (readme, command)
-            pseudo_tools_list = get_pseudo_tools_for_response()
+            pseudo_tools_list = get_pseudo_tools_for_response(server)
             response = {
                 "jsonrpc": "2.0",
                 "id": req_id,
