@@ -69,45 +69,42 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from mcp.shared.exceptions import McpError # <--- ADD THIS IMPORT
 
 # ╔════════════════════════════════════════════════════════════════════════════╗
-# ║  ⚠️  WARNING: READ BEFORE MODIFYING THIS CLASS  ⚠️                        ║
+# ║  ⚠️⚠️⚠️  WARNING: DO NOT ADD EXPLICIT FIELDS TO THIS CLASS  ⚠️⚠️⚠️           ║
 # ║                                                                            ║
-# ║  Fields here must match the cloud's TypeScript AnnotationT type.           ║
-# ║  String fields default to '' and floats to 0.0 (NOT None/Optional)        ║
-# ║  because Pydantic format strings explode on None.                          ║
+# ║  This class uses extra='allow' to dynamically accept ANY kwargs like:      ║
+# ║    - type, decorators, validationStatus, runningStatus, sourceFile, etc.   ║
 # ║                                                                            ║
-# ║  model_dump() is overridden with exclude_unset=True so only fields that   ║
-# ║  were actually passed to the constructor get serialized to the cloud.      ║
-# ║  DO NOT remove the model_dump override or all default values get sent.     ║
+# ║  Adding explicit field definitions (e.g. `decorators: List[str] = []`)     ║
+# ║  WILL BREAK serialization when Tool.model_dump() is called.               ║
 # ║                                                                            ║
-# ║  extra='allow' is retained so unknown/new fields don't cause errors.       ║
+# ║  WHY: Pydantic serializes nested models by the DECLARED type on the       ║
+# ║  parent (Tool.annotations: McpToolAnnotations | None), NOT the runtime    ║
+# ║  subclass. So explicit fields on our subclass are INVISIBLE to the        ║
+# ║  parent's serializer — only extra='allow' fields and base class fields    ║
+# ║  survive Tool.model_dump(). Overriding model_dump() doesn't help either   ║
+# ║  because Pydantic's recursive serialization never calls it.               ║
+# ║                                                                            ║
+# ║  WE TRIED: explicit fields + model_dump(exclude_unset=True), and also     ║
+# ║  @model_serializer(mode='wrap'). Neither works through the parent.        ║
+# ║  Runtime type enforcement on this class is HOPELESS. Don't bother.        ║
+# ║                                                                            ║
+# ║  Just leave this class alone — extra='allow' handles everything.           ║
 # ╚════════════════════════════════════════════════════════════════════════════╝
 class ToolAnnotations(McpToolAnnotations):
-    """Custom ToolAnnotations with explicit fields matching cloud AnnotationT.
+    """Custom ToolAnnotations that allows extra fields to avoid Pydantic warnings.
 
-    model_dump() uses exclude_unset=True so only fields actually passed to the
-    constructor get serialized. DO NOT remove this override.
+    ⛔ DO NOT ADD EXPLICIT FIELD DEFINITIONS TO THIS CLASS! ⛔
+
+    This class MUST only use extra='allow' to handle custom attributes dynamically.
+    Adding explicit fields will break serialization because Pydantic serializes nested
+    models by the parent's declared type (McpToolAnnotations), not the runtime subclass.
+    Only extra='allow' fields and base class fields survive Tool.model_dump().
+
+    We tried explicit fields + model_dump(exclude_unset=True) and @model_serializer.
+    Neither works. Don't waste your time.
     """
     model_config = ConfigDict(extra='allow')
-
-    # -- Cloud AnnotationT fields --
-    type: str = ''
-    validationStatus: str = ''                      # VALID, INVALID, ERROR_LOADING_SERVER
-    app_name: str = ''
-    app_source: str = ''
-    location_name: str = ''
-    protection_name: str = ''
-    lastModified: str = ''
-    sourceFile: str = ''
-    decorators: List[str] = []
-    price_per_call: float = 0.0
-    price_per_sec: float = 0.0
-    errorMessage: str = ''                          # single error field (distinguished by validationStatus)
-    runningStatus: str = ''                         # server process status (running/stopped/failed)
-    started_at: str = ''
-
-    def model_dump(self, **kwargs: Any) -> Dict[str, Any]:
-        kwargs.setdefault('exclude_unset', True)
-        return super().model_dump(**kwargs)
+    # ⛔ NO FIELDS HERE - SERIOUSLY, DON'T DO IT ⛔
 
 
 @dataclass
@@ -1316,7 +1313,7 @@ class DynamicAdditionServer(Server):
                     },
                     "required": ["key"]
                 },
-                annotations=ToolAnnotations(title="_public_click", decorators=["public"])
+                annotations=ToolAnnotations(title="_public_click", decorators=["public"])  # pyright: ignore[reportCallIssue]
             ),
             Tool( # Add definition for _public_upload DEPRECATED
                 name="_public_upload",
@@ -1331,7 +1328,7 @@ class DynamicAdditionServer(Server):
                     },
                     "required": ["key", "filename", "filetype", "base64Content"]
                 },
-                annotations=ToolAnnotations(title="_public_upload", decorators=["public"])
+                annotations=ToolAnnotations(title="_public_upload", decorators=["public"])  # pyright: ignore[reportCallIssue]
             ),
             Tool( # Add definition for _admin_app_create
                 name="_admin_app_create",
@@ -1593,9 +1590,9 @@ class DynamicAdditionServer(Server):
                 except Exception as se:
                     logger.warning(f"⚠️ Error processing MCP server config '{server_name}': {se}")
                     # Create custom ToolAnnotations object to allow extra fields
-                    error_annotations = ToolAnnotations(  # type: ignore[call-arg]
-                        validationStatus="ERROR_LOADING_SERVER",
-                        runningStatus=status # Still show status even if config load failed
+                    error_annotations = ToolAnnotations(
+                        validationStatus="ERROR_LOADING_SERVER",  # pyright: ignore[reportCallIssue]
+                        runningStatus=status  # pyright: ignore[reportCallIssue]  # Still show status even if config load failed
                     )
                     # Check for duplicates before adding (only check against other servers, not functions)
                     existing_server_names = {tool.name.lower() for tool in tools_list
@@ -1634,8 +1631,8 @@ class DynamicAdditionServer(Server):
                     logger.error(f"❌ Failed to fetch tools from running server '{server_name}': {result}")
                     # Optionally update the server's entry in tools_list with an error annotation
                     for tool in tools_list:
-                        if tool.name == server_name and tool.annotations.get("type") == "server":
-                            tool.annotations["errorMessage"] = str(result)
+                        if tool.name == server_name and getattr(tool.annotations, 'type', None) == "server":
+                            setattr(tool.annotations, 'errorMessage', str(result))
                             #tool.description += f" (Error fetching tools: {result})"
                             break
                 elif isinstance(result, list): # Could be list[dict] or list[Tool]
@@ -1782,7 +1779,7 @@ class DynamicAdditionServer(Server):
                                     try:
                                         value = getattr(old_annotations, attr)
                                         if not callable(value):
-                                            tool.annotations[attr] = value
+                                            setattr(tool.annotations, attr, value)
                                             logger.debug(f"  -> Added attribute {attr}: {value}")
                                     except Exception as e:
                                         logger.debug(f"  -> Failed to get attribute {attr}: {e}")
@@ -1889,7 +1886,7 @@ class DynamicAdditionServer(Server):
         # Final verification: report any duplicates as validation errors (app-aware)
         tool_keys = []
         for tool in tools_list:
-            app_name = getattr(tool.annotations, 'app_name', '') if hasattr(tool, 'annotations') and tool.annotations else ''
+            app_name = getattr(tool.annotations, 'app_name', 'unknown') if hasattr(tool, 'annotations') and tool.annotations else 'unknown'
             tool_keys.append(f"{app_name}.{tool.name}")
 
         unique_tool_keys = set(tool_keys)
@@ -1897,7 +1894,7 @@ class DynamicAdditionServer(Server):
             # Find duplicates by app.name combination
             seen_keys = set()
             for i, tool in enumerate(tools_list):
-                app_name = getattr(tool.annotations, 'app_name', '') if hasattr(tool, 'annotations') and tool.annotations else ''
+                app_name = getattr(tool.annotations, 'app_name', 'unknown') if hasattr(tool, 'annotations') and tool.annotations else 'unknown'
                 tool_key = f"{app_name}.{tool.name}"
                 if tool_key in seen_keys:
                     # This is a duplicate - mark it as invalid
@@ -3555,10 +3552,10 @@ class ServiceClient:
         internal_count = 0
         for tool in tools_list:
             app_name = getattr(tool.annotations, 'app_name', None) if hasattr(tool, 'annotations') else None
-            source_file = getattr(tool.annotations, 'sourceFile', None) if hasattr(tool, 'annotations') else None
-            app_source = getattr(tool.annotations, 'app_source', None) if hasattr(tool, 'annotations') else None
+            source_file = getattr(tool.annotations, 'sourceFile', 'unknown') if hasattr(tool, 'annotations') else 'unknown'
+            app_source = getattr(tool.annotations, 'app_source', 'unknown') if hasattr(tool, 'annotations') else 'unknown'
             last_modified = getattr(tool.annotations, 'lastModified', None) if hasattr(tool, 'annotations') else None
-            decorators = getattr(tool.annotations, 'decorators', None) if hasattr(tool, 'annotations') else None
+            decorators = getattr(tool.annotations, 'decorators', []) if hasattr(tool, 'annotations') else []
             protection_name = getattr(tool.annotations, 'protection_name', None) if hasattr(tool, 'annotations') else None
             is_index = getattr(tool.annotations, 'is_index', False) if hasattr(tool, 'annotations') else False
             price_per_call = getattr(tool.annotations, 'price_per_call', None) if hasattr(tool, 'annotations') else None
