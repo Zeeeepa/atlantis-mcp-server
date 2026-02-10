@@ -925,6 +925,11 @@ class DynamicAdditionServer(Server):
                             if is_index_from_info:
                                 tool_annotations["is_index"] = True
 
+                            # Add text content type to annotations if present in function_info
+                            text_content_type = func_info.get("text_content_type")
+                            if text_content_type is not None:
+                                tool_annotations["text_content_type"] = text_content_type
+
                             # Add pricing information to annotations if present in function_info
                             price_per_call = func_info.get("price_per_call")
                             price_per_sec = func_info.get("price_per_sec")
@@ -3560,6 +3565,7 @@ class ServiceClient:
             is_index = getattr(tool.annotations, 'is_index', False) if hasattr(tool, 'annotations') else False
             price_per_call = getattr(tool.annotations, 'price_per_call', None) if hasattr(tool, 'annotations') else None
             price_per_sec = getattr(tool.annotations, 'price_per_sec', None) if hasattr(tool, 'annotations') else None
+            text_content_type = getattr(tool.annotations, 'text_content_type', None) if hasattr(tool, 'annotations') else None
 
             # Check if tool is hidden
             is_hidden = getattr(tool.annotations, 'temporarilyVisible', False) if hasattr(tool, 'annotations') else False
@@ -3625,7 +3631,10 @@ class ServiceClient:
                 if 'chat' in decorators:
                     visibility_str += f" {CORAL_PINK}[@chat]{RESET_COLOR}"
                 if 'text' in decorators:
-                    visibility_str += f" {CORAL_PINK}[@text]{RESET_COLOR}"
+                    if text_content_type:
+                        visibility_str += f" {CORAL_PINK}[@text(\"{text_content_type}\")]{RESET_COLOR}"
+                    else:
+                        visibility_str += f" {CORAL_PINK}[@text]{RESET_COLOR}"
                 if 'session' in decorators:
                     visibility_str += f" {MAGENTA}[@session]{RESET_COLOR}"
                 if 'game' in decorators:

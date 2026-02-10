@@ -50,6 +50,28 @@ def _mcp_identity_decorator(f):
     """A simple identity decorator that returns the function unchanged. Used as a placeholder for @chat, @public, etc."""
     return f
 
+# --- Text Decorator Definition ---
+def text(content_type: Optional[str] = None):
+    """Decorator that marks a function as returning text content.
+    Can be used bare (@text) or with an optional content type string (@text("markdown")).
+
+    Usage: @text
+           @text("markdown")
+           @text("text/html")
+           def my_text_function():
+               ...
+    """
+    # Handle bare @text (no parentheses) - func is passed directly
+    if callable(content_type):
+        func = content_type
+        setattr(func, '_text_content_type', None)
+        return func
+    # Handle @text("markdown") or @text() - returns a decorator
+    def decorator(func):
+        setattr(func, '_text_content_type', content_type)
+        return func
+    return decorator
+
 # --- App Decorator Definition ---
 def app(func):
     """
@@ -759,10 +781,11 @@ class DynamicFunctionManager:
                     docstring = ast.get_docstring(func_def_node)
                     input_schema = {"type": "object"} # Default empty schema
 
-                    # Extract decorators, app_name, location_name, protection_name, is_index, is_copyable, and price
+                    # Extract decorators, app_name, location_name, protection_name, is_index, is_copyable, text_content_type, and price
                     decorator_names = []
                     app_name_from_decorator = None # Initialize app_name
                     location_name_from_decorator = None # Initialize location_name
+                    text_content_type_from_decorator = None # Initialize text_content_type
                     protection_name_from_decorator = None # Initialize protection_name
                     is_index_from_decorator = False # Initialize is_index
                     is_copyable_from_decorator = False # Initialize is_copyable
@@ -870,7 +893,22 @@ class DynamicFunctionManager:
                                             logger.error(f"❌ @price decorator used on {func_def_node.name} but both 'pricePerCall' and 'pricePerSec' arguments are required.")
                                         # Add 'price' to decorator_names
                                         decorator_names.append('price')
-                                    else: # It's a call decorator but not 'app', 'location', 'protected', or 'price'
+                                    elif decorator_func_name == 'text':
+                                        # Extract optional content type from @text("markdown") or @text(content_type="markdown")
+                                        if decorator_node.keywords:
+                                            for kw in decorator_node.keywords:
+                                                if kw.arg == 'content_type' and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                                                    text_content_type_from_decorator = kw.value.value
+                                        # Positional argument like @text("markdown")
+                                        if not text_content_type_from_decorator and decorator_node.args:
+                                            if len(decorator_node.args) == 1 and isinstance(decorator_node.args[0], ast.Constant) and isinstance(decorator_node.args[0].value, str):
+                                                text_content_type_from_decorator = decorator_node.args[0].value
+                                            elif decorator_node.args:
+                                                logger.error(f"❌ @text decorator for {func_def_node.name} has unexpected positional arguments. Expected an optional single string.")
+                                        # @text() with no args is valid - just means plain text
+                                        # Add 'text' to decorator_names
+                                        decorator_names.append('text')
+                                    else: # It's a call decorator but not 'app', 'location', 'protected', 'price', or 'text'
                                         decorator_names.append(decorator_func_name)
                                 else: # Decorator call but func is not a simple Name (e.g. @obj.deco())
                                     # Try to reconstruct its name, could be complex e.g. ast.Attribute
@@ -898,7 +936,8 @@ class DynamicFunctionManager:
                         "is_index": is_index_from_decorator, # Add extracted is_index flag
                         "is_copyable": is_copyable_from_decorator, # Add extracted is_copyable flag
                         "price_per_call": price_per_call_from_decorator, # Add extracted price_per_call
-                        "price_per_sec": price_per_sec_from_decorator # Add extracted price_per_sec
+                        "price_per_sec": price_per_sec_from_decorator, # Add extracted price_per_sec
+                        "text_content_type": text_content_type_from_decorator # Add extracted text content type (e.g. "markdown")
                     }
                     functions_info.append(function_info)
 
@@ -1810,7 +1849,7 @@ async def {name}():
                         # Inject identity decorators for known decorator names
                         # This makes @chat, @public, @session, etc., resolvable during module load
                         module.__dict__['chat'] = _mcp_identity_decorator
-                        module.__dict__['text'] = _mcp_identity_decorator
+                        module.__dict__['text'] = text
                         module.__dict__['public'] = _mcp_identity_decorator
                         module.__dict__['session'] = _mcp_identity_decorator
                         module.__dict__['game'] = _mcp_identity_decorator
