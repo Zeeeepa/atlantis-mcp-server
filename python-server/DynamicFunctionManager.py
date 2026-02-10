@@ -43,7 +43,7 @@ import utils  # Utility module for dynamic functions
 PARENT_PACKAGE_NAME = "dynamic_functions"
 
 # Visibility decorators that allow remote function calls
-VISIBILITY_DECORATORS = ['visible', 'public', 'protected', 'tick', 'chat', 'session', 'index', 'price', 'location', 'app', 'copy']
+VISIBILITY_DECORATORS = ['visible', 'public', 'protected', 'tick', 'chat', 'text', 'session', 'index', 'price', 'location', 'app', 'copy']
 
 # --- Identity Decorator Definition ---
 def _mcp_identity_decorator(f):
@@ -1810,6 +1810,7 @@ async def {name}():
                         # Inject identity decorators for known decorator names
                         # This makes @chat, @public, @session, etc., resolvable during module load
                         module.__dict__['chat'] = _mcp_identity_decorator
+                        module.__dict__['text'] = _mcp_identity_decorator
                         module.__dict__['public'] = _mcp_identity_decorator
                         module.__dict__['session'] = _mcp_identity_decorator
                         module.__dict__['game'] = _mcp_identity_decorator

@@ -69,32 +69,45 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from mcp.shared.exceptions import McpError # <--- ADD THIS IMPORT
 
 # ╔════════════════════════════════════════════════════════════════════════════╗
-# ║  ⚠️⚠️⚠️  WARNING: DO NOT ADD EXPLICIT FIELDS TO THIS CLASS  ⚠️⚠️⚠️           ║
+# ║  ⚠️  WARNING: READ BEFORE MODIFYING THIS CLASS  ⚠️                        ║
 # ║                                                                            ║
-# ║  This class uses extra='allow' to dynamically accept ANY kwargs like:      ║
-# ║    - decorators, validationStatus, runningStatus, sourceFile, app, etc.    ║
+# ║  Fields here must match the cloud's TypeScript AnnotationT type.           ║
+# ║  String fields default to '' and floats to 0.0 (NOT None/Optional)        ║
+# ║  because Pydantic format strings explode on None.                          ║
 # ║                                                                            ║
-# ║  Adding explicit field definitions (e.g. `decorators: Optional[list] = None`) ║
-# ║  WILL BREAK serialization and cause decorators/@game/@chat to stop working ║
-# ║  when sending tools to the cloud!                                          ║
+# ║  model_dump() is overridden with exclude_unset=True so only fields that   ║
+# ║  were actually passed to the constructor get serialized to the cloud.      ║
+# ║  DO NOT remove the model_dump override or all default values get sent.     ║
 # ║                                                                            ║
-# ║  Pydantic's model_dump() behaves differently for explicit fields vs extra  ║
-# ║  fields. Just leave this class alone - extra='allow' handles everything.   ║
+# ║  extra='allow' is retained so unknown/new fields don't cause errors.       ║
 # ╚════════════════════════════════════════════════════════════════════════════╝
 class ToolAnnotations(McpToolAnnotations):
-    """Custom ToolAnnotations that allows extra fields to avoid Pydantic warnings.
+    """Custom ToolAnnotations with explicit fields matching cloud AnnotationT.
 
-    ⛔ DO NOT ADD EXPLICIT FIELD DEFINITIONS TO THIS CLASS! ⛔
-
-    This class MUST only use extra='allow' to handle custom attributes dynamically.
-    Adding explicit fields like `decorators: Optional[list[str]] = None` will break
-    serialization and cause decorators (@game, @chat, etc.) to not be sent to the cloud.
-
-    Custom attributes (decorators, validationStatus, runningStatus, sourceFile, app,
-    location, etc.) are passed as kwargs and stored via Pydantic's extra='allow' mechanism.
+    model_dump() uses exclude_unset=True so only fields actually passed to the
+    constructor get serialized. DO NOT remove this override.
     """
     model_config = ConfigDict(extra='allow')
-    # ⛔ NO FIELDS HERE - SERIOUSLY, DON'T DO IT ⛔
+
+    # -- Cloud AnnotationT fields --
+    type: str = ''
+    validationStatus: str = ''                      # VALID, INVALID, ERROR_LOADING_SERVER
+    app_name: str = ''
+    app_source: str = ''
+    location_name: str = ''
+    protection_name: str = ''
+    lastModified: str = ''
+    sourceFile: str = ''
+    decorators: List[str] = []
+    price_per_call: float = 0.0
+    price_per_sec: float = 0.0
+    errorMessage: str = ''                          # single error field (distinguished by validationStatus)
+    runningStatus: str = ''                         # server process status (running/stopped/failed)
+    started_at: str = ''
+
+    def model_dump(self, **kwargs: Any) -> Dict[str, Any]:
+        kwargs.setdefault('exclude_unset', True)
+        return super().model_dump(**kwargs)
 
 
 @dataclass
@@ -918,17 +931,15 @@ class DynamicAdditionServer(Server):
                             # Add pricing information to annotations if present in function_info
                             price_per_call = func_info.get("price_per_call")
                             price_per_sec = func_info.get("price_per_sec")
-                            if price_per_call is not None and price_per_sec is not None:
+                            if price_per_call or price_per_sec:
                                 tool_annotations["price_per_call"] = price_per_call
                                 tool_annotations["price_per_sec"] = price_per_sec
 
-                            # Add runtime error message if present in cache
+                            # Add error message if present (runtime or load error)
                             if tool_name in _runtime_errors:
-                                tool_annotations["runtimeError"] = _runtime_errors[tool_name]
-
-                            # Add server config load error if present in cache
-                            if tool_name in self.server_manager._server_load_errors:
-                                tool_annotations["loadError"] = self.server_manager._server_load_errors[tool_name]
+                                tool_annotations["errorMessage"] = _runtime_errors[tool_name]
+                            elif tool_name in self.server_manager._server_load_errors:
+                                tool_annotations["errorMessage"] = self.server_manager._server_load_errors[tool_name]
 
                             # Add common annotations
                             try:
@@ -1550,9 +1561,7 @@ class DynamicAdditionServer(Server):
                     # Add error info to annotations if found
                     if error_msg:
                         logger.info(f"📣 Final error for '{server_name}': {error_msg}")
-                        # Add to both error fields for maximum visibility
-                        annotations["loadError"] = error_msg
-                        annotations["error"] = error_msg
+                        annotations["errorMessage"] = error_msg
 
                     # Simplified logging that only uses defined variables
                     if task_info:
@@ -1584,7 +1593,7 @@ class DynamicAdditionServer(Server):
                 except Exception as se:
                     logger.warning(f"⚠️ Error processing MCP server config '{server_name}': {se}")
                     # Create custom ToolAnnotations object to allow extra fields
-                    error_annotations = ToolAnnotations(
+                    error_annotations = ToolAnnotations(  # type: ignore[call-arg]
                         validationStatus="ERROR_LOADING_SERVER",
                         runningStatus=status # Still show status even if config load failed
                     )
@@ -1626,7 +1635,7 @@ class DynamicAdditionServer(Server):
                     # Optionally update the server's entry in tools_list with an error annotation
                     for tool in tools_list:
                         if tool.name == server_name and tool.annotations.get("type") == "server":
-                            tool.annotations["toolFetchError"] = str(result)
+                            tool.annotations["errorMessage"] = str(result)
                             #tool.description += f" (Error fetching tools: {result})"
                             break
                 elif isinstance(result, list): # Could be list[dict] or list[Tool]
@@ -1880,7 +1889,7 @@ class DynamicAdditionServer(Server):
         # Final verification: report any duplicates as validation errors (app-aware)
         tool_keys = []
         for tool in tools_list:
-            app_name = getattr(tool.annotations, 'app_name', 'unknown') if hasattr(tool, 'annotations') and tool.annotations else 'unknown'
+            app_name = getattr(tool.annotations, 'app_name', '') if hasattr(tool, 'annotations') and tool.annotations else ''
             tool_keys.append(f"{app_name}.{tool.name}")
 
         unique_tool_keys = set(tool_keys)
@@ -1888,7 +1897,7 @@ class DynamicAdditionServer(Server):
             # Find duplicates by app.name combination
             seen_keys = set()
             for i, tool in enumerate(tools_list):
-                app_name = getattr(tool.annotations, 'app_name', 'unknown') if hasattr(tool, 'annotations') and tool.annotations else 'unknown'
+                app_name = getattr(tool.annotations, 'app_name', '') if hasattr(tool, 'annotations') and tool.annotations else ''
                 tool_key = f"{app_name}.{tool.name}"
                 if tool_key in seen_keys:
                     # This is a duplicate - mark it as invalid
@@ -2204,7 +2213,7 @@ class DynamicAdditionServer(Server):
                         # @protected - delegated access control via protection function (checked later in function_call)
                         logger.debug(f"🔒 Protected function '{actual_function_name}' - access will be validated by protection function")
                     else:
-                        # @visible, @tick, @chat, @session, @game, @price, @location, or @app - owner-only access
+                        # @visible, @tick, @chat, @text, @session, @game, @price, @location, or @app - owner-only access
                         caller = user or client_id or "unknown"
 
                         # Treat localhost websocket connections as the owner
@@ -2934,6 +2943,12 @@ async def index():
                     final_args = args.copy() if args else {}
                     result_raw = await self.function_manager.function_call(name=actual_function_name, client_id=client_id, request_id=request_id, user=user, session_id=session_id, command_seq=command_seq, shell_path=shell_path, app=parsed_app_name, args=final_args)
                     logger.debug(f"<--- Dynamic function '{name}' RAW result: {result_raw} (type: {type(result_raw)})")
+
+                    # @text functions must return a string
+                    if hasattr(decorators_list, '__contains__') and 'text' in decorators_list:
+                        if result_raw is not None and not isinstance(result_raw, str):
+                            logger.error(f"🚨 @text function '{actual_function_name}' returned {type(result_raw).__name__} instead of str - coercing to string")
+                            result_raw = str(result_raw)
                 except Exception as e:
                     # Error already enhanced with command context at source, just re-raise
                     raise
@@ -3412,8 +3427,7 @@ async def get_all_tools_for_response(server: 'DynamicAdditionServer', caller_con
                     pass  # If we can't get original annotations, use empty dict
 
             # Add error info to annotations
-            annotations["error"] = True
-            annotations["error_message"] = error_msg
+            annotations["errorMessage"] = error_msg
             tool_error_dict["annotations"] = annotations
             tools_dict_list.append(tool_error_dict)  # Include the error info instead of skipping
     logger.debug(f"Helper: Prepared {len(tools_dict_list)} tool dictionaries.")
@@ -3541,10 +3555,10 @@ class ServiceClient:
         internal_count = 0
         for tool in tools_list:
             app_name = getattr(tool.annotations, 'app_name', None) if hasattr(tool, 'annotations') else None
-            source_file = getattr(tool.annotations, 'sourceFile', 'unknown') if hasattr(tool, 'annotations') else 'unknown'
-            app_source = getattr(tool.annotations, 'app_source', 'unknown') if hasattr(tool, 'annotations') else 'unknown'
+            source_file = getattr(tool.annotations, 'sourceFile', None) if hasattr(tool, 'annotations') else None
+            app_source = getattr(tool.annotations, 'app_source', None) if hasattr(tool, 'annotations') else None
             last_modified = getattr(tool.annotations, 'lastModified', None) if hasattr(tool, 'annotations') else None
-            decorators = getattr(tool.annotations, 'decorators', []) if hasattr(tool, 'annotations') else []
+            decorators = getattr(tool.annotations, 'decorators', None) if hasattr(tool, 'annotations') else None
             protection_name = getattr(tool.annotations, 'protection_name', None) if hasattr(tool, 'annotations') else None
             is_index = getattr(tool.annotations, 'is_index', False) if hasattr(tool, 'annotations') else False
             price_per_call = getattr(tool.annotations, 'price_per_call', None) if hasattr(tool, 'annotations') else None
@@ -3613,6 +3627,8 @@ class ServiceClient:
                     visibility_str += f" {BRIGHT_WHITE}[@tick]{RESET_COLOR}"
                 if 'chat' in decorators:
                     visibility_str += f" {CORAL_PINK}[@chat]{RESET_COLOR}"
+                if 'text' in decorators:
+                    visibility_str += f" {CORAL_PINK}[@text]{RESET_COLOR}"
                 if 'session' in decorators:
                     visibility_str += f" {MAGENTA}[@session]{RESET_COLOR}"
                 if 'game' in decorators:
@@ -3629,7 +3645,7 @@ class ServiceClient:
                 visibility_str += f" {SPRING_GREEN}[@index]{RESET_COLOR}"
 
             # Add pricing information if available
-            if price_per_call is not None and price_per_sec is not None:
+            if price_per_call or price_per_sec:
                 visibility_str += f" {CYAN_COLOR}[${price_per_call:.4f}/call ${price_per_sec:.4f}/sec]{RESET_COLOR}"
 
             # Format the line with colors
