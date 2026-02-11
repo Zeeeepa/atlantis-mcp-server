@@ -1,0 +1,20 @@
+name: Mirror to FlowCentral
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to FlowCentral
+        run: |
+          git remote add flowcentral https://x-access-token:${{ secrets.FLOWCENTRAL_PAT }}@github.com/FlowCentralAI/flowcentral-mcp-server.git
+          git push flowcentral main --force
